@@ -51,3 +51,33 @@ deploy:
     - uv run --with boto3 --no-project python -c "import boto3; print(boto3.client('sts').get_caller_identity()['Account'])" || (echo 'AWS credentials invalid/expired — refresh the CI/CD variables' && exit 1)
   script:
     - ./node_modules/.bin/cdk deploy --all -c env=dev --require-approval never
+
+# Frontend (web/): builds the static SPA and syncs it to the UI stack's
+# S3 + CloudFront. Runs AUTOMATICALLY when anything under web/ changes on main.
+deploy-web:
+  stage: deploy
+  image: node:24-alpine
+  variables:
+    AWS_DEFAULT_REGION: us-west-2
+    S3_BUCKET: ymhackathonuistack-uibucket6890e4c3-nrt2xdwerbki
+    CLOUDFRONT_DISTRIBUTION_ID: EOZWN6G8Y0NHZ
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      changes:
+        - web/**/*
+  before_script:
+    # Tolerate a lowercase `aws_session_token` variable — the AWS SDK/CLI only
+    # reads the uppercase name, so normalize it here.
+    - export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-$aws_session_token}"
+    - apk add --no-cache git aws-cli
+    - corepack enable npm
+    - cd web
+    # ENV_DEV is a file-type CI/CD variable holding the .env (see web/.env.example:
+    # SERVER_API_URL, SERVER_API_KEY, AGENTCORE_*). Optional — the offline demo
+    # dashboard needs no backend config, so the build still works without it.
+    - if [ -n "$ENV_DEV" ]; then cp "$ENV_DEV" .env; fi
+    - npm ci
+  script:
+    - npm run generate
+    - aws s3 sync .output/public/ "s3://$S3_BUCKET/" --delete --exclude "*.map"
+    - aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths "/*"
