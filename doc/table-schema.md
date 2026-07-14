@@ -1,16 +1,61 @@
 # Table Schema — Athena / Glue Data Dictionary
 
-Per-table reference for every table in the `ym_datalake_poc` data lake: grain,
+> **Catalog pivot (2026-07): real hackathon dataset.** The CDK stack now
+> registers only two Glue tables — **`vt_fd`** and **`maintenance`** (see
+> "Real-dataset tables" below), built from the real data in `data/*.csv`.
+> The 20 synthetic tables documented in the rest of this file are **no longer
+> registered**; their column lists are retained for reference in
+> `table/raw.py` / `table/curated.py`. No CSV→JSONL loader exists yet.
+
+Per-table reference for every table in the `ym_hackathon` data lake: grain,
 S3 location, partitioning, every column (type / nullability / meaning), one
 verbatim sample row, plus an enum reference and Athena query examples.
 
-**Source of truth for types/partitions:** `deployment/athena_tool_stack.py`
-(the `*_COLUMNS` lists and the `CfnTable` definitions). Column *meanings* come
+**Source of truth for types/partitions:** the `table/` package
+(`*_COLUMNS` lists) and the `CfnTable` definitions in
+`deployment/athena_tool_stack.py`. Column *meanings* come
 from `doc/synthetic-dataset.md` (raw), `doc/curated-dataset.md` (M2),
 `doc/insights.md` (M3) and the ETL source. Sample rows are copied verbatim from
 `tmp/**/*.jsonl` (generated with `--seed 42`).
 
 > Chinese version: `doc/table-schema-zh.md`.
+
+---
+
+## Real-dataset tables
+
+Source: `data/vt_fd.csv` (15 ships × 5 yr noon reports) and
+`data/maintenance.csv` (77 maintenance/inspection events). Schemas:
+`table/real_data.py`. Storage is JSONL like the rest of the lake; the loader
+(not yet written) converts `HIDDEN`/`PREDICT` placeholder cells to null and
+sets the marker columns.
+
+### `vt_fd`
+
+Grain: one row per ship per noon report (source has duplicate
+`(ship_id, noon_utc)` rows, kept verbatim in raw). Location:
+`s3://<DataLakeBucket>/raw/vt_fd/ship_id=<sid>/`. Partitioned by **`ship_id`**
+(enum projection, 15 ids: S1–S12 training, S21–S23 prediction). 41 body
+columns: the 39 CSV columns lowercased (`De-identification Name` → the
+`ship_id` partition key; `noon_utc` is a **relative day**, day 0 = the ship's
+earliest record — no calendar year, hence no year partition), plus two
+loader-set markers:
+
+| Column | Type | Meaning |
+|---|---|---|
+| masked_flag | boolean | row had any `HIDDEN`/`PREDICT` cell |
+| predict_fuel_type | string | `me_fullspeed_consump_*` column marked `PREDICT`, else null |
+
+### `maintenance`
+
+Grain: one row per maintenance/inspection event (77 rows). Location:
+`s3://<DataLakeBucket>/raw/maintenance/`. Unpartitioned; `ship_id` is a body
+column. Columns match `data/maintenance.csv` 1:1: `ship_id`, `event_type`
+(PP / UWI+PP / UWC / UWC+PP / DD / UWI), `event_day` (int, relative day on the
+same axis as `vt_fd.noon_utc`),
+`propeller_condition` (Good/Fair/Poor), `hull_fouling_type` (comma list),
+`hull_coating_condition`, `cavitation_found` (Yes/No), `draft_fwd_m`,
+`draft_aft_m`.
 
 ---
 
@@ -20,9 +65,9 @@ from `doc/synthetic-dataset.md` (raw), `doc/curated-dataset.md` (M2),
 
 | Setting | Value |
 |---|---|
-| Glue database | `ym_datalake_poc` |
+| Glue database | `ym_hackathon` |
 | Athena catalog | `AwsDataCatalog` |
-| Athena workgroup | `ym-datalake-poc` (enforces its own result location) |
+| Athena workgroup | `ym-hackathon` (enforces its own result location) |
 | Region | `us-west-2` |
 
 All 20 tables are `EXTERNAL_TABLE`s over **JSONL** (one JSON object per line),
@@ -949,8 +994,8 @@ degeneracy placeholder.
 
 ## 6. Athena query examples
 
-Run in the Athena console (database `ym_datalake_poc`, workgroup
-`ym-datalake-poc`) or via the deployed query Lambda. **Always add the partition
+Run in the Athena console (database `ym_hackathon`, workgroup
+`ym-hackathon`) or via the deployed query Lambda. **Always add the partition
 predicate** on partitioned tables so projection prunes the scan, and
 **`CAST` date strings** for ordering / arithmetic.
 

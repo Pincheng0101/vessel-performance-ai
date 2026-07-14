@@ -1,12 +1,20 @@
 # 資料表結構 — Athena / Glue 資料字典 (data dictionary)
 
-`ym_datalake_poc` 資料湖 (data lake) 中每一張表的逐表參考：粒度 (grain)、S3
+> **目錄轉向（2026-07）：真實黑客松資料集 (hackathon dataset)。** CDK 堆疊
+> (stack) 現在只註冊兩張 Glue 表 — **`vt_fd`** 與 **`maintenance`**，來自
+> `data/*.csv` 的真實資料（結構定義見 `table/real_data.py`；英文版
+> "Real-dataset tables" 章節有完整說明）。本文件其餘的 20 張合成 (synthetic)
+> 資料表**已不再註冊**；其欄位清單保留於 `table/raw.py` / `table/curated.py`
+> 供參考。CSV→JSONL 載入器 (loader) 尚未撰寫。
+
+`ym_hackathon` 資料湖 (data lake) 中每一張表的逐表參考：粒度 (grain)、S3
 位置、分割 (partition)、每一欄位（型別／可空性／意義）、一列逐字 (verbatim) 樣本，
 另附列舉值 (enum) 參考與 Athena 查詢範例。
 
-**型別／分割的真實來源 (source of truth)：** `deployment/athena_tool_stack.py`
-（`*_COLUMNS` 清單與 `CfnTable` 定義）。欄位*意義*取自 `doc/synthetic-dataset.md`
-（raw）、`doc/curated-dataset.md`（M2）、`doc/insights.md`（M3）與 ETL 原始碼。
+**型別／分割的真實來源 (source of truth)：** `table/` 套件（`*_COLUMNS` 清單）
+與 `deployment/athena_tool_stack.py` 的 `CfnTable` 定義。欄位*意義*取自
+`doc/synthetic-dataset.md`（raw）、`doc/curated-dataset.md`（M2）、
+`doc/insights.md`（M3）與 ETL 原始碼。
 樣本列逐字複製自 `tmp/**/*.jsonl`（以 `--seed 42` 產生）。
 
 > 英文版：`doc/table-schema.md`。
@@ -19,9 +27,9 @@
 
 | 設定 | 值 |
 |---|---|
-| Glue 資料庫 (database) | `ym_datalake_poc` |
+| Glue 資料庫 (database) | `ym_hackathon` |
 | Athena 目錄 (catalog) | `AwsDataCatalog` |
-| Athena 工作群組 (workgroup) | `ym-datalake-poc`（強制指定自己的結果位置） |
+| Athena 工作群組 (workgroup) | `ym-hackathon`（強制指定自己的結果位置） |
 | 區域 (region) | `us-west-2` |
 
 全部 20 張表皆為建立在 **JSONL**（每行一個 JSON 物件）之上的外部表 (external
@@ -910,7 +918,7 @@ M3（`compute.py::_apply_m3`，逐船）在 M2 之上加一層統計：分段汙
 
 ## 6. Athena 查詢範例
 
-於 Athena 主控台（資料庫 `ym_datalake_poc`、工作群組 `ym-datalake-poc`）或已部署的
+於 Athena 主控台（資料庫 `ym_hackathon`、工作群組 `ym-hackathon`）或已部署的
 查詢 Lambda 執行。分割表上**務必加分割述詞**讓投影修剪掃描範圍，並對日期字串
 **`CAST`** 以利排序／運算。
 
