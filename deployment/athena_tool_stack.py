@@ -18,16 +18,7 @@ from aws_cdk import (
 from constructs import Construct
 from pyhocon import ConfigTree
 
-from table.real_data import (
-    FACT_SHIP_ALERT_COLUMNS,
-    FACT_SHIP_ANOMALY_COLUMNS,
-    FACT_SHIP_DAILY_COLUMNS,
-    FACT_SHIP_MAINTENANCE_RECOMMENDATION_COLUMNS,
-    MAINTENANCE_COLUMNS,
-    SHIP_IDS,
-    VESSEL_COLUMNS,
-    VT_FD_COLUMNS,
-)
+from table.schema import CURATED_TABLES, RAW_TABLES
 
 SSM_PREFIX = '/ym-hackathon'
 
@@ -207,29 +198,15 @@ class AthenaToolStack(Stack):
             )
             fn.node.add_dependency(glue_db)
 
-            raw = f's3://{data_bucket.bucket_name}/raw'
-            curated = f's3://{data_bucket.bucket_name}/curated'
-            bucket_name = data_bucket.bucket_name
-            tables = [
-                # Raw zone — real hackathon dataset (data/*.csv, landed as JSONL).
-                self._vt_fd_table(database, bucket_name),
-                self._glue_table(database, 'maintenance', MAINTENANCE_COLUMNS, f'{raw}/maintenance/'),
-                self._glue_table(database, 'vessel', VESSEL_COLUMNS, f'{raw}/vessel/'),
-                # Curated zone — ym_datalake.etl.real_compute output.
-                self._curated_by_ship_table(database, 'fact_ship_daily', FACT_SHIP_DAILY_COLUMNS, bucket_name),
-                self._glue_table(
-                    database, 'fact_ship_anomaly', FACT_SHIP_ANOMALY_COLUMNS, f'{curated}/fact_ship_anomaly/'
-                ),
-                self._glue_table(database, 'fact_ship_alert', FACT_SHIP_ALERT_COLUMNS, f'{curated}/fact_ship_alert/'),
-                self._glue_table(
-                    database,
-                    'fact_ship_maintenance_recommendation',
-                    FACT_SHIP_MAINTENANCE_RECOMMENDATION_COLUMNS,
-                    f'{curated}/fact_ship_maintenance_recommendation/',
-                ),
-            ]
-            for table in tables:
-                table.add_dependency(glue_db)
+            # All 20 tables are FLAT and UNPARTITIONED. The whole lake is ~4 MB / 21,282
+            # noon rows, far below the size where partition pruning pays for its own
+            # complexity, so ship_id is an ordinary body column and each table is one
+            # JSONL file. No projection, no crawler, no MSCK, no partition predicates.
+            zones = {'raw': RAW_TABLES, 'curated': CURATED_TABLES}
+            for zone, catalog in zones.items():
+                for name, columns in catalog.items():
+                    location = f's3://{data_bucket.bucket_name}/{zone}/{name}/'
+                    self._glue_table(database, name, columns, location).add_dependency(glue_db)
 
         # 7. Async query API (M5) — DynamoDB registry + Lambda + API Gateway.
         # DynamoDB query registry: query_id → exec_id/type/status, TTL auto-cleans.
@@ -410,20 +387,8 @@ class AthenaToolStack(Stack):
         CfnOutput(self, 'QueryRegistryTableName', value=registry_table.table_name)
         CfnOutput(self, 'GenBiAthenaRoleName', value=genbi_role.role_name)
 
-    def _glue_table(
-        self,
-        database: str,
-        name: str,
-        columns: list[tuple[str, str]],
-        location: str,
-        *,
-        partition_keys: list[tuple[str, str]] | None = None,
-        extra_parameters: dict[str, str] | None = None,
-    ) -> aws_glue.CfnTable:
-        """Create one EXTERNAL JSON-SerDe table in the Glue catalog."""
-        parameters = {'classification': 'json'}
-        if extra_parameters:
-            parameters.update(extra_parameters)
+    def _glue_table(self, database: str, name: str, columns: list[tuple[str, str]], location: str) -> aws_glue.CfnTable:
+        """Create one flat, unpartitioned EXTERNAL JSON-SerDe table in the Glue catalog."""
         return aws_glue.CfnTable(
             self,
             f'GlueTable{"".join(part.capitalize() for part in name.split("_"))}',
@@ -432,8 +397,7 @@ class AthenaToolStack(Stack):
             table_input=aws_glue.CfnTable.TableInputProperty(
                 name=name,
                 table_type='EXTERNAL_TABLE',
-                parameters=parameters,
-                partition_keys=_columns(partition_keys) if partition_keys else None,
+                parameters={'classification': 'json'},
                 storage_descriptor=aws_glue.CfnTable.StorageDescriptorProperty(
                     columns=_columns(columns),
                     location=location,
@@ -445,42 +409,4 @@ class AthenaToolStack(Stack):
                     ),
                 ),
             ),
-        )
-
-    def _curated_by_ship_table(
-        self, database: str, name: str, columns: list[tuple[str, str]], bucket_name: str
-    ) -> aws_glue.CfnTable:
-        """Curated real-data fact table partitioned by ship_id via partition projection."""
-        location = f's3://{bucket_name}/curated/{name}/'
-        projection = {
-            'projection.enabled': 'true',
-            'projection.ship_id.type': 'enum',
-            'projection.ship_id.values': ','.join(SHIP_IDS),
-            'storage.location.template': f's3://{bucket_name}/curated/{name}/ship_id=${{ship_id}}',
-        }
-        return self._glue_table(
-            database,
-            name,
-            columns,
-            location,
-            partition_keys=[('ship_id', 'string')],
-            extra_parameters=projection,
-        )
-
-    def _vt_fd_table(self, database: str, bucket_name: str) -> aws_glue.CfnTable:
-        """vt_fd partitioned by ship_id via partition projection (relative day axis, no year)."""
-        location = f's3://{bucket_name}/raw/vt_fd/'
-        projection = {
-            'projection.enabled': 'true',
-            'projection.ship_id.type': 'enum',
-            'projection.ship_id.values': ','.join(SHIP_IDS),
-            'storage.location.template': f's3://{bucket_name}/raw/vt_fd/ship_id=${{ship_id}}',
-        }
-        return self._glue_table(
-            database,
-            'vt_fd',
-            VT_FD_COLUMNS,
-            location,
-            partition_keys=[('ship_id', 'string')],
-            extra_parameters=projection,
         )

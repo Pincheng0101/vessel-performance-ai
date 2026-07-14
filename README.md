@@ -94,42 +94,56 @@ Drop `--upload --bucket` from steps 2–3 to build the dataset **fully offline**
 
 ## Real dataset pipeline (hackathon data)
 
-The Glue catalog now serves the **real hackathon dataset** (`data/vt_fd.csv` +
-`data/maintenance.csv` — git-ignored, place them under `data/` first), not the
-synthetic lake above. Two commands, in order, after deploy ([§1](#1-deploy-cdk)):
+The Glue catalog serves the **real hackathon dataset** — `dataset/vt_fd.csv`,
+`dataset/maintenance.csv`, `dataset/vessel.jsonl` — as **20 flat, unpartitioned
+tables**. One command builds all of them:
 
 ```bash
-# 1. Land the raw CSVs: parse → typed JSONL under ./tmp/raw/{vt_fd,maintenance}/ →
-#    upload to s3://<bucket>/raw/... (HIDDEN/PREDICT cells → null + masked_flag /
-#    predict_fuel_type marker columns; duplicate source rows kept verbatim)
-AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl load-real --upload
-
-# 2. Compute the curated layer: baseline power-curve fit → ISO-style speed loss,
-#    robust-z anomalies, alert episodes, maintenance recommendations. Writes
-#    ./tmp/curated/fact_ship_*/ and uploads to s3://<bucket>/curated/...
-AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl compute-real --upload
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl build --upload
 ```
 
-Side effects: both write locally under `--out` (default `./tmp`) and, with
-`--upload`, put objects to the data-lake bucket. Re-running is safe — the same
-S3 keys are overwritten. Neither touches the synthetic tables or `truth/`.
+There is one command because there is one pipeline: `reference_curve` cannot be
+fitted without the cleaned, environment-corrected daily spine, so splitting
+"load" from "compute" would only mean computing the same thing twice. See
+`ym_datalake/etl/curated/compute.py` for the DAG.
 
-The bucket resolves from `app.datalake.bucket_name` in `conf/<env>.conf`
-(`--env`, default `dev`); `--bucket` overrides it. Other flags: `--data`
-(CSV directory, default `./data`), `--out`, `--region`.
+Side effects: writes locally under `--out` (default `./tmp`) and, with
+`--upload`, puts objects to the data-lake bucket. Re-running is safe — the same
+S3 keys are overwritten. The bucket resolves from `app.datalake.bucket_name` in
+`conf/<env>.conf` (`--env`, default `dev`); `--bucket` overrides it. Other flags:
+`--data` (source directory, default `./dataset`), `--out`, `--seed`, `--region`.
 
-Tables produced (schemas: `table/real_data.py`; dictionary:
-[`doc/table-schema.md`](doc/table-schema.md) "Real-dataset tables"):
+**The catalog** (schemas: `table/schema.py`). Every table is flat — 21,282 noon
+rows / ~4 MB is far below the size where partition pruning pays for itself, so
+`ship_id` is an ordinary body column and each table is one JSONL file. No
+projection, no crawler, no `MSCK`, no partition predicates.
 
-| Command | Tables | Grain |
-|---|---|---|
-| `load-real` | `vt_fd` (partitioned by `ship_id`), `maintenance` (flat) | noon-report row; maintenance event |
-| `compute-real` | `fact_ship_daily` (partitioned by `ship_id`), `fact_ship_anomaly`, `fact_ship_alert`, `fact_ship_maintenance_recommendation` (flat) | daily; anomaly; episode; action |
+| Zone | Tables |
+|---|---|
+| **raw** (6) | `noon_report` · `vessel_master` · `maintenance_event` · `reference_curve` · `uwi` · `fuel_price` |
+| **curated** (14) | `fact_performance_daily` · `fact_performance_indicator` · `fact_uwi` · `fact_maintenance_event` · `dim_vessel` · `dim_reference_curve` · `dim_port` · `agg_fleet_daily` · `fact_voyage` · `fact_anomaly` · `fact_alert` · `fact_recommendation` · `fact_maintenance_recommendation` · `fact_speed_profile` |
 
-Analytics thresholds (steady-state gate, 8 % cleaning trigger, z-score bands)
-are constants in `ym_datalake/etl/real_compute.py`. The data is served to
-clients via **`/v2/queries`** — see [`doc/api_v2.md`](doc/api_v2.md); the v1
-types below target the synthetic tables, which are currently not registered.
+**Raw is verbatim; all derivation happens in curated.** `noon_report`,
+`vessel_master` and `maintenance_event` are the three source files landed
+unmutated — every row, every column. That includes the 344 duplicate
+`(ship_id, noon_utc)` rows and the gross outliers (671,576 kW of shaft power
+against a 47,700 kW MCR). Dedupe, outlier clipping and displacement backfill all
+happen in `curated/clean.py` and nowhere else. The only additions to raw are the
+two loader markers `masked_flag` / `predict_fuel_type`, which *preserve* the
+information the `HIDDEN`/`PREDICT` → null conversion would otherwise destroy.
+`maintenance_event` splits composite events on `+` into atoms (77 rows → 115),
+which expands rather than loses: `source_event_type` keeps the original on every
+atom, so grouping on `(ship_id, event_day)` reconstructs the 77 source rows
+exactly. `tests/unit/ym_datalake/test_preservation.py` enforces all of this.
+
+**Provenance is mandatory.** Every column in `table/schema.py` is tagged
+*measured* (read from the source), *class* (a W1/W2 design value), or
+*estimated* (synthesized — **never quote as fact**). The estimated set is: the
+calendar epoch (day 0 = 2021-07-01), all geography, all USD, the UWI numeric
+signals, and event cost/downtime/location.
+
+Analytics thresholds (the ISO 19030 gate, the 8 % cleaning trigger, the z-score
+bands) are constants in the `ym_datalake/etl/curated/` modules that own them.
 
 ## Repository layout
 
@@ -138,21 +152,18 @@ app.py                                  CDK entrypoint (requires -c env=<env>)
 cdk.json                                "app": "uv run python app.py"
 deployment/athena_tool_stack.py         data lake (bucket + glue tables) + athena workgroup + lambdas + API + SSM + IAM
 conf/default.conf  conf/dev.conf        HOCON per-env config (include pattern)
-ym_datalake/synthetic_data/             M1 generator (numpy, local-only)
-  __main__.py                           CLI: generate / validate
-  fleet.py curves.py physics.py ...     fleet specs, speed-power curves, forward physics model
-  uploader.py                           put raw/ tree to S3 (I/O layer; test mock boundary)
-ym_datalake/etl/                        ETL for the real dataset: dataset/ → raw zone → curated tables (local-only)
-  __main__.py                           CLI: load-real / compute-real
-  real_data.py                          load vt_fd.csv / maintenance.csv / vessel.jsonl → raw JSONL
-  real_compute.py                       curated fact_ship_* (daily, anomaly, alert, maintenance recommendation)
+table/schema.py                         the catalog: all 20 tables, every column tagged measured / class / estimated
+ym_datalake/etl/                        the pipeline: 3 source files → 20 flat JSONL tables (local-only)
+  __main__.py                           CLI: build
+  source.py                             load the 3 sources VERBATIM (+ the maintenance `+` split)
+  epoch.py fuel.py ports.py physics.py  calendar, 5-fuel constants, 10 LOCODEs, ISO 15016/19030 physics
+  raw/                                  reference_curve (fitted), uwi (inspection projection), fuel_price
+  curated/clean.py                      dedupe + outlier clipping + displacement backfill — ALL mutation lives here
+  curated/filters.py                    the ISO 19030 valid_flag gate
+  curated/corrections.py                ISO 15016 wind/wave — and the empirical WIND_DIRECTION verdict
+  curated/daily.py                      fact_performance_daily: the spine every other table reads
+  curated/compute.py                    the orchestrator → {table_name: rows}
   jsonl.py uploader.py                  JSONL writer, put raw/ + curated/ trees to S3
-ym_datalake/ml/                         M7 ML pipeline: curated → forecasts (xgboost/sklearn, local-only)
-  __main__.py                           CLI: train / backtest / infer / validate (C21–C23)
-  dataset.py features.py               data I/O boundary + causal multi-horizon features
-  models/ backtest.py registry.py      quantile-regressor race (xgboost/hgb/rf/linear/torch-mlp), IForest health, rolling-origin gate, model store
-  forecast.py maintenance.py           batch pre-inference + predicted-curve cleaning optimiser
-  writer.py uploader.py validate.py    ml/ JSONL writer, put ml/ tree to S3, C21–C23 checks
 lambda_function/athena_query/           M4 sync query Lambda (router + pydantic handler + SSM/Athena I/O)
 lambda_function/async_query_api/        M5 async REST API Lambda (aws-lambda-powertools resolver)
 scripts/export-requirements.sh          pin lambda deps into requirements.txt

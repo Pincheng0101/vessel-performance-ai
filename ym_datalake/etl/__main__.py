@@ -1,10 +1,20 @@
-"""CLI: ``python -m ym_datalake.etl <load-real|compute-real> ...``."""
+"""CLI: ``python -m ym_datalake.etl build [--upload]``.
+
+One command, because there is one pipeline. The three verbatim raw tables and the 17
+derived ones come out of the same pass — ``reference_curve`` cannot be fitted without the
+cleaned, corrected spine, so splitting "load" from "compute" would only mean computing the
+same thing twice (see ``curated.compute`` for the DAG).
+"""
 
 from __future__ import annotations
 
 import argparse
 import os
 import sys
+from pathlib import Path
+
+from table.schema import CURATED_TABLES, RAW_TABLES
+from ym_datalake.etl.jsonl import _write_jsonl
 
 _DEFAULT_REGION = 'us-west-2'
 
@@ -21,48 +31,31 @@ def _resolve_bucket(args: argparse.Namespace) -> str | None:
     return ConfigFactory.parse_file(conf_path).get('app.datalake.bucket_name', '') or None
 
 
-def _cmd_load_real(args: argparse.Namespace) -> int:
-    from ym_datalake.etl.real_data import load_maintenance, load_vessel, load_vt_fd, write_real_data
-
-    data_dir = args.data_dir
-    vt_fd_rows = load_vt_fd(f'{data_dir}/vt_fd.csv')
-    maintenance_rows = load_maintenance(f'{data_dir}/maintenance.csv')
-    vessel_rows = load_vessel(f'{data_dir}/vessel.jsonl')
-    counts = write_real_data(vt_fd_rows, maintenance_rows, vessel_rows, args.out)
-
-    n_predict = sum(1 for r in vt_fd_rows if r['predict_fuel_type'])
-    n_masked = sum(1 for r in vt_fd_rows if r['masked_flag'])
-    print(f'Real data → {args.out}/raw')
-    for name, n in counts.items():
-        print(f'  {name:<28} {n:>8} rows')
-    print(f'  masked rows {n_masked}, PREDICT cells {n_predict}')
-
-    if args.upload:
-        bucket = _resolve_bucket(args)
-        if not bucket:
-            print(
-                f'error: --upload requires --bucket or app.datalake.bucket_name in conf/{args.env}.conf',
-                file=sys.stderr,
-            )
-            return 2
-        os.environ.setdefault('AWS_DEFAULT_REGION', args.region)
-        from ym_datalake.etl import uploader  # lazy: only when uploading
-
-        keys = uploader.upload_real_data(bucket, args.out)
-        print(f'\nUploaded {len(keys)} objects to s3://{bucket}/raw/ (region {args.region})')
-
-    return 0
+def _write(tables: dict[str, list[dict]], out_dir: str) -> None:
+    """One flat JSONL file per table. No partition directories — no table is partitioned."""
+    for zone, catalog in (('raw', RAW_TABLES), ('curated', CURATED_TABLES)):
+        for name in catalog:
+            _write_jsonl(Path(out_dir) / zone / name / f'{name}.jsonl', tables[name])
 
 
-def _cmd_compute_real(args: argparse.Namespace) -> int:
-    from ym_datalake.etl.real_compute import compute_all, write_curated
-    from ym_datalake.etl.real_data import load_maintenance, load_vt_fd
+def _cmd_build(args: argparse.Namespace) -> int:
+    from ym_datalake.etl.curated.compute import build_all
 
-    tables = compute_all(load_vt_fd(f'{args.data_dir}/vt_fd.csv'), load_maintenance(f'{args.data_dir}/maintenance.csv'))
-    counts = write_curated(tables, args.out)
-    print(f'Curated (real) → {args.out}/curated')
-    for name, n in counts.items():
-        print(f'  {name:<42} {n:>8} rows')
+    tables, diagnostics = build_all(args.data_dir, seed=args.seed)
+    _write(tables, args.out)
+
+    print(f'Data lake → {args.out}/{{raw,curated}}\n')
+    for zone, catalog in (('raw', RAW_TABLES), ('curated', CURATED_TABLES)):
+        print(f'  {zone}:')
+        for name in catalog:
+            print(f'    {name:<38} {len(tables[name]):>7} rows')
+
+    print('\n  Pipeline findings:')
+    print(f'    duplicate (ship, day) rows collapsed  {diagnostics["duplicate_rows_collapsed"]}')
+    print(f'    ISO 19030 valid rows                  {diagnostics["valid_rows"]}')
+    print(f'    WIND_DIRECTION convention chosen      {diagnostics["wind_convention"]}')
+    for convention, score in sorted(diagnostics['wind_convention_scores'].items(), key=lambda kv: kv[1]):
+        print(f'      {convention:<14} detrended speed-loss sd {score:6.3f} pp')
 
     if args.upload:
         bucket = _resolve_bucket(args)
@@ -75,8 +68,8 @@ def _cmd_compute_real(args: argparse.Namespace) -> int:
         os.environ.setdefault('AWS_DEFAULT_REGION', args.region)
         from ym_datalake.etl import uploader  # lazy: only when uploading
 
-        keys = uploader.upload_real_curated(bucket, args.out)
-        print(f'\nUploaded {len(keys)} objects to s3://{bucket}/curated/ (region {args.region})')
+        keys = uploader.upload_raw(bucket, args.out) + uploader.upload_curated(bucket, args.out)
+        print(f'\nUploaded {len(keys)} objects to s3://{bucket}/ (region {args.region})')
 
     return 0
 
@@ -85,32 +78,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='python -m ym_datalake.etl')
     sub = parser.add_subparsers(dest='command', required=True)
 
-    real = sub.add_parser('load-real', help='load the real hackathon source files into the raw JSONL tree')
-    real.add_argument(
+    build = sub.add_parser('build', help='build all 20 tables from the real dataset into the JSONL lake')
+    build.add_argument(
         '--data',
         dest='data_dir',
         default='./dataset',
-        help='directory with vt_fd/maintenance.csv + vessel.jsonl (default: ./dataset)',
+        help='directory with vt_fd.csv / maintenance.csv / vessel.jsonl (default: ./dataset)',
     )
-    real.add_argument('--out', default='./tmp', help='output directory (default: ./tmp)')
-    real.add_argument('--upload', action='store_true', help='upload raw/vt_fd + raw/maintenance + raw/vessel to S3')
-    real.add_argument('--bucket', help='target S3 bucket (default: app.datalake.bucket_name from conf/<env>.conf)')
-    real.add_argument('--env', default='dev', help='conf env used to resolve the bucket (default: dev)')
-    real.add_argument('--region', default=_DEFAULT_REGION, help=f'AWS region (default: {_DEFAULT_REGION})')
-    real.set_defaults(func=_cmd_load_real)
-
-    creal = sub.add_parser(
-        'compute-real', help='compute curated tables (speed loss/anomalies/alerts/recos) from the real CSVs'
-    )
-    creal.add_argument(
-        '--data', dest='data_dir', default='./dataset', help='directory with the CSVs (default: ./dataset)'
-    )
-    creal.add_argument('--out', default='./tmp', help='output directory (default: ./tmp)')
-    creal.add_argument('--upload', action='store_true', help='upload curated/fact_ship_* to S3')
-    creal.add_argument('--bucket', help='target S3 bucket (default: app.datalake.bucket_name from conf/<env>.conf)')
-    creal.add_argument('--env', default='dev', help='conf env used to resolve the bucket (default: dev)')
-    creal.add_argument('--region', default=_DEFAULT_REGION, help=f'AWS region (default: {_DEFAULT_REGION})')
-    creal.set_defaults(func=_cmd_compute_real)
+    build.add_argument('--out', default='./tmp', help='output directory (default: ./tmp)')
+    build.add_argument('--seed', type=int, default=42, help='seed for the synthesized columns (default: 42)')
+    build.add_argument('--upload', action='store_true', help='upload all 20 tables to S3')
+    build.add_argument('--bucket', help='target S3 bucket (default: app.datalake.bucket_name from conf/<env>.conf)')
+    build.add_argument('--env', default='dev', help='conf env used to resolve the bucket (default: dev)')
+    build.add_argument('--region', default=_DEFAULT_REGION, help=f'AWS region (default: {_DEFAULT_REGION})')
+    build.set_defaults(func=_cmd_build)
 
     return parser
 

@@ -1,4 +1,4 @@
-"""Curated uploader tests — assert S3 keys/paths without AWS (patch the client)."""
+"""Uploader tests — assert the S3 keys without touching AWS (patch the client)."""
 
 from unittest.mock import patch
 
@@ -13,51 +13,44 @@ def _write(path, text='{"k": 1}\n'):
 
 
 @patch('ym_datalake.etl.uploader.s3')
-def test_upload_real_data_puts_only_real_tables(s3_mock, tmp_path):
-    _write(tmp_path / 'raw' / 'vt_fd' / 'ship_id=S1' / 'data.jsonl')
-    _write(tmp_path / 'raw' / 'vt_fd' / 'ship_id=S21' / 'data.jsonl')
-    _write(tmp_path / 'raw' / 'maintenance' / 'maintenance.jsonl')
-    _write(tmp_path / 'raw' / 'vessel' / 'vessel.jsonl')
-    _write(tmp_path / 'raw' / 'noon_report' / 'imo_number=9700001' / 'year=2021' / 'data.jsonl')  # skipped
-    _write(tmp_path / 'curated' / 'dim_vessel' / 'dim_vessel.jsonl')  # skipped
+def test_upload_raw_puts_the_six_raw_tables(s3_mock, tmp_path):
+    for name in ('noon_report', 'vessel_master', 'maintenance_event', 'reference_curve', 'uwi', 'fuel_price'):
+        _write(tmp_path / 'raw' / name / f'{name}.jsonl')
+    _write(tmp_path / 'curated' / 'dim_vessel' / 'dim_vessel.jsonl')  # another zone: not uploaded here
 
-    keys = uploader.upload_real_data('my-bucket', tmp_path)
+    keys = uploader.upload_raw('my-bucket', tmp_path)
 
     assert set(keys) == {
-        'raw/vt_fd/ship_id=S1/data.jsonl',
-        'raw/vt_fd/ship_id=S21/data.jsonl',
-        'raw/maintenance/maintenance.jsonl',
-        'raw/vessel/vessel.jsonl',
+        'raw/noon_report/noon_report.jsonl',
+        'raw/vessel_master/vessel_master.jsonl',
+        'raw/maintenance_event/maintenance_event.jsonl',
+        'raw/reference_curve/reference_curve.jsonl',
+        'raw/uwi/uwi.jsonl',
+        'raw/fuel_price/fuel_price.jsonl',
     }
-    assert s3_mock.put_object.call_count == 4
+    assert s3_mock.put_object.call_count == 6
     assert all(c.kwargs['Bucket'] == 'my-bucket' for c in s3_mock.put_object.call_args_list)
 
 
 @patch('ym_datalake.etl.uploader.s3')
-def test_upload_real_data_missing_dir_raises(s3_mock, tmp_path):
-    with pytest.raises(FileNotFoundError):
-        uploader.upload_real_data('my-bucket', tmp_path)
-    s3_mock.put_object.assert_not_called()
+def test_upload_curated_puts_the_curated_tables(s3_mock, tmp_path):
+    _write(tmp_path / 'curated' / 'fact_performance_daily' / 'fact_performance_daily.jsonl')
+    _write(tmp_path / 'curated' / 'dim_port' / 'dim_port.jsonl')
+    _write(tmp_path / 'raw' / 'noon_report' / 'noon_report.jsonl')  # another zone: not uploaded here
 
-
-@patch('ym_datalake.etl.uploader.s3')
-def test_upload_real_curated_puts_only_fact_ship_tables(s3_mock, tmp_path):
-    _write(tmp_path / 'curated' / 'fact_ship_daily' / 'ship_id=S1' / 'data.jsonl')
-    _write(tmp_path / 'curated' / 'fact_ship_alert' / 'fact_ship_alert.jsonl')
-    _write(tmp_path / 'curated' / 'dim_vessel' / 'dim_vessel.jsonl')  # skipped (synthetic)
-    _write(tmp_path / 'raw' / 'vt_fd' / 'ship_id=S1' / 'data.jsonl')  # skipped (raw)
-
-    keys = uploader.upload_real_curated('my-bucket', tmp_path)
+    keys = uploader.upload_curated('my-bucket', tmp_path)
 
     assert set(keys) == {
-        'curated/fact_ship_daily/ship_id=S1/data.jsonl',
-        'curated/fact_ship_alert/fact_ship_alert.jsonl',
+        'curated/fact_performance_daily/fact_performance_daily.jsonl',
+        'curated/dim_port/dim_port.jsonl',
     }
     assert s3_mock.put_object.call_count == 2
 
 
 @patch('ym_datalake.etl.uploader.s3')
-def test_upload_real_curated_missing_dir_raises(s3_mock, tmp_path):
+def test_upload_of_a_missing_zone_raises(s3_mock, tmp_path):
     with pytest.raises(FileNotFoundError):
-        uploader.upload_real_curated('my-bucket', tmp_path)
+        uploader.upload_raw('my-bucket', tmp_path)
+    with pytest.raises(FileNotFoundError):
+        uploader.upload_curated('my-bucket', tmp_path)
     s3_mock.put_object.assert_not_called()
