@@ -50,6 +50,7 @@ class AthenaToolStack(Stack):
             self,
             'AthenaResultsBucket',
             block_public_access=aws_s3.BlockPublicAccess.BLOCK_ALL,
+            enforce_ssl=True,
             removal_policy=RemovalPolicy.DESTROY,
             auto_delete_objects=True,
             lifecycle_rules=[
@@ -180,6 +181,7 @@ class AthenaToolStack(Stack):
             self,
             'DataLakeBucket',
             block_public_access=aws_s3.BlockPublicAccess.BLOCK_ALL,
+            enforce_ssl=True,
             removal_policy=RemovalPolicy.DESTROY,
             auto_delete_objects=True,
         )
