@@ -1,8 +1,8 @@
-# `ym_datalake_poc` — GenBI SQL Guide
+# `ym_hackathon` — GenBI SQL Guide
 
 Write Athena SQL against the YangMing vessel-performance data lake and run it with the
 **`athena_query`** tool — pass one SELECT statement as `query`. The database
-(`ym_datalake_poc`), workgroup, and catalog are pre-configured on the tool; reference
+(`ym_hackathon`), workgroup, and catalog are pre-configured on the tool; reference
 tables by bare name.
 
 This lake also powers the **YM Fleet Performance Dashboard** (pages: Fleet Overview,

@@ -11,7 +11,7 @@ from aws_lambda_powertools.utilities.parameters import SSMProvider
 
 logger = logging.getLogger(__name__)
 
-SSM_PREFIX = '/ym-datalake-poc'
+SSM_PREFIX = '/ym-hackathon'
 _TTL_SECONDS = 86400
 # Athena caps get_query_results at 1000 rows per page.
 _MAX_PAGE_ROWS = 1000

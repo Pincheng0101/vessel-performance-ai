@@ -809,7 +809,7 @@ recall ≥ 0.70、precision ≥ 0.60，成因準確率 ≥ 0.75。
 
 ### 資料湖 (Data Lake)
 
-以 S3 為底、Athena 查詢的分區資料存放區（`ym_datalake_poc`）。分兩區：raw 與 curated。
+以 S3 為底、Athena 查詢的分區資料存放區（`ym_hackathon`）。分兩區：raw 與 curated。
 
 ### 原始區 / 精煉區 (Raw Zone / Curated Zone)
 

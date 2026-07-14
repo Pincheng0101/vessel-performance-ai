@@ -308,8 +308,8 @@ uv run python -m ym_datalake.synthetic_data generate --out ./tmp --bucket <DataL
 查詢（Athena 主控台或已部署的 Lambda）：
 
 ```sql
-SELECT count(*) FROM ym_datalake_poc.noon_report WHERE imo_number='9700006' AND year=2023;
-SELECT * FROM ym_datalake_poc.vessel_master;
+SELECT count(*) FROM ym_hackathon.noon_report WHERE imo_number='9700006' AND year=2023;
+SELECT * FROM ym_hackathon.vessel_master;
 ```
 
 ```bash

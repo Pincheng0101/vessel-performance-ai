@@ -35,7 +35,7 @@ class TestSubmit:
         kwargs = athena_mock.start_query_execution.call_args[1]
         # Athena requires string execution parameters to be single-quoted literals.
         assert kwargs['ExecutionParameters'] == ["'9700006'"]
-        assert kwargs['WorkGroup'] == 'ym-datalake-poc'
+        assert kwargs['WorkGroup'] == 'ym-hackathon'
         assert kwargs['QueryExecutionContext'] == {'Database': 'test_db', 'Catalog': 'AwsDataCatalog'}
 
     def test_no_execution_parameters_when_no_binds(self, ssm_mock, athena_mock, table_mock):

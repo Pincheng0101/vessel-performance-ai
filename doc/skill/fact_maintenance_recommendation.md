@@ -49,7 +49,7 @@ Reset clocks (from `fact_maintenance_event`, each ∪ `dry_dock`): propeller_pol
 (roughness), coating_renewal (coating breakdown), engine_overhaul (SFOC drift).
 
 ## Location & partitioning
-- Glue DB `ym_datalake_poc`, workgroup `ym-datalake-poc`, region us-west-2
+- Glue DB `ym_hackathon`, workgroup `ym-hackathon`, region us-west-2
 - S3: `s3://<DataLakeBucket>/curated/fact_maintenance_recommendation/fact_maintenance_recommendation.jsonl`
 - Format: JSONL, OpenX `org.openx.data.jsonserde.JsonSerDe`, `classification=json`
 - **Unpartitioned** (single flat prefix; 0–N rows/vessel). `imo_number` is a body

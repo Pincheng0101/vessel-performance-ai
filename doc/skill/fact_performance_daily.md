@@ -24,7 +24,7 @@ zero-cargo** days. The M3 columns (`anomaly_flag`, `anomaly_cause`,
 (`anomaly_cause`/`anomaly_severity` stay null when the row was not flagged).
 
 ## Location & partitioning
-- Glue DB `ym_datalake_poc`, workgroup `ym-datalake-poc`, region us-west-2
+- Glue DB `ym_hackathon`, workgroup `ym-hackathon`, region us-west-2
 - S3: `s3://<DataLakeBucket>/curated/fact_performance_daily/imo_number=<imo>/year=<yyyy>/month=<mm>/data.jsonl`
 - Format: JSONL, OpenX `org.openx.data.jsonserde.JsonSerDe`, `classification=json`
 - Partition keys (projection): **`imo_number`** (enum, 9 IMOs) + **`year`**

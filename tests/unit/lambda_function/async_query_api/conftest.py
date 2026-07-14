@@ -39,7 +39,7 @@ def _use_local_modules():
 
 
 # Athena runtime config as stored in SSM (JSON string).
-SSM_ATHENA_CONFIG = {'database': 'test_db', 'catalog': 'AwsDataCatalog', 'workgroup': 'ym-datalake-poc'}
+SSM_ATHENA_CONFIG = {'database': 'test_db', 'catalog': 'AwsDataCatalog', 'workgroup': 'ym-hackathon'}
 SSM_ATHENA_CONFIG_JSON = json.dumps(SSM_ATHENA_CONFIG)
 
 # A fake DynamoDB registry item (the shape config.get_registry returns).

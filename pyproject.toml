@@ -1,5 +1,5 @@
 [project]
-name = "ym-datalake-poc"
+name = "ym-hackathon"
 version = "0.1.0"
 description = "Template CDK project deploying a Lambda that queries AWS Athena via boto3."
 requires-python = ">=3.13, <3.14"

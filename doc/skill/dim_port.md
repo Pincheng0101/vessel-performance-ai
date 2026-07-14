@@ -18,7 +18,7 @@ mirror of `ports.py`), **not** from `dim_port`. `dim_port` exists for Athena /
 server-side use.
 
 ## Location & partitioning
-- Glue DB `ym_datalake_poc`, workgroup `ym-datalake-poc`, region us-west-2
+- Glue DB `ym_hackathon`, workgroup `ym-hackathon`, region us-west-2
 - S3: `s3://<DataLakeBucket>/curated/dim_port/dim_port.jsonl`
 - Format: JSONL, OpenX `org.openx.data.jsonserde.JsonSerDe`, `classification=json`
 - **Unpartitioned** (single flat prefix; full scan is cheap — 10 rows)

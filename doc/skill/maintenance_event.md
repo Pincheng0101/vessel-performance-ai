@@ -20,7 +20,7 @@ Unpartitioned. The curated `fact_maintenance_event` mirrors this table (minus th
 columns (`me_recovery_pct`, `payback_days`).
 
 ## Location & partitioning
-- Glue DB `ym_datalake_poc`, workgroup `ym-datalake-poc`, region us-west-2
+- Glue DB `ym_hackathon`, workgroup `ym-hackathon`, region us-west-2
 - S3: `s3://<DataLakeBucket>/raw/maintenance_event/maintenance_event.jsonl`
 - Format: JSONL, OpenX `org.openx.data.jsonserde.JsonSerDe`, `classification=json`
 - **Unpartitioned** (single flat prefix)

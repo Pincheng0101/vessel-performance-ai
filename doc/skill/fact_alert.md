@@ -28,7 +28,7 @@ Each row carries a bilingual `message_zh`/`message_en` narrative + a
 `vessel_alerts` panel.
 
 ## Location & partitioning
-- Glue DB `ym_datalake_poc`, workgroup `ym-datalake-poc`, region us-west-2
+- Glue DB `ym_hackathon`, workgroup `ym-hackathon`, region us-west-2
 - S3: `s3://<DataLakeBucket>/curated/fact_alert/imo_number=<imo>/data.jsonl`
 - Format: JSONL, OpenX `org.openx.data.jsonserde.JsonSerDe`, `classification=json`
 - Partition keys (projection): **`imo_number`** (enum, 9 IMOs). The fleet-wide

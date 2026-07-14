@@ -3,6 +3,7 @@ plan.md
 .serena
 .claude
 tmp
+data
 
 # Python
 __pycache__/

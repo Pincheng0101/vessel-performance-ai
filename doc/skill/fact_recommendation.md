@@ -17,7 +17,7 @@ date the open cycle reaches **8%** speed loss (the authoritative
 Backs the Dashboard `vessel_recommendation` panel.
 
 ## Location & partitioning
-- Glue DB `ym_datalake_poc`, workgroup `ym-datalake-poc`, region us-west-2
+- Glue DB `ym_hackathon`, workgroup `ym-hackathon`, region us-west-2
 - S3: `s3://<DataLakeBucket>/curated/fact_recommendation/fact_recommendation.jsonl`
 - Format: JSONL, OpenX `org.openx.data.jsonserde.JsonSerDe`, `classification=json`
 - **Unpartitioned** (single flat prefix; 1 row/vessel). `imo_number` is a body

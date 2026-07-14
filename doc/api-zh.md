@@ -451,7 +451,7 @@ API Gateway，僅含 `{"message"}`。
 
 **Lambda**（`AsyncQueryApiFunction`）：Python 3.13、ARM64、處理常式 (handler)
 `router.lambda_handler`、512 MB、30 秒逾時。環境變數：`QUERY_TABLE`（登錄表
-名）、`SSM_PREFIX`（`/ym-datalake-poc`）、`POWERTOOLS_SERVICE_NAME`
+名）、`SSM_PREFIX`（`/ym-hackathon`）、`POWERTOOLS_SERVICE_NAME`
 （`async-query-api`）。以 Powertools REST resolver 建構；每次請求僅一次
 Athena／DynamoDB 往返。
 
@@ -460,8 +460,8 @@ Athena／DynamoDB 往返。
 自動清理過期記錄。所存的 `status` 僅為快取 (cache) — Athena 執行狀態才是權威
 來源，每次 status／results 呼叫皆重新讀取。
 
-**SSM** `/ym-datalake-poc/athena-config` — 於提交查詢時讀取的 JSON
-`{database, workgroup, catalog}`。Athena 工作群組 (workgroup) `ym-datalake-poc`
+**SSM** `/ym-hackathon/athena-config` — 於提交查詢時讀取的 JSON
+`{database, workgroup, catalog}`。Athena 工作群組 (workgroup) `ym-hackathon`
 強制結果位置為 `s3://<AthenaResultsBucket>/results/`（7 天生命週期）。
 
 **安全性。** 使用者輸入絕不串接進 SQL：每個 `?` 佔位符 (placeholder) 皆經

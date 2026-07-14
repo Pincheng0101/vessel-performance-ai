@@ -13,7 +13,7 @@ in the M2 ETL to convert excess fuel burned to fouling into
 table with no `imo_number` — it keys only on `(date, fuel_type)`.
 
 ## Location & partitioning
-- Glue DB `ym_datalake_poc`, workgroup `ym-datalake-poc`, region us-west-2
+- Glue DB `ym_hackathon`, workgroup `ym-hackathon`, region us-west-2
 - S3: `s3://<DataLakeBucket>/raw/fuel_price/fuel_price.jsonl`
 - Format: JSONL, OpenX `org.openx.data.jsonserde.JsonSerDe`, `classification=json`
 - **Unpartitioned** (single flat prefix)

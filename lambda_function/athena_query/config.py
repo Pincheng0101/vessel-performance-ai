@@ -10,7 +10,7 @@ from aws_lambda_powertools.utilities.parameters import SSMProvider
 
 logger = logging.getLogger(__name__)
 
-SSM_PREFIX = '/ym-datalake-poc'
+SSM_PREFIX = '/ym-hackathon'
 
 # Athena moves through QUEUED/RUNNING before reaching a terminal state.
 _TERMINAL_STATES = {'SUCCEEDED', 'FAILED', 'CANCELLED'}

@@ -1,11 +1,11 @@
 ---
-name: ym_datalake_poc skill index
-description: Per-table skill docs for the ym_datalake_poc Athena data lake — one self-contained file per table for text→SQL. Start here.
+name: ym_hackathon skill index
+description: Per-table skill docs for the ym_hackathon Athena data lake — one self-contained file per table for text→SQL. Start here.
 ---
 
-# `ym_datalake_poc` — per-table skill docs
+# `ym_hackathon` — per-table skill docs
 
-One self-contained English "skill" file per Athena table in the `ym_datalake_poc`
+One self-contained English "skill" file per Athena table in the `ym_hackathon`
 data lake. Each file gives a table's purpose, full schema (every column, type,
 nullability, meaning), how to query it with **partition pruning**, and how it
 joins to the other 19 tables. Use these to write correct Athena SQL (text→SQL)
@@ -15,9 +15,9 @@ against the lake.
 
 | Setting | Value |
 |---|---|
-| Glue database | `ym_datalake_poc` |
+| Glue database | `ym_hackathon` |
 | Athena catalog | `AwsDataCatalog` |
-| Athena workgroup | `ym-datalake-poc` (enforces its own result location) |
+| Athena workgroup | `ym-hackathon` (enforces its own result location) |
 | Region | `us-west-2` |
 
 All 20 tables are `EXTERNAL_TABLE`s over **JSONL** (one JSON object per line),

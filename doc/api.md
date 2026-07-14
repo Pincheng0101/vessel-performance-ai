@@ -460,7 +460,7 @@ needed to call the API.
 
 **Lambda** (`AsyncQueryApiFunction`): Python 3.13, ARM64, handler
 `router.lambda_handler`, 512 MB, 30 s timeout. Env: `QUERY_TABLE` (registry
-table name), `SSM_PREFIX` (`/ym-datalake-poc`), `POWERTOOLS_SERVICE_NAME`
+table name), `SSM_PREFIX` (`/ym-hackathon`), `POWERTOOLS_SERVICE_NAME`
 (`async-query-api`). Built with the Powertools REST resolver; each request is a
 single Athena/DynamoDB round-trip.
 
@@ -469,8 +469,8 @@ item `{query_id, exec_id, query_type, status, ttl}`. `ttl` = now + 24 h auto-
 cleans stale records. The stored `status` is only a cache — Athena's execution
 state is authoritative, re-read on every status/results call.
 
-**SSM** `/ym-datalake-poc/athena-config` — JSON `{database, workgroup, catalog}`
-read at query-submit time. Athena workgroup `ym-datalake-poc` enforces the
+**SSM** `/ym-hackathon/athena-config` — JSON `{database, workgroup, catalog}`
+read at query-submit time. Athena workgroup `ym-hackathon` enforces the
 result location to `s3://<AthenaResultsBucket>/results/` (7-day lifecycle).
 
 **Security.** User values are never concatenated into SQL: each `?` placeholder

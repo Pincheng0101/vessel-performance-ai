@@ -1,8 +1,8 @@
 {
-  "name": "ym-datalake-poc",
+  "name": "ym-hackathon",
   "version": "0.1.0",
   "private": true,
-  "description": "AWS CDK CLI toolkit for the ym-datalake-poc project (Python app; see pyproject.toml for the CDK library).",
+  "description": "AWS CDK CLI toolkit for the ym-hackathon project (Python app; see pyproject.toml for the CDK library).",
   "scripts": {
     "cdk": "cdk"
   },

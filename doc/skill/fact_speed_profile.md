@@ -23,7 +23,7 @@ Optimizer page (usd/nm curve, current/economical/schedule markers, live savings,
 fleet slow-steaming KPI).
 
 ## Location & partitioning
-- Glue DB `ym_datalake_poc`, workgroup `ym-datalake-poc`, region us-west-2
+- Glue DB `ym_hackathon`, workgroup `ym-hackathon`, region us-west-2
 - S3: `s3://<DataLakeBucket>/curated/fact_speed_profile/imo_number=<imo>/data.jsonl`
 - Format: JSONL, OpenX `org.openx.data.jsonserde.JsonSerDe`, `classification=json`
 - Partition keys (projection): **`imo_number`** (enum, 9 IMOs). Always add

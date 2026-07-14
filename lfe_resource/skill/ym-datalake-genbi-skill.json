@@ -1,5 +1,5 @@
 {
     "skill_name": "ym-datalake-genbi-skill",
-    "description": "Table catalog + SQL guide for the ym_datalake_poc Athena vessel-performance data lake, including the exact SQL behind every YM Fleet Performance Dashboard panel (Fleet Overview, Fleet Map, Vessel Deep-dive, Optimizer, Alerts, Maintenance Planner). Invoke before writing any SQL: covers all 20 tables, partition-pruning rules, join keys, and per-panel dashboard queries. Use whenever the user asks about speed loss (速度損失), fuel consumption (油耗), CII 評級, anomalies/alerts (異常/預警), maintenance (維修建議/維修效益), fleet KPI, the Optimizer, or anything shown on the dashboard.",
+    "description": "Table catalog + SQL guide for the ym_hackathon Athena vessel-performance data lake, including the exact SQL behind every YM Fleet Performance Dashboard panel (Fleet Overview, Fleet Map, Vessel Deep-dive, Optimizer, Alerts, Maintenance Planner). Invoke before writing any SQL: covers all 20 tables, partition-pruning rules, join keys, and per-panel dashboard queries. Use whenever the user asks about speed loss (速度損失), fuel consumption (油耗), CII 評級, anomalies/alerts (異常/預警), maintenance (維修建議/維修效益), fleet KPI, the Optimizer, or anything shown on the dashboard.",
     "skill_markdown": "${file:skill/ym-datalake-genbi-skill.md}"
 }

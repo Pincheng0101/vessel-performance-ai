@@ -39,7 +39,7 @@ def _use_local_modules():
 SSM_ATHENA_CONFIG = {
     'database': 'test_db',
     'catalog': 'AwsDataCatalog',
-    'workgroup': 'ym-datalake-poc',
+    'workgroup': 'ym-hackathon',
 }
 SSM_ATHENA_CONFIG_JSON = json.dumps(SSM_ATHENA_CONFIG)
 

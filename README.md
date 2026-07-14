@@ -1,4 +1,4 @@
-# ym-datalake-poc
+# ym-hackathon
 
 陽明海運 (Yang Ming) AI 船舶效能分析 (vessel-performance analytics) POC — the data
 lake and query stack behind the spec in [`doc/poc-spec.md`](doc/poc-spec.md).
@@ -129,13 +129,13 @@ tests/e2e/                              live suite against the deployed API (aut
 
 | Key | Meaning |
 |---|---|
-| `app.athena.database` | Glue database the stack creates and Athena queries (`ym_datalake_poc`). |
+| `app.athena.database` | Glue database the stack creates and Athena queries (`ym_hackathon`). |
 | `app.athena.catalog` | Data source catalog (default `AwsDataCatalog`). |
 | `app.athena.workgroup_name` | Name of the WorkGroup this stack creates. |
 | `app.athena.source_bucket_arns` | Extra S3 bucket ARNs Athena reads from. The data-lake bucket is granted automatically, so this stays `[]`. |
 
 At deploy time the stack writes the non-secret Athena settings to SSM at
-`/ym-datalake-poc/athena-config` as JSON `{"database","catalog","workgroup"}`; the
+`/ym-hackathon/athena-config` as JSON `{"database","catalog","workgroup"}`; the
 Lambda reads it at invoke time (cached 30 min).
 
 ## Develop & test
@@ -164,7 +164,7 @@ AWS_PROFILE=ym-hackathon npx aws-cdk@latest deploy -c env=dev  # note the CfnOut
 
 The stack (`deployment/athena_tool_stack.py`) provisions:
 
-- **Data lake** — a Glue database (`ym_datalake_poc`) over a raw + curated S3 bucket
+- **Data lake** — a Glue database (`ym_hackathon`) over a raw + curated S3 bucket
   (20 tables total; see [`doc/table-schema.md`](doc/table-schema.md)). Raw zone: six
   JSON-SerDe tables (`noon_report` partitioned by `imo_number`+`year`; `vessel_master`
   (+`fleet_id`/`fleet_name`), `reference_curve`, `uwi`, `maintenance_event`,

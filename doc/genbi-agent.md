@@ -3,7 +3,7 @@
 A text-to-SQL agent on the LangForge Enterprise (LFE) platform that answers natural-language
 questions from the **YM Fleet Performance Dashboard** — speed loss, CII, anomalies/alerts,
 maintenance recommendations, voyage economics, optimizer speeds — by running read-only Athena
-SQL against the `ym_datalake_poc` data lake and interpreting the results (Traditional Chinese
+SQL against the `ym_hackathon` data lake and interpreting the results (Traditional Chinese
 or English, following the user).
 
 The agent's skill embeds the exact SQL behind every dashboard panel (mirrored from
@@ -21,7 +21,7 @@ dependency order — connector → llm → skill → agent — and prints their 
 resources are matched by name (`list-*`), existing ones are updated in place, ids are stable.
 Re-run after editing any file under `lfe_resource/`.
 
-Prerequisite: the `YmHackathonAthenaToolStack` must be deployed (`ym-datalake-poc-genbi-athena` IAM role —
+Prerequisite: the `YmHackathonAthenaToolStack` must be deployed (`ym-hackathon-genbi-athena` IAM role —
 CfnOutput `GenBiAthenaRoleName`) with M1–M3 data uploaded, else the agent's queries return
 empty results.
 
@@ -32,17 +32,17 @@ empty results.
 | `LFE_BASE_URL` / `LFE_API_KEY` | LFE API endpoint + key (ask the LFE operator) |
 | `LFE_AUTH_TOKEN` | optional bearer token |
 | `YM_DATALAKE_AWS_ACCOUNT_ID` | account hosting the data lake (= LFE's account) |
-| `YM_DATALAKE_ATHENA_ROLE_NAME` | `ym-datalake-poc-genbi-athena` |
+| `YM_DATALAKE_ATHENA_ROLE_NAME` | `ym-hackathon-genbi-athena` |
 
 ## Resource files (`lfe_resource/`)
 
 | File | Resource | Purpose |
 |---|---|---|
-| `agent/ym-datalake-genbi-agent.json` | agent | wires prompt + skill + `athena_client` tool (db `ym_datalake_poc`, workgroup `ym-datalake-poc`, `read_only: true`) |
+| `agent/ym-datalake-genbi-agent.json` | agent | wires prompt + skill + `athena_client` tool (db `ym_hackathon`, workgroup `ym-hackathon`, `read_only: true`) |
 | `agent/prompts/ym-datalake-genbi-agent.md` | — | agent prompt: role, domain background, dashboard context, tool usage, answer rules |
 | `skill/ym-datalake-genbi-skill.{json,md}` | skill | table catalog, partition-pruning rules, sample-question mapping, per-dashboard-panel SQL |
 | `llm/ym-datalake-genbi-llm.json` | llm | Bedrock Claude (us-west-2) |
-| `connector/ym-datalake-aws-connector.json` | connector | AWS auth for the Athena tool: assumes `ym-datalake-poc-genbi-athena` in us-west-2 via `${env:…}` values |
+| `connector/ym-datalake-aws-connector.json` | connector | AWS auth for the Athena tool: assumes `ym-hackathon-genbi-athena` in us-west-2 via `${env:…}` values |
 
 Placeholders in the JSON bodies — `${file:path}` (inline a file), `${env:KEY}`, and
 `${llm:name}` / `${skill:name}` / `${connector:name}` (id of a resource created earlier in the
@@ -70,7 +70,7 @@ in the repo.
 
 | Symptom | Check |
 |---|---|
-| Queries fail with Athena access error | role trust policy (LFE runtime must be able to assume `ym-datalake-poc-genbi-athena`); role exists (deploy `YmHackathonAthenaToolStack`) |
+| Queries fail with Athena access error | role trust policy (LFE runtime must be able to assume `ym-hackathon-genbi-athena`); role exists (deploy `YmHackathonAthenaToolStack`) |
 | Queries succeed but return no rows | M1–M3 data uploaded to the lake? (README §2–3) |
 | `PlaceholderError: ${env:…}` | key missing from `.env` / environment |
 | Register creates a duplicate instead of updating | remote resource was renamed/deleted — align names, delete strays in the LFE console |

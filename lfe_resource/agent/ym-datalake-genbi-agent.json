@@ -1,7 +1,7 @@
 {
     "agent_name": "ym-datalake-genbi-agent",
     "agent_prompt": "${file:agent/prompts/ym-datalake-genbi-agent.md}",
-    "description": "YangMing Vessel-Performance GenBI Agent (text-to-SQL over the ym_datalake_poc Athena data lake)",
+    "description": "YangMing Vessel-Performance GenBI Agent (text-to-SQL over the ym_hackathon Athena data lake)",
     "llm_id": "${llm:ym-datalake-genbi-llm}",
     "builtin_tools": {
         "skill": {
@@ -16,10 +16,10 @@
         {
             "tool_type": "athena_client",
             "name": "athena_query",
-            "description": "Run one read-only SQL query against the ym_datalake_poc vessel-performance data lake (Athena, us-west-2). Pass a single SELECT statement as `query`. Load the ym-datalake-genbi-skill skill first for the table catalog, partition-pruning rules, and sample queries.",
+            "description": "Run one read-only SQL query against the ym_hackathon vessel-performance data lake (Athena, us-west-2). Pass a single SELECT statement as `query`. Load the ym-datalake-genbi-skill skill first for the table catalog, partition-pruning rules, and sample queries.",
             "connector_id": "${connector:ym-datalake-aws-connector}",
-            "database": "ym_datalake_poc",
-            "workgroup": "ym-datalake-poc",
+            "database": "ym_hackathon",
+            "workgroup": "ym-hackathon",
             "output_location": null,
             "catalog": "AwsDataCatalog",
             "read_only": true

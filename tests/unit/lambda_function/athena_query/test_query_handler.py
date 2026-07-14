@@ -39,7 +39,7 @@ class TestRunQueryHandle:
         handle({'sql': 'SELECT 42 AS x'})
         kwargs = athena_mock.start_query_execution.call_args[1]
         assert kwargs['QueryString'] == 'SELECT 42 AS x'
-        assert kwargs['WorkGroup'] == 'ym-datalake-poc'
+        assert kwargs['WorkGroup'] == 'ym-hackathon'
         assert kwargs['QueryExecutionContext'] == {'Database': 'test_db', 'Catalog': 'AwsDataCatalog'}
 
     def test_event_overrides_database_and_catalog(self, ssm_mock, athena_mock):

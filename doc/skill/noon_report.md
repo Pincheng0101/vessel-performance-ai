@@ -16,7 +16,7 @@ All temporal fields are strings; any non-finite float (NaN/Inf) is written as
 `null`. `data_source` is always `sensor`.
 
 ## Location & partitioning
-- Glue DB `ym_datalake_poc`, workgroup `ym-datalake-poc`, region us-west-2
+- Glue DB `ym_hackathon`, workgroup `ym-hackathon`, region us-west-2
 - S3: `s3://<DataLakeBucket>/raw/noon_report/imo_number=<imo>/year=<yyyy>/data.jsonl`
 - Format: JSONL, OpenX `org.openx.data.jsonserde.JsonSerDe`, `classification=json`
 - Partition keys (projection): **`imo_number`** (enum, 9 IMOs `9700001`–`9700009`) +
