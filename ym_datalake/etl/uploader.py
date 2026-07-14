@@ -29,3 +29,25 @@ def upload_curated(bucket: str, out_dir: str | Path = './tmp') -> list[str]:
         s3.put_object(Bucket=bucket, Key=key, Body=path.read_bytes())
         keys.append(key)
     return keys
+
+
+def upload_real_data(bucket: str, out_dir: str | Path = './tmp') -> list[str]:
+    """Put the real-dataset tables (``raw/vt_fd/**``, ``raw/maintenance/**``) to S3; return keys.
+
+    Only the two real-data prefixes are walked, so a shared ``out_dir`` never
+    re-uploads synthetic raw tables.
+    """
+    root = Path(out_dir)
+    table_dirs = [root / 'raw' / 'vt_fd', root / 'raw' / 'maintenance']
+    if not any(d.is_dir() for d in table_dirs):
+        raise FileNotFoundError(f'no raw/vt_fd or raw/maintenance directory under {out_dir!r} — run load-real first')
+
+    keys: list[str] = []
+    for table_dir in table_dirs:
+        if not table_dir.is_dir():
+            continue
+        for path in sorted(table_dir.rglob('*.jsonl')):
+            key = path.relative_to(root).as_posix()
+            s3.put_object(Bucket=bucket, Key=key, Body=path.read_bytes())
+            keys.append(key)
+    return keys

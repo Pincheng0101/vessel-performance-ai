@@ -1,4 +1,4 @@
-"""CLI: ``python -m ym_datalake.etl <compute|validate> ...``."""
+"""CLI: ``python -m ym_datalake.etl <compute|validate|load-real> ...``."""
 
 from __future__ import annotations
 
@@ -20,6 +20,18 @@ from ym_datalake.etl.writer import write_all
 from ym_datalake.synthetic_data.validate import load_result
 
 _DEFAULT_REGION = 'us-west-2'
+
+
+def _resolve_bucket(args: argparse.Namespace) -> str | None:
+    """--bucket if given, else app.datalake.bucket_name from conf/<env>.conf."""
+    if args.bucket:
+        return args.bucket
+    conf_path = f'conf/{args.env}.conf'
+    if not os.path.isfile(conf_path):
+        return None
+    from pyhocon import ConfigFactory  # lazy: only when falling back to conf
+
+    return ConfigFactory.parse_file(conf_path).get('app.datalake.bucket_name', '') or None
 
 
 def _cmd_compute(args: argparse.Namespace) -> int:
@@ -56,16 +68,52 @@ def _cmd_compute(args: argparse.Namespace) -> int:
             exit_code = 1
 
     if args.upload:
-        if not args.bucket:
-            print('error: --upload requires --bucket', file=sys.stderr)
+        bucket = _resolve_bucket(args)
+        if not bucket:
+            print(
+                f'error: --upload requires --bucket or app.datalake.bucket_name in conf/{args.env}.conf',
+                file=sys.stderr,
+            )
             return 2
         os.environ.setdefault('AWS_DEFAULT_REGION', args.region)
         from ym_datalake.etl import uploader  # lazy: only when uploading
 
-        keys = uploader.upload_curated(args.bucket, args.out)
-        print(f'\nUploaded {len(keys)} objects to s3://{args.bucket}/curated/ (region {args.region})')
+        keys = uploader.upload_curated(bucket, args.out)
+        print(f'\nUploaded {len(keys)} objects to s3://{bucket}/curated/ (region {args.region})')
 
     return exit_code
+
+
+def _cmd_load_real(args: argparse.Namespace) -> int:
+    from ym_datalake.etl.real_data import load_maintenance, load_vt_fd, write_real_data
+
+    data_dir = args.data_dir
+    vt_fd_rows = load_vt_fd(f'{data_dir}/vt_fd.csv')
+    maintenance_rows = load_maintenance(f'{data_dir}/maintenance.csv')
+    counts = write_real_data(vt_fd_rows, maintenance_rows, args.out)
+
+    n_predict = sum(1 for r in vt_fd_rows if r['predict_fuel_type'])
+    n_masked = sum(1 for r in vt_fd_rows if r['masked_flag'])
+    print(f'Real data → {args.out}/raw')
+    for name, n in counts.items():
+        print(f'  {name:<28} {n:>8} rows')
+    print(f'  masked rows {n_masked}, PREDICT cells {n_predict}')
+
+    if args.upload:
+        bucket = _resolve_bucket(args)
+        if not bucket:
+            print(
+                f'error: --upload requires --bucket or app.datalake.bucket_name in conf/{args.env}.conf',
+                file=sys.stderr,
+            )
+            return 2
+        os.environ.setdefault('AWS_DEFAULT_REGION', args.region)
+        from ym_datalake.etl import uploader  # lazy: only when uploading
+
+        keys = uploader.upload_real_data(bucket, args.out)
+        print(f'\nUploaded {len(keys)} objects to s3://{bucket}/raw/ (region {args.region})')
+
+    return 0
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
@@ -83,9 +131,19 @@ def build_parser() -> argparse.ArgumentParser:
     comp.add_argument('--out', default='./tmp', help='curated output directory (default: ./tmp)')
     comp.add_argument('--validate', action='store_true', help='run C13 closed-loop checks after computing')
     comp.add_argument('--upload', action='store_true', help='upload curated/ tree to S3')
-    comp.add_argument('--bucket', help='target S3 bucket (required with --upload)')
+    comp.add_argument('--bucket', help='target S3 bucket (default: app.datalake.bucket_name from conf/<env>.conf)')
+    comp.add_argument('--env', default='dev', help='conf env used to resolve the bucket (default: dev)')
     comp.add_argument('--region', default=_DEFAULT_REGION, help=f'AWS region (default: {_DEFAULT_REGION})')
     comp.set_defaults(func=_cmd_compute)
+
+    real = sub.add_parser('load-real', help='load the real hackathon CSVs into the raw JSONL tree')
+    real.add_argument('--data', dest='data_dir', default='./data', help='directory with the CSVs (default: ./data)')
+    real.add_argument('--out', default='./tmp', help='output directory (default: ./tmp)')
+    real.add_argument('--upload', action='store_true', help='upload raw/vt_fd + raw/maintenance to S3')
+    real.add_argument('--bucket', help='target S3 bucket (default: app.datalake.bucket_name from conf/<env>.conf)')
+    real.add_argument('--env', default='dev', help='conf env used to resolve the bucket (default: dev)')
+    real.add_argument('--region', default=_DEFAULT_REGION, help=f'AWS region (default: {_DEFAULT_REGION})')
+    real.set_defaults(func=_cmd_load_real)
 
     val = sub.add_parser('validate', help='validate a previously written curated tree (C13)')
     val.add_argument('--dir', default='./tmp', help='directory holding curated/ and truth/ (default: ./tmp)')
