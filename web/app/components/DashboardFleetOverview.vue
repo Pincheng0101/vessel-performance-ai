@@ -18,6 +18,10 @@ const fmtUsdCompact = (v) => {
   if (v >= 1e3) return `$${Math.round(v / 1e3)}k`;
   return `$${Math.round(v)}`;
 };
+const fmtDate = d => (d ? d.replaceAll('-', '/') : '–');
+// ETL clamps an overdue action's due_day to the ship's last reported day, so a zero-day
+// horizon means already due, not due today.
+const fmtDueIn = n => (n <= 0 ? '已到期' : `${n}天後`);
 
 // useFleetDaily carries the roster and the per-ship daily fan-out (speed loss + fouling clocks
 // for the table, folded into the fleet snapshot for the KPIs). The alerts / recommendations are
@@ -125,7 +129,12 @@ const nextByShip = computed(() => {
     if (!rows.length) return;
     const earliest = rows.reduce((min, r) => (r.due_day < min ? r.due_day : min), rows[0].due_day);
     const windowRows = rows.filter(r => r.due_day === earliest);
-    out[v.ship_id] = { day: earliest, type: windowRows[0].action_type, count: windowRows.length };
+    out[v.ship_id] = {
+      day: earliest,
+      date: windowRows[0].due_date,
+      service: windowRows[0].plan_service_type,
+      actions: windowRows.map(r => r.action_type),
+    };
   });
   return out;
 });
@@ -148,8 +157,13 @@ const tableRows = computed(() => roster.map((v) => {
     daysInWater: last.days_since_cleaning ?? null,
     alerts30: (anomaliesByShip.value[v.ship_id] ?? []).filter(r => r.noon_utc > (last.noon_utc ?? 0) - 30).length,
     nextDay: next?.day ?? null,
-    serviceType: next?.type ?? null,
-    nextCount: next?.count ?? 0,
+    nextDate: next ? fmtDate(next.date) : null,
+    // Days-to-due is relative to this ship's own last reported day — the fleet-wide latest
+    // date would read as overdue for any ship whose data stops early.
+    nextIn: next && last.noon_utc != null ? next.day - last.noon_utc : null,
+    serviceType: next?.service ?? null,
+    nextItems: next ? next.actions.map(a => ACTION_LABEL[a] || a).join('、') : '',
+    nextCount: next?.actions.length ?? 0,
   };
 }));
 
@@ -160,13 +174,14 @@ const tableHeaders = [
   { title: 'Days since dry-dock', key: 'daysDryDock', sortable: true, minWidth: 110, tooltip: T.daysSinceDryDock },
   { title: 'Days since in-water', key: 'daysInWater', sortable: true, minWidth: 110, tooltip: T.daysSinceInWater },
   { title: 'Alerts (30d)', key: 'alerts30', sortable: true, width: 96, minWidth: 96, tooltip: T.anomaly },
-  { title: 'Next maintenance', key: 'nextDay', sortable: true, minWidth: 170, tooltip: T.nextMaintenance },
+  { title: 'Next maintenance', key: 'nextDay', sortable: true, minWidth: 260, tooltip: T.nextMaintenance },
 ];
-const SERVICE_LABEL = {
-  hull_cleaning: '船體清洗',
-  propeller_polishing: '螺槳拋光',
-  propeller_repair: '螺槳修理',
-  coating_renewal: '塗層更新',
+const SERVICE_LABEL = { dry_dock: '乾塢', in_water: '水下' };
+const ACTION_LABEL = {
+  hull_cleaning: '船體清潔',
+  propeller_polishing: '螺旋槳拋光',
+  propeller_repair: '螺旋槳修理',
+  coating_renewal: '船體塗層更新',
   engine_inspection: '主機檢查',
 };
 const trendIcon = s => (s == null ? 'mdi-minus' : s > SLOPE_EPS ? 'mdi-arrow-up-bold' : s < -SLOPE_EPS ? 'mdi-arrow-down-bold' : 'mdi-arrow-right-bold');
@@ -332,16 +347,29 @@ const speedLossHistOption = computed(() => {
               class="text-medium-emphasis"
             >–</span>
             <template v-else>
-              <span>第 {{ item.nextDay }} 天</span>
-              <AppChip
+              <span>{{ item.nextDate }}</span>
+              <span
+                v-if="item.nextIn != null"
+                class="text-medium-emphasis ml-1"
+              >({{ fmtDueIn(item.nextIn) }})</span>
+              <span
                 v-if="item.serviceType"
-                variant="outlined"
-                class="mx-2"
-                :text="SERVICE_LABEL[item.serviceType] || item.serviceType"
-                :color="serviceColor(item.serviceType)"
-                :dot-color="serviceColor(item.serviceType)"
-                dot
-              />
+                class="d-inline-block"
+              >
+                <AppChip
+                  variant="outlined"
+                  class="mx-2"
+                  :text="SERVICE_LABEL[item.serviceType] || item.serviceType"
+                  :color="serviceColor(item.serviceType)"
+                  :dot-color="serviceColor(item.serviceType)"
+                  dot
+                />
+                <AppTooltip
+                  :text="item.nextItems"
+                  activator="parent"
+                  location="top"
+                />
+              </span>
               <span>{{ item.nextCount }} 項</span>
             </template>
           </template>

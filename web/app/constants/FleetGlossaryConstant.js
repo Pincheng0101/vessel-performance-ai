@@ -60,7 +60,7 @@ const Term = Object.freeze({
 
   // Maintenance
   serviceType: '維修窗口是否需進乾塢（含塗層更新或螺旋槳修理），其餘可於水下施作。',
-  nextMaintenance: '規劃器將各行動的到期日批次成服務窗口後，最早一個窗口的日期與內容。',
+  nextMaintenance: '該船最早到期的維修行動：到期日與距該船最後一筆資料的天數，以及該行動所屬的服務窗口型態（乾塢／水下）；滑鼠停留於型態標籤可見行動明細。',
 
   // Maintenance planner (fleet-wide; definitions aligned with the PoC's Planner.js / glossary.js)
   dryDockWindow: '需進乾塢施作（塗層更新或螺旋槳修理）的服務窗口數；乾塢須上架，是排程與預算中最受限的事件。',
