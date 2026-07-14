@@ -48,7 +48,7 @@ const Term = Object.freeze({
   vesselSpeedLossTrend: '此船每日速度損失的長期趨勢；含維修事件標記、10% 清潔門檻，以及依汙損速率外推至預測觸發日的趨勢線。',
   causeDiagnostics: '整合滑失、SFOC 與 Admiralty efficiency index，判斷速度損失較可能來自船體髒污、螺旋槳／海流、主機效率或天氣／感測資料。',
   maintenanceRec: '整合汙損模型、異常偵測與水下檢查所產生的建議維修行動；每項含優先度、建議到期日、預估淨節省與作業方式（水下／乾塢），依優先度與節省金額排序。',
-  uwiInspection: '歷次水下檢查（潛水員／ROV）結果：船體汙損等級（0–100）與覆蓋率、螺旋槳 Rubert 等級（A 佳→E 差）與粗糙度、塗層劣化與狀況，以及建議動作。作為統計診斷與維修建議的實體佐證。',
+  uwiInspection: '歷次水下檢查（在水檢查 UWI／乾塢 DD）結果：船體汙損等級（0–100）與覆蓋率、螺旋槳狀況（良好／尚可／不佳）與粗糙度、塗層劣化與狀況，以及建議動作。作為統計診斷與維修建議的實體佐證。',
   ciiTrend: '此船 CII AER 與 IMO 碳強度數值（gCO₂/dwt·nm）隨時間的變化；圖上的 A–E 標記各自對應所在那條線於該段期間的 CII 評級，圓點填色代表評級，外框顏色代表所屬線別（灰藍色 AER、紫色 IMO）。C 級以上為合規；連續三年 D 或單年 E 須提出改善計畫。',
   speedPowerScatter: '實測「船速對主機功率」散點，依距上次清潔天數上色，並與乾淨船體參考曲線比較；曲線越往右上偏移代表汙損越嚴重。',
   anomalyTimeline: '各成因的異常 episode 時間軸；橫條越長代表持續越久，顏色代表嚴重度。',
@@ -62,12 +62,10 @@ const Term = Object.freeze({
   nextMaintenance: '規劃器將各行動的到期日批次成服務窗口後，最早一個窗口的日期與內容。',
 
   // Maintenance planner (fleet-wide; definitions aligned with the PoC's Planner.js / glossary.js)
-  capex: '維修行動的指示性成本估算：取歷史對應維護事件成本的中位數；主機檢查以主機大修（engine overhaul）成本估算，可能高估純檢查費用。',
   dryDockWindow: '需進乾塢施作（塗層更新或螺旋槳修理）的服務窗口數；乾塢須上架，是排程與預算中最受限的事件。',
-  maintenanceRoi: '淨節省除以資本支出的倍數；≥1× 代表可回收成本。淨節省為空（非經濟型行動，如主機檢查）者不計入 ROI，於待辦清單排序時置底。',
   maintenanceGantt: '每艘船的維修服務窗口排程；同船同日同服務型態的行動會合併成一個窗口。長條顏色代表服務型態（乾塢／水下），深淺代表優先度；長條長度為乾塢 12 天／水下 2 天的示意工期，非實際量測。',
-  capexCashflow: '依服務窗口的計畫日期分季彙總指示性資本支出，並依服務型態（乾塢／水下）堆疊，呈現船隊維修預算的季度分布。',
-  maintenanceBacklog: '所有船舶的待辦維修行動，依 ROI（淨節省 ÷ 資本支出）由高到低排序；點擊任一列可查看該船的個船分析。',
+  savingByQuarter: '依服務窗口的計畫日期分季彙總淨節省，並依服務型態（乾塢／水下）堆疊，呈現船隊維修效益的季度分布。非經濟型行動（如主機檢查）無淨節省，計為 0。',
+  maintenanceBacklog: '所有船舶的待辦維修行動，依淨節省由高到低排序；點擊任一列可查看該船的個船分析。',
   maintenanceAction: '建議的維修項目：船體清潔、螺旋槳拋光／修理、船體塗層更新、主機檢查。',
 
   // Executive
@@ -75,7 +73,7 @@ const Term = Object.freeze({
   savingsRealized: '超額油費從歷史高點回落的金額，作為已實現節省的估計值（USD）。',
 
   // Fleet overview
-  fleetTable: '每艘船的當前狀態：速度損失、趨勢、CII 評級、距上次乾塢／水下清潔天數、近 30 日異常數、下次維修與淨節省。',
+  fleetTable: '每艘船的當前狀態：速度損失與趨勢、距上次乾塢／水下清潔天數、近 30 日異常數，以及下一項維修建議。',
   speedLossDistribution: '全船隊各船當前速度損失的分布。',
 
   // Speed optimizer (definitions aligned with the PoC's Optimizer.js / glossary.js)
@@ -121,7 +119,7 @@ const Title = Object.freeze({
 
   // Maintenance planner
   maintenanceGantt: 'Maintenance schedule',
-  capexCashflow: 'Capex by quarter',
+  savingByQuarter: 'Net saving by quarter',
   maintenanceBacklog: 'Maintenance backlog',
 
   // Fleet alerts

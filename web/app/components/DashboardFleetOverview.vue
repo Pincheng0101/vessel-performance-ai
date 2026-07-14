@@ -18,66 +18,59 @@ const fmtUsdCompact = (v) => {
   return `$${Math.round(v)}`;
 };
 
-// v2 has no cost or CII data at all (see doc/api_v2.md §4), so "Excess fuel cost" and
-// "Savings potential" stay v1 — computed from v1's own 9-vessel roster, independent of the
-// v2 ship table below. Fleet size / avg speed loss / open alert cases are all directly
-// derivable from v2 and use the real 15-ship roster.
+// The fleet-wide rows (agg_fleet_daily rollup, roster, alerts, recommendations) are one call
+// each; only the per-ship daily series and anomalies need a fan-out.
 //
 // Floors the Suspense fallback at 1s — without it, a cache-warm reload can resolve fast enough
 // that the loading illustration flashes for a single frame.
 const [fetched] = await Promise.all([
   Promise.all([
-    server.datalake.v1FleetOverview({}, { lazy: false }),
-    server.datalake.v1FleetVessels({ lazy: false }),
-    server.datalake.v2FleetVessels({ lazy: false }),
-    server.datalake.v2FleetAlerts({}, { lazy: false }),
+    server.datalake.aggFleetDaily({}, { lazy: false }),
+    server.datalake.dimVessel({ lazy: false }),
+    server.datalake.factAlert({}, { lazy: false }),
+    server.datalake.factRecommendation({ lazy: false }),
+    server.datalake.factMaintenanceRecommendation({}, { lazy: false }),
   ]),
   delay(1000),
 ]);
-const [{ data: overviewRows }, { data: v1Vessels }, { data: ships }, { data: alerts }] = fetched;
-const v1Roster = v1Vessels.value ?? [];
+const [{ data: overviewRows }, { data: ships }, { data: alerts }, { data: recommendations }, { data: maintenanceRecs }] = fetched;
 const roster = ships.value ?? [];
 
-// v1 fan-out: recommendations for the "Savings potential" KPI only.
-const recommendations = await Promise.all(
-  v1Roster.map(v => server.datalake.v1VesselRecommendation({ imoNumber: v.imo_number }, { lazy: false })),
-);
-// v2 fan-out per ship: speed loss (table + avg speed loss KPI), anomalies (30d alert count),
-// maintenance effect (days since dry-dock / in-water), maintenance recommendation (next action).
-const speedLossData = await Promise.all(
-  roster.map(v => server.datalake.v2VesselSpeedLoss({ shipId: v.ship_id }, { lazy: false })),
+// Per-ship fan-out: the daily series (speed loss + fouling clocks for the table) and the
+// anomaly points (30-day count).
+const performanceData = await Promise.all(
+  roster.map(v => server.datalake.factPerformanceDaily({ shipId: v.ship_id }, { lazy: false })),
 );
 const anomalyData = await Promise.all(
-  roster.map(v => server.datalake.v2VesselAnomalies({ shipId: v.ship_id }, { lazy: false })),
-);
-const maintenanceEffectData = await Promise.all(
-  roster.map(v => server.datalake.v2VesselMaintenanceEffect({ shipId: v.ship_id }, { lazy: false })),
-);
-const maintenanceRecData = await Promise.all(
-  roster.map(v => server.datalake.v2VesselMaintenanceRecommendation({ shipId: v.ship_id }, { lazy: false })),
+  roster.map(v => server.datalake.factAnomaly({ shipId: v.ship_id }, { lazy: false })),
 );
 
 const latest = computed(() => overviewRows.value?.at(-1) ?? null);
-const speedLossByShip = computed(() => Object.fromEntries(
-  roster.map((v, i) => [v.ship_id, speedLossData[i].data.value ?? []]),
+const performanceByShip = computed(() => Object.fromEntries(
+  roster.map((v, i) => [v.ship_id, performanceData[i].data.value ?? []]),
 ));
 const anomaliesByShip = computed(() => Object.fromEntries(
   roster.map((v, i) => [v.ship_id, anomalyData[i].data.value ?? []]),
 ));
-const maintenanceEffectByShip = computed(() => Object.fromEntries(
-  roster.map((v, i) => [v.ship_id, maintenanceEffectData[i].data.value ?? []]),
-));
-const maintenanceRecByShip = computed(() => Object.fromEntries(
-  roster.map((v, i) => [v.ship_id, maintenanceRecData[i].data.value ?? []]),
-));
+const maintenanceRecByShip = computed(() => {
+  const out = {};
+  (maintenanceRecs.value ?? []).forEach((r) => {
+    (out[r.ship_id] ??= []).push(r);
+  });
+  return out;
+});
 
 // --- KPIs ---
+// fact_alert holds closed episodes too — the backlog is the open ones.
+const openAlertCount = computed(() => (alerts.value ?? []).filter(a => a.status === 'open').length);
 const savingsPotential = computed(() =>
-  recommendations.reduce((sum, rec) => sum + Math.max(0, rec.data.value?.[0]?.net_saving_usd ?? 0), 0),
+  (recommendations.value ?? []).reduce((sum, rec) => sum + Math.max(0, rec.net_saving_usd ?? 0), 0),
 );
+// Only ISO 19030-valid days carry a meaningful speed loss — an unfiltered "latest" reading would
+// be reporting the weather on that ship's last day, not its hull condition.
 const avgSpeedLossLatest = computed(() => {
   const vals = roster.map((v) => {
-    const rows = speedLossByShip.value[v.ship_id] ?? [];
+    const rows = performanceByShip.value[v.ship_id] ?? [];
     return rows.filter(r => r.valid_flag).at(-1)?.speed_loss_pct ?? null;
   }).filter(v => v != null);
   return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
@@ -88,35 +81,30 @@ const kpis = computed(() => [
     value: fmtInt(roster.length),
     sub: 'ships',
     tooltip: FleetGlossaryConstant.Term.fleetSize,
-    version: 'v2',
   },
   {
     label: 'Avg speed loss',
     value: fmtPct(avgSpeedLossLatest.value),
     sub: 'each ship’s own latest reading',
     tooltip: FleetGlossaryConstant.Term.avgSpeedLoss,
-    version: 'v2',
   },
   {
     label: 'Open alert cases',
-    value: fmtInt(alerts.value?.length ?? 0),
+    value: fmtInt(openAlertCount.value),
     sub: 'unresolved episodes',
     tooltip: FleetGlossaryConstant.Term.openAlertCases,
-    version: 'v2',
   },
   {
     label: 'Excess fuel cost',
     value: fmtUsdCompact(latest.value?.total_excess_cost_usd),
     sub: 'fleet, latest day',
     tooltip: FleetGlossaryConstant.Term.excessFuelCost,
-    version: 'v1',
   },
   {
     label: 'Savings potential',
     value: fmtUsdCompact(savingsPotential.value),
     sub: 'sum of recommendations',
     tooltip: FleetGlossaryConstant.Term.savingsPotential,
-    version: 'v1',
   },
 ]);
 
@@ -137,8 +125,8 @@ const slopeOf = (arr) => {
   const denom = n * sxx - sx * sx;
   return denom === 0 ? null : (n * sxy - sx * sy) / denom;
 };
-// Next maintenance = the earliest-due recommendation per ship (v2 trigger/ETA heuristic,
-// not a cost-scheduled plan date — see doc/api_v2.md §3.11).
+// Next maintenance = the earliest-due recommendation per ship (a trigger/ETA forecast, not the
+// batched plan window — that is what the maintenance planner tab schedules).
 const nextByShip = computed(() => {
   const out = {};
   roster.forEach((v) => {
@@ -150,27 +138,24 @@ const nextByShip = computed(() => {
   });
   return out;
 });
-// CII and net saving have no v2 source (doc/api_v2.md §4) — see the "Excess fuel cost" /
-// "Savings potential" KPIs and the CII distribution chart below for their (v1, separately
-// badged) home. Attaching a v1 vessel's value to a v2 ship's row here would misattribute demo
-// data to a real ship, so those two columns are dropped rather than backfilled.
+// The fouling clocks (days_since_dry_dock / days_since_cleaning) are carried on every daily row,
+// already reset by the maintenance events — read them off the ship's last day rather than
+// re-deriving them from the event log. Speed loss reads off the last *valid* day (ISO 19030).
 const tableRows = computed(() => roster.map((v) => {
-  const speedLoss = speedLossByShip.value[v.ship_id] ?? [];
-  const valid = speedLoss.filter(r => r.valid_flag);
-  const last = valid.at(-1) ?? speedLoss.at(-1) ?? {};
-  const maintenanceEffect = maintenanceEffectByShip.value[v.ship_id] ?? [];
-  const lastDryDockDay = Math.max(-Infinity, ...maintenanceEffect.filter(r => r.event_type === 'DD').map(r => r.event_day));
-  const lastInWaterDay = Math.max(-Infinity, ...maintenanceEffect.filter(r => r.event_type?.includes('UWC')).map(r => r.event_day));
+  const daily = performanceByShip.value[v.ship_id] ?? [];
+  const valid = daily.filter(r => r.valid_flag);
+  const last = daily.at(-1) ?? {};
+  const lastValid = valid.at(-1) ?? {};
   const next = nextByShip.value[v.ship_id] ?? null;
   return {
     id: v.ship_id,
     shipId: v.ship_id,
     name: v.ship_id,
-    sl: last.speed_loss_pct ?? null,
+    sl: lastValid.speed_loss_pct ?? null,
     slope: slopeOf(valid.slice(-30).map(r => r.speed_loss_pct).filter(x => x != null)),
-    daysDryDock: Number.isFinite(lastDryDockDay) ? v.last_day - lastDryDockDay : null,
-    daysInWater: Number.isFinite(lastInWaterDay) ? v.last_day - lastInWaterDay : null,
-    alerts30: (anomaliesByShip.value[v.ship_id] ?? []).filter(r => r.noon_utc > v.last_day - 30).length,
+    daysDryDock: last.days_since_dry_dock ?? null,
+    daysInWater: last.days_since_cleaning ?? null,
+    alerts30: (anomaliesByShip.value[v.ship_id] ?? []).filter(r => r.noon_utc > (last.noon_utc ?? 0) - 30).length,
     nextDay: next?.day ?? null,
     serviceType: next?.type ?? null,
     nextCount: next?.count ?? 0,
@@ -186,7 +171,13 @@ const tableHeaders = [
   { title: 'Alerts (30d)', key: 'alerts30', sortable: true, width: 96, minWidth: 96, tooltip: T.anomaly },
   { title: 'Next maintenance', key: 'nextDay', sortable: true, minWidth: 170, tooltip: T.nextMaintenance },
 ];
-const SERVICE_LABEL = { hull_cleaning: '船體清洗', propeller_polishing: '螺槳拋光', engine_inspection: '主機檢查' };
+const SERVICE_LABEL = {
+  hull_cleaning: '船體清洗',
+  propeller_polishing: '螺槳拋光',
+  propeller_repair: '螺槳修理',
+  coating_renewal: '塗層更新',
+  engine_inspection: '主機檢查',
+};
 const trendIcon = s => (s == null ? 'mdi-minus' : s > SLOPE_EPS ? 'mdi-arrow-up-bold' : s < -SLOPE_EPS ? 'mdi-arrow-down-bold' : 'mdi-arrow-right-bold');
 const trendClass = s => (s == null || Math.abs(s) <= SLOPE_EPS ? 'text-medium-emphasis' : s > 0 ? 'text-error' : 'text-success');
 const serviceColor = t => FleetChartConstant.ServiceTypeColor[t] || FleetChartConstant.FallbackColor;
@@ -205,7 +196,7 @@ const openVesselDetail = async (item) => {
 
 // --- CII rating distribution (vessel count per rating) ---
 // Same grammar as the speed-loss histogram (vertical count bars, shared "vessels" y-axis) so
-// the two panels read as a matched pair. With only ~9 vessels, counts are clearer and more
+// the two panels read as a matched pair. With only 15 vessels, counts are clearer and more
 // actionable than percentages; the share is offered in the tooltip.
 const CII_RATINGS = ['A', 'B', 'C', 'D', 'E'];
 const ciiCountOption = computed(() => {
@@ -291,10 +282,6 @@ const speedLossHistOption = computed(() => {
         <div class="text-caption text-medium-emphasis mt-1">
           {{ k.sub }}
         </div>
-        <AppDataSourceBadge
-          :version="k.version"
-          class="mt-2"
-        />
       </DashboardKpiCard>
     </div>
 
@@ -302,9 +289,6 @@ const speedLossHistOption = computed(() => {
       :title="FleetGlossaryConstant.Title.fleetTable"
       :tooltip="FleetGlossaryConstant.Term.fleetTable"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v2" />
-      </template>
       <UsageResultCard>
         <AppTable
           :headers="tableHeaders"
@@ -378,9 +362,6 @@ const speedLossHistOption = computed(() => {
         :title="FleetGlossaryConstant.Title.ciiDistribution"
         :tooltip="FleetGlossaryConstant.Term.cii"
       >
-        <template #actions>
-          <AppDataSourceBadge version="v1" />
-        </template>
         <UsageResultCard>
           <AppEChart
             :option="ciiCountOption"
@@ -393,9 +374,6 @@ const speedLossHistOption = computed(() => {
         :title="FleetGlossaryConstant.Title.speedLossDistribution"
         :tooltip="FleetGlossaryConstant.Term.speedLossDistribution"
       >
-        <template #actions>
-          <AppDataSourceBadge version="v2" />
-        </template>
         <UsageResultCard>
           <AppEChart
             :option="speedLossHistOption"

@@ -60,16 +60,19 @@ const SeverityColor = Object.freeze({
   low: FallbackColor,
 });
 
-// Planner service window type (v1 plan_service_type). in_water reuses the steel-blue series
-// color (not the teal pinned to hull_biofouling above) so "underwater work" reads as blue,
-// not teal/green. hull_cleaning/propeller_polishing/engine_inspection are the v2
-// vessel_maintenance_recommendation action_type values (doc/api_v2.md §3.11) — hull_cleaning
-// reuses in_water's blue since both are underwater hull work.
+// Maintenance planner: both the service window (plan_service_type) and the action
+// (action_type) of fact_maintenance_recommendation. in_water reuses the steel-blue series color
+// (not the teal pinned to hull_biofouling above) so "underwater work" reads as blue, not
+// teal/green; hull_cleaning shares it since both are underwater hull work. Propeller work
+// (polishing / repair) and coating renewal likewise share their action's family color — the
+// pairs never appear as adjacent series, so the repeat costs no legibility.
 const ServiceTypeColor = Object.freeze({
   dry_dock: CategoricalPalette[4],
   in_water: CategoricalPalette[1],
   hull_cleaning: CategoricalPalette[1],
   propeller_polishing: CategoricalPalette[4],
+  propeller_repair: CategoricalPalette[4],
+  coating_renewal: CategoricalPalette[2],
   engine_inspection: CategoricalPalette[0],
 });
 

@@ -38,10 +38,10 @@ const builtSections = ['executive', 'fleet', 'map', 'alerts', 'planner', 'vessel
 const placeholderSections = computed(() => sections.value.filter(section => !builtSections.includes(section.value)));
 
 // Dataset coverage (start–end relative day), shown beside the tabs so trends have a stated
-// period. v2's noon_utc is a per-ship relative day (0 = that ship's earliest record), not a
+// period. noon_utc is a per-ship relative day (0 = that ship's earliest record), not a
 // calendar date, so this reads as a day range rather than a month range.
 const server = useServer();
-const { data: overview } = await server.datalake.v2FleetOverview({}, { lazy: false });
+const { data: overview } = await server.datalake.aggFleetDaily({}, { lazy: false });
 const dataPeriod = computed(() => {
   const rows = overview.value;
   if (!rows?.length) return '';

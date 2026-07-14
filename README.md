@@ -19,7 +19,8 @@ async REST API, a Bedrock AgentCore agent, and a CloudFront-hosted dashboard.
 | **Sync Lambda** | `run_query` — arbitrary SQL against Athena, for humans and scripts | `lambda_function/athena_query/` |
 | **Async API** | API Gateway + Lambda + DynamoDB registry — 23 predefined query types (submit → poll → page) | `lambda_function/async_query_api/` |
 | **GenBI agent** | Strands agent on Bedrock AgentCore — natural language → SQL → answer, streamed over SSE | `agentcore/` |
-| **UI hosting** | Private S3 + CloudFront (OAC) for the (external) Nuxt dashboard SPA | `deployment/ui_stack.py` |
+| **Dashboard** | Nuxt 4 SPA — offline fixture-backed charts + live GenBI copilot chat | `web/` |
+| **UI hosting** | Private S3 + CloudFront (OAC) serving the built SPA | `deployment/ui_stack.py` |
 
 Region is **`us-west-2`**. Four stacks, all named from `app.project_name` (`YmHackathon`):
 `YmHackathonAthenaToolStack`, `YmHackathonUiStack`, `YmHackathonGenbiAgentAuthStack`,
@@ -31,6 +32,7 @@ Region is **`us-west-2`**. Four stacks, all named from `app.project_name` (`YmHa
 |---|---|---|
 | Python 3.13 + [`uv`](https://docs.astral.sh/uv/) | ETL, tests, the CDK app itself | `>=3.13,<3.14` |
 | Node.js + `npm` | CDK CLI | pinned in `package.json`; `npm ci` → `./node_modules/.bin/cdk` |
+| Node 24 (`web/.nvmrc` → `v24.11.0`) + npm ≥ 11.10 | the `web/` dashboard | `corepack enable npm`; separate npm tree from the root CDK pin |
 | Docker | bundling at `cdk deploy` | both Lambdas **and** the agent code asset (linux/arm64); must be running |
 | AWS credentials | deploy + upload + query | examples use `AWS_PROFILE=ym-hackathon`; account must be CDK-bootstrapped |
 
@@ -58,6 +60,9 @@ $CDK deploy --all -c env=dev
 
 # 3. Build all 20 tables from ./dataset and upload them to that bucket
 uv run python -m ym_datalake.etl build --upload
+
+# 4. Run the dashboard (offline — no AWS, no .env)
+cd web && npm ci && npm run dev
 ```
 
 The lake is now queryable — no crawler, no `MSCK`, no partitions. Drop `--upload` from step 3
@@ -248,23 +253,83 @@ conversation context. The access token lasts 24h. A browser client that does all
 token cache, SSE parsing, tool-progress events — is in `agentcore/frontend-example.js`, with a
 runnable page at `agentcore/test.html`.
 
-## 6. Dashboard (UI hosting)
+## 6. Dashboard (`web/`)
 
-`YmHackathonUiStack` provisions the hosting only: a **private** S3 bucket read exclusively by
-CloudFront through an Origin Access Control, HTTPS-only, with 403/404 → `/index.html` (200) so
-the SPA's client-side routing works. The dashboard **source is not in this repo** — it is the
-external `ym-datalake-ui` Nuxt app (`<TODO: repo URL>`), which talks to the async query API and
-the GenBI agent.
+The SPA lives at **`web/`** — a Nuxt 4 + Vuetify app, merged in as a git subtree of
+`ym-datalake-ui`. `YmHackathonUiStack` provisions only its hosting: a **private** S3 bucket read
+exclusively by CloudFront through an Origin Access Control, HTTPS-only, with 403/404 →
+`/index.html` (200) so the SPA's client-side routing works.
 
-Deploy a build into it:
+### Local dev
+
+```bash
+cd web
+corepack enable npm    # .npmrc sets engine-strict=true; needs npm ≥ 11.10
+npm ci
+npm run dev            # → http://localhost:3000/dashboard
+```
+
+**No config needed, and no AWS.** The dashboard is **fixture-backed**:
+`app/services/server/datalake.js` fetches checked-in JSON from `public/demo/{v1,v2}/`, resolving
+each cache key to a filename through that directory's `index.json`. `v2` is the real hackathon
+dataset (`ship_id` S1–S23, 111 files); `v1` is a frozen synthetic PoC. A live API mode is a TODO
+comment, not code — so the charts render offline, with no `.env` and no deployed stack.
+
+### `.env` — only for the copilot chat
+
+The one live feature is the GenBI copilot chat, which throws without credentials. Copy
+`.env.example` and fill it; only the six `AGENTCORE_*` keys are read (`SERVER_API_URL` /
+`SERVER_API_KEY` are inert leftovers). Derive the values from the deployed stacks — reusing the
+same `out()` helper as §5:
+
+```bash
+AUTH=YmHackathonGenbiAgentAuthStack; RT=YmHackathonGenbiAgentRuntimeStack
+CID=$(out $AUTH ClientId)
+
+cat > web/.env <<EOF
+AGENTCORE_RUNTIME_ARN=$(out $RT RuntimeArn)
+AGENTCORE_REGION=us-west-2
+AGENTCORE_TOKEN_ENDPOINT=$(out $AUTH TokenEndpoint)
+AGENTCORE_CLIENT_ID=$CID
+AGENTCORE_CLIENT_SECRET=$(aws cognito-idp describe-user-pool-client \
+  --user-pool-id "$(out $AUTH UserPoolId)" --client-id "$CID" \
+  --query 'UserPoolClient.ClientSecret' --output text)
+AGENTCORE_TOKEN_SCOPE=$(out $AUTH TokenScope)
+EOF
+```
+
+In GitLab this same file is the file-type CI variable `ENV_DEV`. Prefer the stack outputs over
+copying the CI variables — the CI copy's API endpoint is stale.
+
+### Regenerating the fixtures
+
+`npm run capture` rewrites `public/demo/v2/` from the live API. It reads **differently-named**
+vars — `YM_API_BASE_URL` / `YM_API_KEY` — from `web/.env.capture` (git-ignored), *not* `.env`.
+
+> **Known break:** `scripts/capture-fixtures.mjs` still calls `${BASE}/v2/queries`, but the API no
+> longer has a `/v2` prefix — the Lambda routes plain `/queries` (`async_query_api/router.py`).
+> Capture fails until the `/v2` is dropped at the 3 call sites in that script.
+
+### Lint / test
+
+```bash
+npm run lint
+npm run lint:security
+npm run test:unit -- --run
+npm run test:integration     # Playwright
+```
+
+### Build + deploy
+
+The upload is **manual** — `ui_stack.py` is hosting-only, with no `BucketDeployment`.
 
 ```bash
 S=YmHackathonUiStack
 out() { aws cloudformation describe-stacks --stack-name "$1" \
   --query "Stacks[0].Outputs[?OutputKey=='$2'].OutputValue" --output text; }
 
-npx nuxt generate                                    # in the ym-datalake-ui checkout
-aws s3 sync .output/public "s3://$(out $S UiBucketName)" --delete
+cd web && npm run generate                           # static build → .output/public
+aws s3 sync .output/public "s3://$(out $S UiBucketName)" --delete --exclude '*.map'
 aws cloudfront create-invalidation --distribution-id "$(out $S UiDistributionId)" --paths '/*'
 ```
 
@@ -315,6 +380,12 @@ pagination and the error paths (**422** invalid body/unknown type, 403 missing k
 `YmHackathonAthenaToolStack` outputs via boto3 and **auto-skips** without AWS, so a plain
 `pytest` stays green offline. Override with `E2E_STACK_NAME` and the standard AWS region vars.
 
+`-m e2e` also drives the **deployed GenBI agent** (`tests/e2e/test_genbi_agent.py`): Cognito token →
+`POST /invocations` → SSE → grounded answer, plus the session header and the auth/bad-payload error
+paths. It needs `YmHackathonGenbiAgentAuthStack` + `YmHackathonGenbiAgentRuntimeStack` (overridable
+with `E2E_AGENT_AUTH_STACK` / `E2E_AGENT_RUNTIME_STACK`) and spends Bedrock tokens; it skips the same
+way when they are absent.
+
 ## Repository layout
 
 ```
@@ -324,7 +395,7 @@ cdk.json  package.json                  "app": "uv run python app.py";  pinned C
 conf/default.conf  conf/dev.conf        HOCON per-env config (include pattern)
 dataset/                                the 3 source files: vt_fd.csv, maintenance.csv, vessel.jsonl
 deployment/athena_tool_stack.py         data lake + glue + athena + both lambdas + async API + SSM + IAM
-deployment/ui_stack.py                  S3 + CloudFront (OAC) hosting for the external Nuxt dashboard
+deployment/ui_stack.py                  S3 + CloudFront (OAC) hosting for the web/ Nuxt dashboard
 deployment/agent_auth_stack.py          Cognito user pool + M2M client for the agent's JWT auth
 deployment/agent_runtime_stack.py       Bedrock AgentCore runtime (arm64 zip asset) + execution role
 ym_datalake/schema.py                   the catalog: all 20 tables, every column tagged measured / class / estimated
@@ -342,6 +413,12 @@ lambda_function/athena_query/           sync query Lambda (router + pydantic han
 lambda_function/async_query_api/        async REST API Lambda (aws-lambda-powertools resolver)
 agentcore/                              GenBI agent: agent.py (2 tools), skill.md (the catalog it loads),
                                         frontend-example.js + test.html (browser client)
+web/                                    the dashboard: Nuxt 4 SPA (git subtree of ym-datalake-ui)
+  app/services/server/datalake.js       fixture-backed data service — reads public/demo/{v1,v2}
+  public/demo/{v1,v2}/                  checked-in query snapshots; the dashboard runs offline
+  scripts/capture-fixtures.mjs          regenerate public/demo/v2 from the live API (npm run capture)
+  .env.example                          AGENTCORE_* for the copilot chat (GitLab file-var ENV_DEV)
+  CLAUDE.md  .claude/rules/             the web app's own conventions
 doc/                                    dataset · synthetic-dataset · curated-dataset · schema · vessel · iso-19030 · api · glossary
 tests/unit/                             offline suite (boto3 mocked; no AWS/network)
 tests/e2e/                              live suite against the deployed API (auto-skips offline)
@@ -368,3 +445,4 @@ Start at the top; each doc answers one question.
 | [`doc/iso-19030.md`](doc/iso-19030.md) | The speed-loss standard the pipeline implements. |
 | [`doc/glossary.md`](doc/glossary.md) | Terms, units, and abbreviations. |
 | [`doc/api.md`](doc/api.md) | Async query API — every `query_type`, its params, and its response shape. |
+| [`web/README.md`](web/README.md) · [`web/CLAUDE.md`](web/CLAUDE.md) | **The dashboard.** How the Nuxt SPA is built and what conventions it follows — authoritative for anything under `web/`. |

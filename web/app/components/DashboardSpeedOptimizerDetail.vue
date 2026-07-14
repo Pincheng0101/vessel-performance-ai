@@ -1,15 +1,10 @@
 <script setup>
-// Per-vessel speed optimizer: the vessel_speed_profile fixture is a 24-point speed sweep (fuel,
-// power, cost at each speed). usd_per_nm — (fuel + charter) per day, divided by daily distance —
-// is the cost to cover a fixed annual distance at a constant speed; its minimum is the "economic
-// speed" the model recommends (verified against the fixtures: recommended_speed_kn always sits
-// exactly at the curve's lowest usd_per_nm point).
-//
-// vessel_speed_profile needs a sea-trial reference curve + charter rates, neither of which exist
-// in v2 (doc/api_v2.md §4 — no v2 counterpart at all) — this entire tab stays v1. The vessel
-// selector still shows the app-wide v2 ship roster for a consistent picker everywhere, but the
-// data underneath is `fallbackImo`'s stable v1 stand-in vessel (see useDashboardVesselSelection),
-// not that ship's own data — hence the badges below and the note under the selector.
+// Per-vessel speed optimizer: fact_speed_profile is a 24-point speed sweep (fuel, power, cost at
+// each speed). usd_per_nm — (fuel + charter) per day, divided by daily distance — is the cost to
+// cover a fixed annual distance at a constant speed; its minimum is the "economic speed" the
+// model recommends (recommended_speed_kn always sits exactly at the curve's lowest usd_per_nm
+// point). recommended_speed_kn / current_speed_kn / annual_distance_nm are repeated on all 24
+// rows of a ship — read them off the first row, never aggregate.
 import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
 
 const props = defineProps({
@@ -20,10 +15,6 @@ const props = defineProps({
   vesselOptions: {
     type: Array,
     default: () => [],
-  },
-  fallbackImo: {
-    type: [String, Number],
-    default: null,
   },
 });
 
@@ -50,7 +41,7 @@ const fmtUsdCompact = (v) => {
 // an already-fetched vessel) can resolve fast enough that the loading illustration flashes
 // for a single frame.
 const [{ data: profile }] = await Promise.all([
-  server.datalake.v1VesselSpeedProfile({ imoNumber: props.fallbackImo }, { lazy: false }),
+  server.datalake.factSpeedProfile({ shipId: shipId.value }, { lazy: false }),
   delay(1000),
 ]);
 
@@ -347,17 +338,11 @@ const fuelEmissionCurveOption = computed(() => {
       :items="props.vesselOptions"
       :vessel="props.vessel"
     />
-    <div class="text-caption text-medium-emphasis mb-n2">
-      顯示示範對照船舶資料，非 {{ shipId }} 之實際數據（v2 無航速優化所需的參考曲線與租金資料）
-    </div>
 
     <UsageResultCardFrame
       :title="FleetGlossaryConstant.Title.speedCostCurve"
       :tooltip="T.speedCostCurve"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v1" />
-      </template>
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
@@ -417,9 +402,6 @@ const fuelEmissionCurveOption = computed(() => {
       :title="FleetGlossaryConstant.Title.scheduleWhatIf"
       :tooltip="T.scheduleSpeed"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v1" />
-      </template>
       <UsageResultCard>
         <div class="schedule-frame pa-3">
           <div class="schedule-sliders">
@@ -506,9 +488,6 @@ const fuelEmissionCurveOption = computed(() => {
         :title="FleetGlossaryConstant.Title.dailyCostBreakdown"
         :tooltip="T.dailyCostBreakdown"
       >
-        <template #actions>
-          <AppDataSourceBadge version="v1" />
-        </template>
         <UsageResultCard>
           <AppEChart
             :option="dailyCostBreakdownOption"
@@ -521,9 +500,6 @@ const fuelEmissionCurveOption = computed(() => {
         :title="FleetGlossaryConstant.Title.fuelEmissionCurve"
         :tooltip="T.fuelEmissionCurve"
       >
-        <template #actions>
-          <AppDataSourceBadge version="v1" />
-        </template>
         <UsageResultCard>
           <AppEChart
             :option="fuelEmissionCurveOption"

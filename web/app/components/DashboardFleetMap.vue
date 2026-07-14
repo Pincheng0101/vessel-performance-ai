@@ -10,20 +10,18 @@
 import { FleetChartConstant, FleetGlossaryConstant, PortConstant } from '~/constants';
 
 const server = useServer();
+const route = useRoute();
+const router = useRouter();
 const { themeColors } = useCustomTheme();
 const T = FleetGlossaryConstant.Term;
 const THRESHOLD = FleetChartConstant.SpeedLossThreshold;
 
-// v2 has no lat/lon at all (doc/api_v2.md §4) — this whole tab stays v1, and its 9 vessels
-// have no correspondence to the v2 ship roster used everywhere else, so clicking a dot no
-// longer navigates to the vessel tab (see handleMapClick removal below).
-//
 // Floors the Suspense fallback at 1s — without it, a cache-warm reload can resolve fast enough
 // that the loading illustration flashes for a single frame.
 const [fetched] = await Promise.all([
   Promise.all([
-    server.datalake.v1FleetPositions({}, { lazy: false }),
-    server.datalake.v1FleetVessels({}, { lazy: false }),
+    server.datalake.fleetPositions({ lazy: false }),
+    server.datalake.dimVessel({ lazy: false }),
     // Fetched as text and parsed by hand rather than relying on $fetch's content-type-based
     // auto-parsing — S3 serves .geojson as `binary/octet-stream` (its mime-type guesser
     // doesn't know the extension), which skips ofetch's JSON parsing and breaks the map only
@@ -38,9 +36,9 @@ const [
   worldGeoJson,
 ] = fetched;
 
-// fleet_positions carries no fleet_id — join against the vessel roster, same trick the
-// PoC uses (fleetByImo in FleetMap.js).
-const fleetIdByImo = computed(() => Object.fromEntries((vessels.value ?? []).map(v => [v.imo_number, v.fleet_id])));
+// fleet_positions is a projection of the latest daily row per ship and carries no fleet — join
+// against dim_vessel on ship_id for the fleet filter.
+const fleetIdByShip = computed(() => Object.fromEntries((vessels.value ?? []).map(v => [v.ship_id, v.fleet_id])));
 const fleetOptions = computed(() => {
   const seen = new Map();
   (vessels.value ?? []).forEach((v) => {
@@ -55,7 +53,7 @@ const colorBy = ref('speed_loss');
 const filteredPositions = computed(() => {
   const rows = positions.value ?? [];
   if (selectedFleet.value === 'ALL') return rows;
-  return rows.filter(r => fleetIdByImo.value[r.imo_number] === selectedFleet.value);
+  return rows.filter(r => fleetIdByShip.value[r.ship_id] === selectedFleet.value);
 });
 
 const speedLossColor = (v) => {
@@ -99,16 +97,17 @@ const portDots = computed(() => Object.entries(PortConstant.Port).map(([locode, 
   symbolSize: p.isEu ? 11 : 9,
 })));
 
+// ship_id is the fleet's identity — there is no vessel name in the catalog.
 const vesselDots = computed(() => filteredPositions.value.map(r => ({
-  name: r.vessel_name || r.imo_number,
+  name: r.ship_id,
   value: [r.longitude, r.latitude],
-  imo: r.imo_number,
+  ship: r.ship_id,
   itemStyle: { color: dotColor(r) },
   slPct: r.speed_loss_pct,
   cii: r.cii_rating_aer,
   portFrom: r.port_from,
   portTo: r.port_to,
-  phase: r.voyage_phase,
+  voyage: r.voyage,
 })));
 
 // Custom, fixed-size zoom steps (both the floating +/- buttons and the wheel handler below) —
@@ -134,10 +133,10 @@ const mapOption = computed(() => {
       trigger: 'item',
       formatter: (p) => {
         if (p.seriesType === 'lines') return '';
-        if (p.data?.imo) {
-          const phaseZh = p.data.phase === 'in_port' ? '在港' : '航行中';
+        if (p.data?.ship) {
           const sl = p.data.slPct == null ? '–' : `${(+p.data.slPct).toFixed(1)}%`;
-          return `<b>${p.data.name}</b><br/>${p.data.portFrom} → ${p.data.portTo} · ${phaseZh}<br/>速度損失 ${sl} · CII ${p.data.cii || '–'}`;
+          const voyage = p.data.voyage ? ` · 航次 ${p.data.voyage}` : '';
+          return `<b>${p.data.name}</b><br/>${p.data.portFrom} → ${p.data.portTo}${voyage}<br/>速度損失 ${sl} · CII ${p.data.cii || '–'}`;
         }
         return p.data?.name || '';
       },
@@ -201,6 +200,22 @@ const handleWheel = (e) => {
 const zoomIn = () => zoomChart(chartApi.value, 1.2);
 const zoomOut = () => zoomChart(chartApi.value, 1 / 1.2);
 const resetView = () => chartApi.value?.dispatchAction({ type: 'restore' });
+
+// Clicking a ship dot opens that ship's deep-dive — same navigation the fleet table and the
+// alerts table use. Ports and route arcs are silent, so only vessel dots carry a ship id.
+const handleMapClick = async (params) => {
+  const shipId = params?.data?.ship;
+  if (!shipId) return;
+  await router.push({
+    query: {
+      ...route.query,
+      tab: 'vessel',
+      ship: shipId,
+    },
+  });
+  await delay(0);
+  scrollUtils.scrollTo();
+};
 </script>
 
 <template>
@@ -227,7 +242,6 @@ const resetView = () => chartApi.value?.dispatchAction({ type: 'restore' });
             ]"
           />
         </div>
-        <AppDataSourceBadge version="v1" />
       </template>
       <UsageResultCard>
         <div class="map-chart-wrap">
@@ -236,6 +250,7 @@ const resetView = () => chartApi.value?.dispatchAction({ type: 'restore' });
             :option="mapOption"
             :maps="[{ name: 'world', geoJson: worldGeoJson }]"
             :height="520"
+            :on-series-click="handleMapClick"
             @wheel="handleWheel"
           />
           <div class="map-zoom-controls d-flex flex-column">

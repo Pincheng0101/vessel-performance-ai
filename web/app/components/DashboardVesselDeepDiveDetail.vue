@@ -1,12 +1,12 @@
 <script setup>
-// Per-vessel deep-dive detail (up to cause diagnostics): header (coverage + speed-loss gauge +
-// CII), the alert feed, the speed-loss trend main visual, and the speed–power scatter +
-// anomaly timeline pair. Keyed by ship_id in the parent, so it fully reloads per vessel.
+// Per-vessel deep-dive detail: header (particulars + speed-loss gauge + CII), the alert feed, the
+// speed-loss trend main visual, excess-cost composition, CII trend, cause diagnostics, the
+// speed–power scatter + anomaly timeline pair, the underwater-inspection log, and the recommended
+// actions. Keyed by ship_id in the parent, so it fully reloads per vessel.
 //
-// v2 has no cost, CII, or UWI-detail data (see doc/api_v2.md §4). Sections that need those stay
-// on v1, sourced from `fallbackImo` — a stable (but not physically corresponding) v1 vessel for
-// the currently selected v2 ship, since the two rosters don't overlap (see
-// useDashboardVesselSelection). Everything else here uses v2, keyed by `shipId`.
+// fact_performance_daily is the spine: one row per (ship, day) carrying the ISO 19030 speed loss,
+// the raw signals, the fouling clocks, the CII trajectory and the excess-cost split — so most of
+// this file reads from that single fetch.
 import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
 
 const props = defineProps({
@@ -17,10 +17,6 @@ const props = defineProps({
   vesselOptions: {
     type: Array,
     default: () => [],
-  },
-  fallbackImo: {
-    type: [String, Number],
-    default: null,
   },
 });
 
@@ -43,55 +39,51 @@ const ciiColor = c => FleetChartConstant.CiiColor[c] || FleetChartConstant.Fallb
 // for a single frame.
 const [fetched] = await Promise.all([
   Promise.all([
-    server.datalake.v2VesselMetrics({ shipId: shipId.value }, { lazy: false }),
-    server.datalake.v2VesselSpeedLoss({ shipId: shipId.value }, { lazy: false }),
-    server.datalake.v2VesselSpeedPower({ shipId: shipId.value }, { lazy: false }),
-    server.datalake.v2VesselAlerts({ shipId: shipId.value }, { lazy: false }),
-    server.datalake.v2VesselAnomalies({ shipId: shipId.value }, { lazy: false }),
-    server.datalake.v2VesselMaintenanceEffect({ shipId: shipId.value }, { lazy: false }),
-    server.datalake.v2VesselMaintenanceRecommendation({ shipId: shipId.value }, { lazy: false }),
-    server.datalake.v1VesselMetrics({ imoNumber: props.fallbackImo }, { lazy: false }),
-    server.datalake.v1VesselUwi({ imoNumber: props.fallbackImo }, { lazy: false }),
+    server.datalake.factPerformanceDaily({ shipId: shipId.value }, { lazy: false }),
+    server.datalake.shipSpeedPower({ shipId: shipId.value }, { lazy: false }),
+    server.datalake.factAlert({ shipId: shipId.value }, { lazy: false }),
+    server.datalake.factAnomaly({ shipId: shipId.value }, { lazy: false }),
+    server.datalake.factPerformanceIndicator({ shipId: shipId.value }, { lazy: false }),
+    server.datalake.factMaintenanceRecommendation({ shipId: shipId.value }, { lazy: false }),
+    server.datalake.factUwi({ shipId: shipId.value }, { lazy: false }),
   ]),
   delay(1000),
 ]);
 const [
-  { data: metrics },
-  { data: speedLoss },
+  { data: daily },
   { data: speedPower },
   { data: alerts },
   { data: anomalies },
-  { data: events },
+  { data: indicators },
   { data: maintRecs },
-  { data: v1Metrics },
   { data: uwi },
 ] = fetched;
 
-// The hull_cleaning recommendation row (if any) carries the same trigger/rate fields v1's
-// vesselRecommendation used for the trend chart's prediction line.
+// The hull_cleaning recommendation row (if any) carries the trigger day and fouling rate the
+// trend chart's prediction line extrapolates along.
 const rec = computed(() => (maintRecs.value ?? []).find(r => r.action_type === 'hull_cleaning') ?? {});
-// Latest condition = the newest valid speed-loss row (fallback to the newest row).
+// fact_performance_indicator is long-format (ISP / DDP / ME / MT); the ME rows are the
+// maintenance-effect ones, keyed to the event they measure.
+const events = computed(() => (indicators.value ?? []).filter(r => r.indicator === 'ME'));
+// Latest condition = the newest ISO 19030-valid row (fallback to the newest row). Speed loss on
+// an invalid day is weather, not hull.
 const latest = computed(() => {
-  const rows = speedLoss.value ?? [];
-  return [...rows].reverse().find(r => r.valid_flag) ?? rows.at(-1) ?? {};
-});
-// CII has no v2 source at all — read from the v1 fallback vessel's latest valid metrics row.
-const v1Latest = computed(() => {
-  const rows = v1Metrics.value ?? [];
+  const rows = daily.value ?? [];
   return [...rows].reverse().find(r => r.valid_flag) ?? rows.at(-1) ?? {};
 });
 
-// --- Header: data coverage (v2 has no vessel particulars — dimensions/build year/dry-dock date
-// are v1-only fields that don't exist for the real ships at all) ---
+// --- Header: vessel particulars (dim_vessel) + the ship's data coverage ---
 const specs = computed(() => {
   const v = props.vessel;
-  const kind = /^S2[1-3]$/.test(v.ship_id || '') ? '預測船' : '訓練船';
+  const rows = daily.value ?? [];
+  const kind = v.role === 'predict' ? '預測船' : '訓練船';
+  const range = rows.length ? `第 ${rows[0].noon_utc}–${rows.at(-1).noon_utc} 天` : '–';
   return [
-    { label: 'Type', value: kind },
-    { label: 'Data range', value: v.first_day == null ? '–' : `第 ${v.first_day}–${v.last_day} 天` },
-    { label: 'Rows', value: v.n_rows == null ? '–' : v.n_rows.toLocaleString() },
-    { label: 'Predict cells', value: v.n_predict == null ? '–' : v.n_predict.toLocaleString() },
-    { label: 'Masked cells', value: v.n_masked == null ? '–' : v.n_masked.toLocaleString() },
+    { label: 'Type', value: `${kind} · ${v.hull_class ?? '–'}` },
+    { label: 'TEU', value: v.teu_nominal == null ? '–' : v.teu_nominal.toLocaleString() },
+    { label: 'Design speed', value: v.design_speed_kn == null ? '–' : `${v.design_speed_kn.toFixed(1)} kn` },
+    { label: 'Last dry-dock', value: v.last_dry_dock_day == null ? '無紀錄' : `第 ${v.last_dry_dock_day} 天` },
+    { label: 'Data range', value: range },
   ];
 });
 
@@ -109,7 +101,7 @@ const slColor = computed(() => {
 const mean = arr => (arr.length ? arr.reduce((sum, v) => sum + v, 0) / arr.length : null);
 const fmtMag = v => (v == null ? '–' : `${Math.abs(v).toFixed(1)}%`);
 const slDelta = computed(() => {
-  const vals = (speedLoss.value ?? []).filter(d => d.valid_flag && d.speed_loss_pct != null).map(d => d.speed_loss_pct);
+  const vals = (daily.value ?? []).filter(d => d.valid_flag && d.speed_loss_pct != null).map(d => d.speed_loss_pct);
   const cur = mean(vals.slice(-30));
   const prev = mean(vals.slice(-60, -30));
   return cur != null && prev != null ? cur - prev : null;
@@ -158,28 +150,26 @@ const theilSen = (pts) => {
   return { slope, intercept };
 };
 
-// Maintenance action code → Chinese label (for the trend event markers). vessel_maintenance_effect's
-// event_type values (doc/api_v2.md §3.5): PP / UWI+PP / UWC / UWC+PP / DD / UWI.
+// Maintenance events are atomic in the catalog (a source "UWC+PP" row is split into two), so
+// event_type is always one of these four.
 const MAINT_ZH = {
-  'PP': '螺旋槳拋光',
-  'UWI': '水下檢查',
-  'UWI+PP': '水下檢查＋拋光',
-  'UWC': '水下清潔',
-  'UWC+PP': '水下清潔＋拋光',
-  'DD': '乾塢',
+  PP: '螺旋槳拋光',
+  UWI: '水下檢查',
+  UWC: '水下清潔',
+  DD: '乾塢',
 };
-// Only used by the v1-fallback CII/cost sections below, which carry real calendar dates
-// (report_date), unlike v2's relative-day fields.
+// Used by the calendar-axis charts (excess cost, CII), which key off report_date rather than the
+// relative-day axis every other chart here uses.
 const fmtDate = (ts) => {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 // --- Speed-loss trend (main visual) ---
-// v2's noon_utc/event_day/trigger_eta_day are already plain relative-day integers (no calendar
-// dates in v2 — see doc/api_v2.md), so this axis is a day count, not a time axis.
+// noon_utc / event_day / trigger_eta_day are relative-day integers (day 0 = this ship's earliest
+// record), so this axis is a day count, not a time axis.
 const speedLossTrendOption = computed(() => {
-  const pts = (speedLoss.value ?? [])
+  const pts = (daily.value ?? [])
     .map(d => ({ day: d.noon_utc, sl: d.speed_loss_pct, valid: d.valid_flag, daysSinceCleaning: d.days_since_cleaning }))
     .filter(d => d.day != null && d.sl != null)
     .sort((a, b) => a.day - b.day);
@@ -196,8 +186,6 @@ const speedLossTrendOption = computed(() => {
   const drawPts = valid.length ? valid : pts;
   const maxSl = Math.max(...pts.map(d => d.sl));
 
-  // hull_cleaning recommendation row (rec, from useVesselMaintenanceRecommendation above) carries
-  // the trigger/rate fields v1's vesselRecommendation used for the prediction line.
   const r = rec.value;
   const triggerDay = r.trigger_eta_day ?? null;
   // Last cleaning day = the latest valid row's day minus its own days_since_cleaning.
@@ -221,9 +209,9 @@ const speedLossTrendOption = computed(() => {
       itemStyle: { color: FleetChartConstant.SemanticRamp.warning },
       data: [[x0, yAt(x0)], [x1, yAt(x1)]],
     });
-    if (triggerDay != null && r.rate_per_day != null) {
+    if (triggerDay != null && r.degradation_rate != null) {
       const y1 = seg.at(-1).sl;
-      const yEnd = y1 + r.rate_per_day * (triggerDay - x1);
+      const yEnd = y1 + r.degradation_rate * (triggerDay - x1);
       fitSeries.push({
         name: '預測', type: 'line', showSymbol: false, symbol: 'none', silent: true,
         lineStyle: { color: FleetChartConstant.SemanticRamp.warning, width: 1.8, type: [5, 4] },
@@ -343,9 +331,8 @@ const COST_PARTS = [
   { key: 'o', col: 'excess_cost_operational_usd', title: '操作', color: '#d6d3d1' },
 ];
 const COST_AVG_WINDOW = 30;
-// No v2 cost data at all (doc/api_v2.md §4) — sourced from the v1 fallback vessel.
 const costDaily = computed(() =>
-  (v1Metrics.value ?? [])
+  (daily.value ?? [])
     .filter(d => d.excess_cost_fouling_usd != null && typeof d.report_date === 'string')
     .map(d => ({
       ts: Date.parse(d.report_date),
@@ -454,9 +441,8 @@ const toCiiValue = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
-// No v2 CII data at all (doc/api_v2.md §4) — sourced from the v1 fallback vessel.
 const ciiRows = computed(() =>
-  (v1Metrics.value ?? [])
+  (daily.value ?? [])
     .filter(d => typeof d.report_date === 'string')
     .map(d => ({
       ts: Date.parse(d.report_date),
@@ -601,13 +587,14 @@ const ciiTrendOption = computed(() => {
 });
 
 // --- Maintenance recommendations (the decision: what to do, when) ---
-// v2's vessel_maintenance_recommendation (doc/api_v2.md §3.11) is a trigger/ETA heuristic — no
-// net saving or service-type window (no cost data in v2 at all), so those columns are dropped
-// rather than backfilled from v1 (would misattribute a fallback vessel's dollar figure to this
-// real ship's recommendation). The metric unit differs by action (speed-loss %, slip pp, SFOC %).
+// The tracked signal's unit differs by action: speed loss and coating breakdown are percentages,
+// propeller work tracks roughness in µm. net_saving_usd is only populated for the economic
+// actions (hull cleaning / polishing) — engine inspection has no saving model.
 const MAINT_ACTION = {
   hull_cleaning: { title: '船體清潔', icon: 'mdi-spray-bottle', unit: '%' },
-  propeller_polishing: { title: '螺旋槳拋光', icon: 'mdi-fan', unit: 'pp' },
+  propeller_polishing: { title: '螺旋槳拋光', icon: 'mdi-fan', unit: 'µm' },
+  propeller_repair: { title: '螺旋槳修理', icon: 'mdi-fan-alert', unit: 'µm' },
+  coating_renewal: { title: '船體塗層更新', icon: 'mdi-format-paint', unit: '%' },
   engine_inspection: { title: '主機檢查', icon: 'mdi-engine', unit: '%' },
 };
 const PRIORITY_META = {
@@ -618,7 +605,7 @@ const PRIORITY_META = {
 const fmtMetricVal = (v, unit) => {
   if (v == null) return '–';
   if (unit === '%') return `${v.toFixed(1)}%`;
-  if (unit === 'pp') return `${v.toFixed(1)}pp`;
+  if (unit === 'µm') return `${Math.round(v)}µm`;
   return Number.isInteger(v) ? `${v}` : v.toFixed(1);
 };
 const maintenanceRecommendations = computed(() =>
@@ -634,6 +621,7 @@ const maintenanceRecommendations = computed(() =>
         priorityColor: prio.color,
         rank: prio.rank,
         dueDay: r.due_day,
+        netSaving: r.net_saving_usd ?? null,
         metric: r.current_value == null
           ? null
           : `目前 ${fmtMetricVal(r.current_value, action.unit)} / 門檻 ${fmtMetricVal(r.threshold_value, action.unit)}`,
@@ -650,11 +638,12 @@ const maintenanceSummary = computed(() => {
 });
 
 // --- Underwater inspection (physical ground-truth for the fouling story) ---
-// vessel_uwi is the diver/ROV inspection log: hull fouling rating (0–100) + coverage, propeller
-// Rubert grade (A best → E worst) + roughness, coating breakdown + condition, and the recommended
-// action. It corroborates the statistical diagnostics and backs the maintenance recommendations.
-const UWI_TYPE_ZH = { diver: '潛水員', ROV: 'ROV', UWI: '水下檢查' };
-const UWI_COND_ZH = { good: '良好', fair: '尚可', poor: '不佳' };
+// fact_uwi is the inspection log: hull fouling rating (0–100) + coverage, propeller condition
+// (Good/Fair/Poor) + roughness, coating breakdown + condition, and the recommended action. It
+// corroborates the statistical diagnostics and backs the maintenance recommendations. The grades
+// are real; the numeric signals beside them are synthesized from those grades.
+const UWI_TYPE_ZH = { UWI: '水下檢查', DD: '乾塢' };
+const UWI_COND_ZH = { Good: '良好', Fair: '尚可', Poor: '不佳' };
 const UWI_ACTION = {
   none: { label: '無需處理', color: undefined },
   polish: { label: '拋光', color: 'warning' },
@@ -668,9 +657,10 @@ const uwiHeaders = [
   { title: '塗層', key: 'coating_breakdown_pct', minWidth: 140, sortable: true },
   { title: '建議', key: 'recommended_action', minWidth: 110, sortable: true },
 ];
+const CONDITION_COLOR = { Good: 'success', Fair: 'warning', Poor: 'error' };
 const foulColor = r => (r == null ? undefined : r < 30 ? 'success' : r < 60 ? 'warning' : 'error');
-const propColor = c => (['A', 'B'].includes(c) ? 'success' : c === 'C' ? 'warning' : 'error');
-const coatColor = c => ({ good: 'success', fair: 'warning', poor: 'error' }[c]);
+const condColor = c => CONDITION_COLOR[c];
+const condLabel = c => UWI_COND_ZH[c] || c || '–';
 const textClass = c => (c ? `text-${c} font-weight-medium` : '');
 const uwiRows = computed(() =>
   [...(uwi.value ?? [])]
@@ -681,33 +671,29 @@ const uwiSummary = computed(() => {
   const r = uwiRows.value[0];
   if (!r) return '尚無水下檢查紀錄。';
   const act = UWI_ACTION[r.recommended_action]?.label ?? r.recommended_action;
-  return `最新一次水下檢查（${r.inspection_date}）：船體汙損 ${Math.round(r.hull_fouling_rating)}/100、螺旋槳 ${r.propeller_condition} 級、塗層劣化 ${Math.round(r.coating_breakdown_pct)}%，建議${act}。`;
+  return `最新一次水下檢查（${r.inspection_date}）：船體汙損 ${Math.round(r.hull_fouling_rating)}/100、螺旋槳${condLabel(r.propeller_condition)}、塗層劣化 ${Math.round(r.coating_breakdown_pct)}%，建議${act}。`;
 });
 // History table stays collapsed by default — the latest inspection summary is enough at a glance.
 const uwiExpanded = ref(false);
 
 // --- Speed–power scatter ---
-// Measured points bucketed by cleaning-cycle phase (discrete colors are easier to read than
-// a continuous gradient): the point cloud marching up-left away from the clean reference over
-// the cycle is the fouling story. v2's vessel_speed_power has no `series`/days_since_cleaning of
-// its own (measured points only, no reference curve — doc/api_v2.md §3.4 says to fit a baseline
-// from early-cycle points, which this skips rather than inventing a curve fit), so
-// days_since_cleaning is joined in here from vessel_speed_loss by day.
+// ship_speed_power aligns two series on (speed_kn, power_kw): the ship's ISO-corrected, valid-gated
+// measured points (each carrying its own days_since_cleaning) and its fitted clean-hull reference
+// curve. Measured points are bucketed by cleaning-cycle phase — discrete colors read better than a
+// continuous gradient — and the cloud marching up-left away from the reference over the cycle is
+// the fouling story.
 const CLEAN_PHASES = [
   { label: '清潔後 0–75 天', color: FleetChartConstant.SemanticRamp.good, min: 0, max: 75 },
   { label: '75–150 天', color: FleetChartConstant.SemanticRamp.fair, min: 75, max: 150 },
   { label: '150–250 天', color: FleetChartConstant.SemanticRamp.warning, min: 150, max: 250 },
   { label: '≥ 250 天', color: FleetChartConstant.SemanticRamp.critical, min: 250, max: Infinity },
 ];
-const daysSinceCleaningByDay = computed(() => Object.fromEntries(
-  (speedLoss.value ?? []).map(d => [d.noon_utc, d.days_since_cleaning]),
-));
+const REFERENCE_LABEL = '乾淨船體基準';
 const speedPowerOption = computed(() => {
-  const rows = speedPower.value ?? [];
-  const measured = rows
-    .filter(d => d.speed_through_water != null && d.horse_power != null)
-    .map(d => ({ ...d, daysSinceCleaning: daysSinceCleaningByDay.value[d.noon_utc] ?? null }));
-  if (!measured.length) return {};
+  const rows = (speedPower.value ?? []).filter(d => d.speed_kn != null && d.power_kw != null);
+  const measured = rows.filter(d => d.series === 'measured');
+  const reference = rows.filter(d => d.series === 'reference').sort((a, b) => a.speed_kn - b.speed_kn);
+  if (!measured.length && !reference.length) return {};
 
   const phaseSeries = CLEAN_PHASES.map(p => ({
     name: p.label,
@@ -715,11 +701,11 @@ const speedPowerOption = computed(() => {
     symbolSize: 5,
     itemStyle: { color: p.color, opacity: 0.8 },
     data: measured
-      .filter(d => d.daysSinceCleaning != null && d.daysSinceCleaning >= p.min && d.daysSinceCleaning < p.max)
-      .map(d => ({ value: [d.speed_through_water, d.horse_power], day: d.daysSinceCleaning })),
+      .filter(d => d.days_since_cleaning != null && d.days_since_cleaning >= p.min && d.days_since_cleaning < p.max)
+      .map(d => ({ value: [d.speed_kn, d.power_kw], day: d.days_since_cleaning })),
   }));
-  // Points with no matching speed-loss row for that day (so no cleaning-cycle phase known).
-  const unphased = measured.filter(d => d.daysSinceCleaning == null);
+  // Ships with no cleaning event on record have no cycle clock to bucket by.
+  const unphased = measured.filter(d => d.days_since_cleaning == null);
 
   return {
     grid: { left: 68, right: 24, top: 44, bottom: 48 },
@@ -730,7 +716,8 @@ const speedPowerOption = computed(() => {
         if (!Array.isArray(p.value)) return '';
         const [s, pw] = p.value;
         const day = p.data?.day;
-        return `${s.toFixed(1)} kn · ${Math.round(pw).toLocaleString()} kW${day == null ? '' : ` · 距清潔 ${day} 天`}`;
+        const head = p.seriesName === REFERENCE_LABEL ? `${REFERENCE_LABEL}<br/>` : '';
+        return `${head}${s.toFixed(1)} kn · ${Math.round(pw).toLocaleString()} kW${day == null ? '' : ` · 距清潔 ${day} 天`}`;
       },
     },
     // Both axis names centered (y rotated on the left, x below), so the top clears the legend
@@ -744,28 +731,39 @@ const speedPowerOption = computed(() => {
         type: 'scatter',
         symbolSize: 5,
         itemStyle: { color: FleetChartConstant.FallbackColor, opacity: 0.5 },
-        data: unphased.map(d => ({ value: [d.speed_through_water, d.horse_power], day: null })),
+        data: unphased.map(d => ({ value: [d.speed_kn, d.power_kw], day: null })),
+      },
+      {
+        name: REFERENCE_LABEL,
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        symbol: 'none',
+        z: 4,
+        lineStyle: { color: '#334155', width: 2 },
+        itemStyle: { color: '#334155' },
+        data: reference.map(d => [d.speed_kn, d.power_kw]),
       },
     ],
   };
 });
 
 const severityColor = s => FleetChartConstant.SeverityColor[s] || FleetChartConstant.FallbackColor;
-// v2's anomaly-triggering metric, standing in for v1's rule-based cause taxonomy (same mapping
-// used in DashboardFleetAlerts.vue for consistency across the app).
-const METRIC_ORDER = ['speed_loss_pct', 'sfoc', 'me_slip', 'total_consump'];
+// The driver metric behind an alert episode (fact_alert.driver_metric) or an anomaly point
+// (fact_anomaly.metric) — the same four names in both (mirrored in DashboardFleetAlerts.vue).
+const METRIC_ORDER = ['speed_loss', 'sfoc', 'slip', 'excess_foc'];
 const METRIC_ZH = {
-  speed_loss_pct: '速度損失',
+  speed_loss: '速度損失',
   sfoc: '主機油耗 (SFOC)',
-  me_slip: '螺槳滑失',
-  total_consump: '總油耗',
+  slip: '螺槳滑失',
+  excess_foc: '超額油耗',
 };
 const metricTitle = m => METRIC_ZH[m] || m;
 const METRIC_ICON = {
-  speed_loss_pct: 'mdi-speedometer-slow',
+  speed_loss: 'mdi-speedometer-slow',
   sfoc: 'mdi-engine',
-  me_slip: 'mdi-fan',
-  total_consump: 'mdi-gas-station',
+  slip: 'mdi-fan',
+  excess_foc: 'mdi-gas-station',
 };
 const metricIcon = m => METRIC_ICON[m] || 'mdi-alert-circle-outline';
 
@@ -833,11 +831,11 @@ const anomalyTimelineOption = computed(() => {
       if (d.opened_day == null || d.last_seen_day == null) return null;
       return {
         ...d,
-        metric: d.metric || 'unknown',
+        metric: d.driver_metric || 'unknown',
         severity: d.severity || 'unknown',
         start: d.opened_day,
         end: Math.max(d.opened_day, d.last_seen_day),
-        durationDays: d.n_days ?? Math.max(1, d.last_seen_day - d.opened_day + 1),
+        durationDays: Math.max(1, d.last_seen_day - d.opened_day + 1),
       };
     })
     .filter(Boolean)
@@ -875,7 +873,7 @@ const anomalyTimelineOption = computed(() => {
       formatter: (p) => {
         const d = p.data.row;
         const peak = d.peak_z == null ? '' : `<br/>峰值 z=${d.peak_z.toFixed(1)}`;
-        return `${metricTitle(d.metric)} · ${SEVERITY_LABEL[d.severity] || d.severity}<br/>第 ${d.opened_day}–${d.last_seen_day} 天 · ${d.durationDays} 天${peak}<br/>${d.message || ''}`;
+        return `${metricTitle(d.metric)} · ${SEVERITY_LABEL[d.severity] || d.severity}<br/>第 ${d.opened_day}–${d.last_seen_day} 天 · ${d.durationDays} 天${peak}<br/>${d.message_zh || ''}`;
       },
     },
     dataZoom: [
@@ -937,17 +935,16 @@ const anomalyTimelineOption = computed(() => {
   };
 });
 
-// --- Cause diagnostics (baseline-index view over v2's raw signals — speed_loss_pct, me_slip,
-// sfoc, total_consump — corroborated by v2's own robust-z anomaly detection for the same
-// metric, doc/api_v2.md §3.8). v1's admiralty_coef and the slip_apparent/slip_real split have
-// no v2 counterpart (v2 has a single me_slip); dropped rather than approximated.
+// --- Cause diagnostics: a baseline-index view over the four signals the anomaly detector itself
+// keys off (speed_loss / slip / sfoc / excess_foc), so each tile's deviation can be corroborated
+// by that same metric's robust-z anomaly count.
 const DIAGNOSTIC_BASELINE_WINDOW = 30;
 const DIAGNOSTIC_ALERT_WINDOW_DAYS = 30;
 const DIAGNOSTIC_GRIDS = [
   { top: 46, height: 56, name: '%', decimals: 1 },
   { top: 130, height: 56, name: 'slip', decimals: 3 },
   { top: 214, height: 56, name: 'g/kWh', decimals: 1 },
-  { top: 298, height: 56, name: 'mt', decimals: 0 },
+  { top: 298, height: 56, name: 'mt', decimals: 1 },
 ];
 const toFinite = (v) => {
   if (v == null || v === '') return null;
@@ -961,10 +958,11 @@ const fmtSignedPct = v => (v == null ? '–' : `${v >= 0 ? '+' : ''}${v.toFixed(
 const fmtIndexDelta = index => fmtSignedPct(index == null ? null : index - 100);
 const fmtMetricRaw = (key, value) => {
   if (value == null) return '–';
-  if (key === 'me_slip') return `${(value * 100).toFixed(1)}%`;
+  if (key === 'slip') return `${(value * 100).toFixed(1)}%`;
   if (key === 'sfoc') return `${value.toFixed(1)} g/kWh`;
-  if (key === 'speed_loss_pct') return `${value.toFixed(1)}%`;
-  return value.toFixed(0);
+  if (key === 'speed_loss') return `${value.toFixed(1)}%`;
+  if (key === 'excess_foc') return `${value.toFixed(1)} mt`;
+  return value.toFixed(1);
 };
 const fmtAxisLabel = (value, decimals) => {
   const n = Number(value);
@@ -975,18 +973,19 @@ const clamp = (value, min, max) => {
   if (value == null || min == null || max == null) return value;
   return Math.max(min, Math.min(max, value));
 };
-// Merge each day's raw signal (vessel_metrics) with its speed-loss reading (vessel_speed_loss)
-// so all four diagnostic metrics share one day-indexed row set.
-const diagnosticRows = computed(() => {
-  const slByDay = Object.fromEntries((speedLoss.value ?? []).map(d => [d.noon_utc, d.speed_loss_pct]));
-  return (metrics.value ?? [])
-    .filter(d => d.noon_utc != null && !d.masked_flag)
-    .map(d => ({
-      day: d.noon_utc, sfoc: d.sfoc, me_slip: d.me_slip, total_consump: d.total_consump,
-      speed_loss_pct: slByDay[d.noon_utc] ?? null,
-    }))
-    .sort((a, b) => a.day - b.day);
-});
+// All four signals live on the same daily row. speed_loss is only meaningful on an ISO 19030-valid
+// day (elsewhere it is measuring the weather), so it is gated; the other three are raw readings
+// that stand on their own.
+const diagnosticRows = computed(() => (daily.value ?? [])
+  .filter(d => d.noon_utc != null && !d.masked_flag)
+  .map(d => ({
+    day: d.noon_utc,
+    speed_loss: d.valid_flag ? d.speed_loss_pct : null,
+    slip: d.slip_real,
+    sfoc: d.sfoc_g_kwh,
+    excess_foc: d.excess_foc_mt,
+  }))
+  .sort((a, b) => a.day - b.day));
 const buildMetricStat = (rows, key) => {
   const points = rows
     .map(d => ({ day: d.day, value: toFinite(d[key]) }))
@@ -1005,16 +1004,16 @@ const diagnosticStats = computed(() => {
   const rows = diagnosticRows.value;
 
   return {
-    speedLoss: buildMetricStat(rows, 'speed_loss_pct'),
+    speedLoss: buildMetricStat(rows, 'speed_loss'),
     sfoc: buildMetricStat(rows, 'sfoc'),
-    meSlip: buildMetricStat(rows, 'me_slip'),
-    totalConsump: buildMetricStat(rows, 'total_consump'),
+    slip: buildMetricStat(rows, 'slip'),
+    excessFoc: buildMetricStat(rows, 'excess_foc'),
   };
 });
 const diagnosticLevel = (high, medium) => (high ? 'high' : medium ? 'medium' : 'low');
 const diagnosticColor = level => ({ high: 'error', medium: 'warning', low: 'success' }[level]);
 const diagnosticStatus = level => ({ high: '需優先確認', medium: '持續觀察', low: '穩定' }[level]);
-// Recent anomaly count for a metric — v2's own robust-z detection (vessel_anomalies), within the
+// Recent anomaly count for a metric — the lake's own robust-z detection (fact_anomaly), within the
 // last 30 days of this ship's own data (single ship, so no cross-ship day-alignment issue).
 const recentAnomalyCount = (metric) => {
   const lastDay = diagnosticRows.value.at(-1)?.day;
@@ -1023,13 +1022,13 @@ const recentAnomalyCount = (metric) => {
 };
 const causeDiagnostics = computed(() => {
   const stats = diagnosticStats.value;
-  const slipDelta = stats.meSlip.latestIndex == null ? null : stats.meSlip.latestIndex - 100;
+  const slipDelta = stats.slip.latestIndex == null ? null : stats.slip.latestIndex - 100;
   const sfocDelta = stats.sfoc.latestIndex == null ? null : stats.sfoc.latestIndex - 100;
-  const consumpDelta = stats.totalConsump.latestIndex == null ? null : stats.totalConsump.latestIndex - 100;
-  const speedLossAnomalies = recentAnomalyCount('speed_loss_pct');
-  const slipAnomalies = recentAnomalyCount('me_slip');
+  const excessDelta = stats.excessFoc.latestIndex == null ? null : stats.excessFoc.latestIndex - 100;
+  const speedLossAnomalies = recentAnomalyCount('speed_loss');
+  const slipAnomalies = recentAnomalyCount('slip');
   const sfocAnomalies = recentAnomalyCount('sfoc');
-  const consumpAnomalies = recentAnomalyCount('total_consump');
+  const excessAnomalies = recentAnomalyCount('excess_foc');
 
   const hullLevel = diagnosticLevel(
     (slLatest.value ?? 0) >= THRESHOLD || speedLossAnomalies >= 2,
@@ -1043,16 +1042,16 @@ const causeDiagnostics = computed(() => {
     (sfocDelta != null && sfocDelta >= 5) || sfocAnomalies >= 2,
     (sfocDelta != null && sfocDelta >= 2) || sfocAnomalies >= 1,
   );
-  const consumpLevel = diagnosticLevel(
-    (consumpDelta != null && consumpDelta >= 8) || consumpAnomalies >= 2,
-    (consumpDelta != null && consumpDelta >= 3) || consumpAnomalies >= 1,
+  const excessLevel = diagnosticLevel(
+    (excessDelta != null && excessDelta >= 8) || excessAnomalies >= 2,
+    (excessDelta != null && excessDelta >= 3) || excessAnomalies >= 1,
   );
 
   return [
     {
-      key: 'speed_loss_pct',
+      key: 'speed_loss',
       title: '船體／速度損失',
-      icon: metricIcon('speed_loss_pct'),
+      icon: metricIcon('speed_loss'),
       level: hullLevel,
       score: Math.max(slLatest.value ?? 0, speedLossAnomalies * 4),
       value: slLatest.value == null ? '–' : `${slLatest.value.toFixed(1)}%`,
@@ -1061,15 +1060,15 @@ const causeDiagnostics = computed(() => {
       summary: `速度損失 ${slLatest.value == null ? '–' : `${slLatest.value.toFixed(1)}%`}，近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${speedLossAnomalies} 件異常`,
     },
     {
-      key: 'me_slip',
+      key: 'slip',
       title: '螺旋槳滑失',
-      icon: metricIcon('me_slip'),
+      icon: metricIcon('slip'),
       level: propellerLevel,
       score: Math.max(slipDelta ?? 0, slipAnomalies * 4),
-      value: fmtIndexDelta(stats.meSlip.latestIndex),
+      value: fmtIndexDelta(stats.slip.latestIndex),
       label: '滑失 vs 基準',
-      detail: `目前 ${fmtMetricRaw('me_slip', stats.meSlip.latestValue)} · 近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${slipAnomalies} 件異常`,
-      summary: `滑失 ${fmtIndexDelta(stats.meSlip.latestIndex)}，近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${slipAnomalies} 件異常`,
+      detail: `目前 ${fmtMetricRaw('slip', stats.slip.latestValue)} · 近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${slipAnomalies} 件異常`,
+      summary: `滑失 ${fmtIndexDelta(stats.slip.latestIndex)}，近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${slipAnomalies} 件異常`,
     },
     {
       key: 'sfoc',
@@ -1083,15 +1082,15 @@ const causeDiagnostics = computed(() => {
       summary: `SFOC ${fmtIndexDelta(stats.sfoc.latestIndex)}，目前 ${fmtMetricRaw('sfoc', stats.sfoc.latestValue)}`,
     },
     {
-      key: 'total_consump',
-      title: '總油耗',
-      icon: metricIcon('total_consump'),
-      level: consumpLevel,
-      score: Math.max(consumpDelta ?? 0, consumpAnomalies * 4),
-      value: fmtIndexDelta(stats.totalConsump.latestIndex),
-      label: '總油耗 vs 基準',
-      detail: `近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${consumpAnomalies} 件異常`,
-      summary: `總油耗 ${fmtIndexDelta(stats.totalConsump.latestIndex)}，近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${consumpAnomalies} 件異常`,
+      key: 'excess_foc',
+      title: '超額油耗',
+      icon: metricIcon('excess_foc'),
+      level: excessLevel,
+      score: Math.max(excessDelta ?? 0, excessAnomalies * 4),
+      value: fmtIndexDelta(stats.excessFoc.latestIndex),
+      label: '超額油耗 vs 基準',
+      detail: `目前 ${fmtMetricRaw('excess_foc', stats.excessFoc.latestValue)} · 近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${excessAnomalies} 件異常`,
+      summary: `超額油耗 ${fmtIndexDelta(stats.excessFoc.latestIndex)}，近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${excessAnomalies} 件異常`,
     },
   ].map(item => ({
     ...item,
@@ -1142,15 +1141,15 @@ const causeDiagnosticsOption = computed(() => {
   const stats = diagnosticStats.value;
   const extents = [
     metricExtent([stats.speedLoss]),
-    metricExtent([stats.meSlip]),
+    metricExtent([stats.slip]),
     metricExtent([stats.sfoc]),
-    metricExtent([stats.totalConsump]),
+    metricExtent([stats.excessFoc]),
   ];
   const series = [
-    diagnosticLineSeries({ name: '速度損失', key: 'speed_loss_pct', color: FleetChartConstant.SpeedLossColor, extent: extents[0], gridIndex: 0, stat: stats.speedLoss }),
-    diagnosticLineSeries({ name: '滑失', key: 'me_slip', color: FleetChartConstant.CategoricalPalette[1], extent: extents[1], gridIndex: 1, stat: stats.meSlip }),
+    diagnosticLineSeries({ name: '速度損失', key: 'speed_loss', color: FleetChartConstant.SpeedLossColor, extent: extents[0], gridIndex: 0, stat: stats.speedLoss }),
+    diagnosticLineSeries({ name: '滑失', key: 'slip', color: FleetChartConstant.CategoricalPalette[1], extent: extents[1], gridIndex: 1, stat: stats.slip }),
     diagnosticLineSeries({ name: 'SFOC', key: 'sfoc', color: FleetChartConstant.CategoricalPalette[4], extent: extents[2], gridIndex: 2, stat: stats.sfoc }),
-    diagnosticLineSeries({ name: '總油耗', key: 'total_consump', color: FleetChartConstant.CategoricalPalette[2], extent: extents[3], gridIndex: 3, stat: stats.totalConsump }),
+    diagnosticLineSeries({ name: '超額油耗', key: 'excess_foc', color: FleetChartConstant.CategoricalPalette[2], extent: extents[3], gridIndex: 3, stat: stats.excessFoc }),
   ];
 
   if (!series.some(s => s.data.length)) return {};
@@ -1208,9 +1207,8 @@ const causeDiagnosticsOption = computed(() => {
 });
 
 // --- Alert feed (newest first, paged) ---
-// v2 has no calendar dates (relative day per ship, doc/api_v2.md) — the v1 date-range picker
-// (AppDateRangePicker) has nothing meaningful to filter against here, so this drops the range
-// filter and just paginates every alert, newest last-seen-day first.
+// Alerts are keyed to this ship's relative-day axis, not a calendar, so there is nothing for a
+// date-range picker to filter against — this just paginates every alert, newest last-seen-day first.
 const sortedAlerts = computed(() =>
   [...(alerts.value ?? [])].sort((a, b) => (b.last_seen_day ?? 0) - (a.last_seen_day ?? 0)),
 );
@@ -1275,24 +1273,16 @@ watch(alertPageCount, (n) => {
             </v-chip>
             <span class="text-caption text-medium-emphasis">vs prev 30d</span>
           </div>
-          <AppDataSourceBadge
-            version="v2"
-            class="mt-2"
-          />
         </DashboardKpiCard>
         <DashboardKpiCard
           label="CII"
           :tooltip="T.cii"
-          :value="v1Latest?.cii_rating_aer || '–'"
-          :value-color="v1Latest?.cii_rating_aer ? ciiColor(v1Latest.cii_rating_aer) : ''"
+          :value="latest?.cii_rating_aer || '–'"
+          :value-color="latest?.cii_rating_aer ? ciiColor(latest.cii_rating_aer) : ''"
         >
           <div class="text-caption text-medium-emphasis mt-1">
-            {{ `AER ${fmtNum(v1Latest?.cii_aer, 2)}` }}
+            {{ `AER ${fmtNum(latest?.cii_aer, 2)}` }}
           </div>
-          <AppDataSourceBadge
-            version="v1"
-            class="mt-2"
-          />
         </DashboardKpiCard>
       </div>
     </div>
@@ -1302,9 +1292,6 @@ watch(alertPageCount, (n) => {
       :title="FleetGlossaryConstant.Title.alerts"
       :tooltip="T.alertsFeed"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v2" />
-      </template>
       <UsageResultCard>
         <div class="alert-card">
           <div class="alert-header pa-3 d-flex flex-wrap align-center justify-end ga-3">
@@ -1320,13 +1307,13 @@ watch(alertPageCount, (n) => {
                 class="d-flex ga-2 pa-3 alert-row"
               >
                 <v-icon
-                  :icon="metricIcon(a.metric)"
+                  :icon="metricIcon(a.driver_metric)"
                   size="20"
                   class="mt-1 text-medium-emphasis"
                 />
                 <div class="flex-grow-1">
                   <div class="d-flex flex-wrap align-center ga-2">
-                    <span class="text-body-2 font-weight-medium">{{ metricTitle(a.metric) }}</span>
+                    <span class="text-body-2 font-weight-medium">{{ metricTitle(a.driver_metric) }}</span>
                     <AppChip
                       variant="outlined"
                       :text="SEVERITY_LABEL[a.severity] || a.severity"
@@ -1335,7 +1322,7 @@ watch(alertPageCount, (n) => {
                     <span class="text-caption text-medium-emphasis">第 {{ a.opened_day }}–{{ a.last_seen_day }} 天</span>
                   </div>
                   <div class="text-caption mt-1">
-                    {{ a.message }}
+                    {{ a.message_zh }}
                   </div>
                 </div>
               </div>
@@ -1367,9 +1354,6 @@ watch(alertPageCount, (n) => {
       :title="FleetGlossaryConstant.Title.vesselSpeedLossTrend"
       :tooltip="T.vesselSpeedLossTrend"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v2" />
-      </template>
       <UsageResultCard>
         <AppEChart
           :option="speedLossTrendOption"
@@ -1383,9 +1367,6 @@ watch(alertPageCount, (n) => {
       :title="FleetGlossaryConstant.Title.excessCost"
       :tooltip="T.excessCost"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v1" />
-      </template>
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
@@ -1438,9 +1419,6 @@ watch(alertPageCount, (n) => {
       :title="FleetGlossaryConstant.Title.vesselCiiTrend"
       :tooltip="T.ciiTrend"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v1" />
-      </template>
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
@@ -1467,9 +1445,6 @@ watch(alertPageCount, (n) => {
       :title="FleetGlossaryConstant.Title.causeDiagnostics"
       :tooltip="T.causeDiagnostics"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v2" />
-      </template>
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
@@ -1544,9 +1519,6 @@ watch(alertPageCount, (n) => {
         :title="FleetGlossaryConstant.Title.speedPower"
         :tooltip="T.speedPowerScatter"
       >
-        <template #actions>
-          <AppDataSourceBadge version="v2" />
-        </template>
         <UsageResultCard>
           <AppEChart
             :option="speedPowerOption"
@@ -1559,9 +1531,6 @@ watch(alertPageCount, (n) => {
         :title="FleetGlossaryConstant.Title.anomalyTimeline"
         :tooltip="T.anomalyTimeline"
       >
-        <template #actions>
-          <AppDataSourceBadge version="v2" />
-        </template>
         <UsageResultCard>
           <AppEChart
             :option="anomalyTimelineOption"
@@ -1576,9 +1545,6 @@ watch(alertPageCount, (n) => {
       :title="FleetGlossaryConstant.Title.uwiInspection"
       :tooltip="T.uwiInspection"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v1" />
-      </template>
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
@@ -1625,14 +1591,14 @@ watch(alertPageCount, (n) => {
             </template>
             <template #item.propeller_condition="{ item }">
               <span class="text-no-wrap">
-                <span :class="textClass(propColor(item.propeller_condition))">{{ item.propeller_condition }} 級</span>
+                <span :class="textClass(condColor(item.propeller_condition))">{{ condLabel(item.propeller_condition) }}</span>
                 <span class="text-medium-emphasis"> · {{ Math.round(item.propeller_roughness_um) }}µm</span>
               </span>
             </template>
             <template #item.coating_breakdown_pct="{ item }">
               <span class="text-no-wrap">
-                <span :class="textClass(coatColor(item.coating_condition))">{{ Math.round(item.coating_breakdown_pct) }}%</span>
-                <span class="text-medium-emphasis"> · {{ UWI_COND_ZH[item.coating_condition] || item.coating_condition }}</span>
+                <span :class="textClass(condColor(item.hull_coating_condition))">{{ Math.round(item.coating_breakdown_pct) }}%</span>
+                <span class="text-medium-emphasis"> · {{ condLabel(item.hull_coating_condition) }}</span>
               </span>
             </template>
             <template #item.recommended_action="{ item }">
@@ -1654,9 +1620,6 @@ watch(alertPageCount, (n) => {
       :title="FleetGlossaryConstant.Title.maintenanceRec"
       :tooltip="T.maintenanceRec"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v2" />
-      </template>
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
@@ -1697,6 +1660,12 @@ watch(alertPageCount, (n) => {
                     </v-chip>
                     <span class="text-caption text-medium-emphasis">
                       建議第 {{ r.dueDay }} 天前處理
+                    </span>
+                    <span
+                      v-if="r.netSaving != null"
+                      class="text-caption text-success font-weight-medium"
+                    >
+                      淨節省 {{ fmtUsd(r.netSaving) }}
                     </span>
                   </div>
                   <div

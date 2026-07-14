@@ -1,19 +1,17 @@
-// Capture the v2 async-query API (real hackathon dataset, see doc/api_v2.md in
-// ym-hackathon) into static fixtures for the offline demo.
+// Capture the async-query API (the ym_hackathon data lake — 20 tables + 3 derived
+// query types, see ym_datalake/schema.py) into static fixtures for the offline demo.
 //
-// Re-runnable: derives the ship roster at runtime, then pulls every query_type
-// (raw, wide, full-grain — no trimming, full day range) and writes each result
-// to public/demo/<slug>.json plus an index.json mapping the runtime cache key
-// (`${type}:${JSON.stringify(params)}`) → filename. datalake.js reads that index.
+// Re-runnable: derives the ship roster at runtime from dim_vessel, then pulls every
+// query_type the dashboard reads (raw, wide, full-grain — no trimming, full day range)
+// and writes each result to public/demo/<slug>.json plus an index.json mapping the
+// runtime cache key (`${type}:${JSON.stringify(params)}`) → filename. datalake.js reads
+// that index.
 //
 // Config comes from env (never committed):
 //   YM_API_BASE_URL=... YM_API_KEY=... node scripts/capture-fixtures.mjs
 //
-// The param shapes here MUST match how the app calls query() (e.g. fleet_overview
-// uses {} for full-history, not { start_day: 0 }), so the cache keys line up.
-//
-// v2 has no fleet grouping, lat/lon, voyages, or cost/CII/UWI-cost data — those
-// v1 query types have no v2 counterpart (doc/api_v2.md §4) and are not captured.
+// The param shapes here MUST match how the app calls query() (e.g. agg_fleet_daily uses
+// {} for full-history/all-fleet, not { fleet_id: 'ALL' }), so the cache keys line up.
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -26,15 +24,16 @@ if (!BASE || !KEY) {
   process.exit(1);
 }
 
-const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'demo', 'v2');
+const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'demo');
 
 const POLL_INTERVAL_MS = 900;
 const POLL_TIMEOUT_MS = 90_000;
 const MAX_CONCURRENCY = 8;
 
-// ship_id (e.g. "S1", "S21") is already non-numeric and never coerces, but
-// list it for clarity alongside the columns that do need protecting.
-const STRING_COLUMNS = new Set(['ship_id']);
+// Identifiers that look numeric and would otherwise be coerced: imo_number is a bare
+// 9800001-style string, voyage/voyage_no are numeric-ish voyage codes. ship_id ("S1")
+// never coerces, but is listed alongside them for clarity.
+const STRING_COLUMNS = new Set(['ship_id', 'imo_number', 'voyage', 'voyage_no']);
 const NUMERIC_RE = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -74,7 +73,7 @@ async function fetchWithRetry(url, options) {
 const headers = extra => ({ 'x-api-key': KEY, ...(extra || {}) });
 
 async function submit(type, params) {
-  const res = await fetchWithRetry(`${BASE}/v2/queries`, {
+  const res = await fetchWithRetry(`${BASE}/queries`, {
     method: 'POST',
     headers: headers({ 'content-type': 'application/json' }),
     body: JSON.stringify({ query_type: type, params: params || {} }),
@@ -86,7 +85,7 @@ async function submit(type, params) {
 async function pollUntilDone(queryId, type) {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const res = await fetchWithRetry(`${BASE}/v2/queries/${queryId}`, { headers: headers() });
+    const res = await fetchWithRetry(`${BASE}/queries/${queryId}`, { headers: headers() });
     if (!res.ok) throw new Error(`status ${type} → ${res.status}`);
     const body = await res.json();
     if (body.status === 'SUCCEEDED') return;
@@ -101,7 +100,7 @@ async function fetchAllResults(queryId, type) {
   const rows = [];
   let token = null;
   do {
-    const url = new URL(`${BASE}/v2/queries/${queryId}/results`);
+    const url = new URL(`${BASE}/queries/${queryId}/results`);
     if (token) url.searchParams.set('page_token', token);
     const res = await fetchWithRetry(url, { headers: headers() });
     if (!res.ok) throw new Error(`results ${type} → ${res.status}`);
@@ -173,27 +172,29 @@ async function main() {
     }
   };
 
-  // Roster first — it drives the per-ship tasks. No fleet grouping in v2
-  // (doc/api_v2.md §3.10/§3.12 fleet_* types are tenant-wide, no fleet_id param).
+  // Roster first — it drives the per-ship tasks. agg_fleet_daily binds fleet_id='ALL' by
+  // default, which is the whole-fleet rollup row the dashboard wants (a call without it
+  // would double-count the rollup against its two sub-fleets).
   const [vessels] = await Promise.all([
-    capture('fleet_vessels', {}),
-    capture('fleet_overview', {}),
-    capture('fleet_alerts', {}),
-    capture('fleet_maintenance_recommendation', {}),
+    capture('dim_vessel', {}),
+    capture('agg_fleet_daily', {}),
+    capture('fleet_positions', {}),
+    capture('fact_alert', {}),
+    capture('fact_recommendation', {}),
+    capture('fact_maintenance_recommendation', {}),
     capture('predict_targets', {}),
   ]);
 
   const shipIds = [...new Set(vessels.map(v => v.ship_id).filter(Boolean))];
 
-  const VESSEL_TYPES = [
-    'vessel_metrics', 'vessel_speed_power', 'vessel_maintenance_effect',
-    'vessel_speed_loss', 'vessel_anomalies', 'vessel_alerts',
-    'vessel_maintenance_recommendation',
+  const SHIP_TYPES = [
+    'fact_performance_daily', 'fact_performance_indicator', 'fact_anomaly', 'fact_alert',
+    'fact_maintenance_recommendation', 'fact_uwi', 'fact_speed_profile', 'ship_speed_power',
   ];
-  const vesselTasks = shipIds.flatMap(ship_id => VESSEL_TYPES.map(type => () => capture(type, { ship_id })));
+  const shipTasks = shipIds.flatMap(ship_id => SHIP_TYPES.map(type => () => capture(type, { ship_id })));
 
   // The semaphore inside runQuery throttles actual concurrency; fire them all.
-  await Promise.all(vesselTasks.map(fn => fn()));
+  await Promise.all(shipTasks.map(fn => fn()));
 
   await writeFile(join(OUT_DIR, 'index.json'), JSON.stringify(index, null, 2));
 

@@ -10,73 +10,67 @@ const route = useRoute();
 const router = useRouter();
 const T = FleetGlossaryConstant.Term;
 
-// v2's fleet_alerts is metric-based (which raw signal triggered the anomaly) rather than v1's
-// rule-based "cause" attribution, and drops cost/recommended-action/localized message (doc/api_v2.md
-// §4) — but is otherwise a direct, real-ship equivalent, so this whole tab moves to v2 rather than
-// falling back. The "Excess cost" column has no v2 source and is dropped rather than backfilled
-// from v1 (excess cost already has its own v1-badged home in the Executive/Fleet Overview KPIs).
+// fact_alert is one row per alert episode across the whole fleet, open and closed alike; the
+// roster is only needed for the "of N ships" denominator.
 //
 // Floors the Suspense fallback at 1s — without it, a cache-warm reload can resolve fast enough
 // that the loading illustration flashes for a single frame.
 const [fetched] = await Promise.all([
   Promise.all([
-    server.datalake.v2FleetAlerts({ lazy: false }),
-    server.datalake.v2FleetVessels({ lazy: false }),
+    server.datalake.factAlert({}, { lazy: false }),
+    server.datalake.dimVessel({ lazy: false }),
   ]),
   delay(1000),
 ]);
 const [{ data: alerts }, { data: ships }] = fetched;
 
-const lastDayByShip = computed(() => Object.fromEntries((ships.value ?? []).map(v => [v.ship_id, v.last_day])));
-
-// v2's anomaly-triggering metric, standing in for v1's rule-based cause taxonomy.
+// driver_metric — the raw signal whose deviation opened the episode.
 const METRIC_ZH = {
-  speed_loss_pct: '速度損失',
+  speed_loss: '速度損失',
   sfoc: '主機油耗 (SFOC)',
-  me_slip: '螺槳滑失',
-  total_consump: '總油耗',
+  slip: '螺槳滑失',
+  excess_foc: '超額油耗',
 };
 const METRIC_ICON = {
-  speed_loss_pct: 'mdi-speedometer-slow',
+  speed_loss: 'mdi-speedometer-slow',
   sfoc: 'mdi-engine',
-  me_slip: 'mdi-fan',
-  total_consump: 'mdi-gas-station',
+  slip: 'mdi-fan',
+  excess_foc: 'mdi-gas-station',
 };
-const METRIC_ORDER = ['speed_loss_pct', 'sfoc', 'me_slip', 'total_consump'];
+const METRIC_ORDER = ['speed_loss', 'sfoc', 'slip', 'excess_foc'];
 const SEVERITY_LABEL = { low: '低', medium: '中', high: '高' };
 const SEVERITY_ORDER = ['high', 'medium', 'low'];
+const STATUS_LABEL = { open: '開啟', closed: '已關閉' };
 const metricTitle = m => METRIC_ZH[m] || m;
 const metricIcon = m => METRIC_ICON[m] || 'mdi-alert-circle-outline';
 const severityColor = s => FleetChartConstant.SeverityColor[s] || FleetChartConstant.FallbackColor;
 
 const rows = computed(() => (alerts.value ?? []).map((r, i) => ({
-  id: r.alert_id || `${r.ship_id}-${r.metric}-${r.opened_day}-${i}`,
+  id: r.alert_id || `${r.ship_id}-${r.driver_metric}-${r.opened_day}-${i}`,
   shipId: r.ship_id,
-  metric: r.metric,
+  metric: r.driver_metric,
   severity: r.severity,
+  status: r.status,
   openedDay: r.opened_day,
   lastSeenDay: r.last_seen_day,
-  message: r.message,
+  message: r.message_zh,
 })));
 
 // --- KPIs ---
-const highSeverityCount = computed(() => rows.value.filter(r => r.severity === 'high').length);
-const vesselsAffected = computed(() => new Set(rows.value.map(r => r.shipId)).size);
-// "Recent" is per-ship: each ship's own relative-day axis is independent (day 0 is a different
-// real calendar date per ship), so "opened in the last 30 days" means within 30 days of that
-// specific ship's own latest data day, not a shared cutoff.
-const recentCount = computed(() => rows.value.filter((r) => {
-  const shipLastDay = lastDayByShip.value[r.shipId];
-  return shipLastDay != null && r.openedDay != null && shipLastDay - r.openedDay <= 30;
-}).length);
+// The backlog is the *open* episodes; the closed ones stay in the table (and the total tile) as
+// history. Each ship's relative-day axis is its own, so there is no fleet-wide "last 30 days"
+// cutoff to count against — open/closed is the status the data actually carries.
+const openRows = computed(() => rows.value.filter(r => r.status === 'open'));
+const highSeverityCount = computed(() => openRows.value.filter(r => r.severity === 'high').length);
+const vesselsAffected = computed(() => new Set(openRows.value.map(r => r.shipId)).size);
 const kpis = computed(() => [
-  { label: 'Open alerts', value: `${rows.value.length}`, sub: 'open episodes', tooltip: T.openAlertCases },
+  { label: 'Open alerts', value: `${openRows.value.length}`, sub: 'unresolved episodes', tooltip: T.openAlertCases },
   {
     label: 'High severity', value: `${highSeverityCount.value}`, sub: 'need priority attention', tooltip: T.highSeverityAlerts,
     color: highSeverityCount.value > 0 ? FleetChartConstant.SemanticRamp.critical : undefined,
   },
   { label: 'Vessels affected', value: `${vesselsAffected.value}`, sub: `of ${ships.value?.length ?? 0} ships`, tooltip: T.vesselsWithAlerts },
-  { label: 'Opened last 30d', value: `${recentCount.value}`, sub: 'new episodes', tooltip: T.recentAlerts },
+  { label: 'Total episodes', value: `${rows.value.length}`, sub: 'incl. closed', tooltip: T.anomaly },
 ]);
 
 // --- Alerts by metric, stacked by severity ---
@@ -112,6 +106,7 @@ const tableHeaders = [
   { title: 'Ship', key: 'shipId', sortable: true, minWidth: 90 },
   { title: 'Metric', key: 'metric', sortable: true, minWidth: 150, tooltip: T.cause },
   { title: 'Severity', key: 'severity', sortable: true, width: 100, minWidth: 100, tooltip: T.severity },
+  { title: 'Status', key: 'status', sortable: true, width: 100, minWidth: 100 },
   { title: 'Opened', key: 'openedDay', sortable: true, minWidth: 100 },
   { title: 'Last seen', key: 'lastSeenDay', sortable: true, minWidth: 100 },
 ];
@@ -119,6 +114,7 @@ const filterOptions = [
   { title: 'Ship', field: 'shipId' },
   { title: 'Metric', field: 'metric', values: METRIC_ORDER.map(value => ({ title: metricTitle(value), value })) },
   { title: 'Severity', field: 'severity', values: SEVERITY_ORDER.map(value => ({ title: SEVERITY_LABEL[value], value })) },
+  { title: 'Status', field: 'status', values: Object.entries(STATUS_LABEL).map(([value, title]) => ({ title, value })) },
 ];
 
 const tableState = reactive({
@@ -132,7 +128,7 @@ const tableState = reactive({
 const matchesQuery = (row, q) => {
   if (!q) return true;
   const needle = q.toLowerCase();
-  return [row.shipId, metricTitle(row.metric), SEVERITY_LABEL[row.severity], row.openedDay, row.lastSeenDay, row.message]
+  return [row.shipId, metricTitle(row.metric), SEVERITY_LABEL[row.severity], STATUS_LABEL[row.status], row.openedDay, row.lastSeenDay, row.message]
     .some(v => String(v ?? '').toLowerCase().includes(needle));
 };
 const matchesFilters = (row, filters) => filters.every((f) => {
@@ -209,10 +205,6 @@ const openVesselDetail = async (item) => {
         <div class="text-caption text-medium-emphasis mt-1">
           {{ k.sub }}
         </div>
-        <AppDataSourceBadge
-          version="v2"
-          class="mt-2"
-        />
       </DashboardKpiCard>
     </div>
 
@@ -220,9 +212,6 @@ const openVesselDetail = async (item) => {
       :title="FleetGlossaryConstant.Title.alertsBySeverity"
       :tooltip="T.alertsBySeverity"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v2" />
-      </template>
       <UsageResultCard>
         <AppEChart
           :option="causeSeverityOption"
@@ -235,9 +224,6 @@ const openVesselDetail = async (item) => {
       :title="FleetGlossaryConstant.Title.fleetAlertsTable"
       :tooltip="T.fleetAlertsTable"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v2" />
-      </template>
       <UsageResultCard>
         <!-- enable-url-params defaults on and would sync filter/sort/page into the shared page
              query string — this table never reads them back on mount, so it would only pollute
@@ -297,6 +283,11 @@ const openVesselDetail = async (item) => {
               :text="SEVERITY_LABEL[item.severity] || item.severity"
               :color="severityColor(item.severity)"
             />
+          </template>
+          <template #item.status="{ item }">
+            <span :class="item.status === 'open' ? '' : 'text-medium-emphasis'">
+              {{ STATUS_LABEL[item.status] || item.status }}
+            </span>
           </template>
           <template #item.openedDay="{ item }">
             第 {{ item.openedDay }} 天

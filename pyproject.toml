@@ -34,7 +34,7 @@ dev = [
 addopts = ["--import-mode=importlib"]
 pythonpath = ["."]
 markers = [
-    "e2e: live end-to-end tests against a deployed AthenaToolStack (needs AWS creds; auto-skips otherwise)",
+    "e2e: live end-to-end tests against the deployed AthenaToolStack + GenBI agent runtime (needs AWS creds; auto-skips otherwise)",
 ]
 
 [tool.ruff]

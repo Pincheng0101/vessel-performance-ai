@@ -186,12 +186,18 @@ async def invoke(payload):
     if not prompt:
         yield {'error': "Missing 'prompt' in payload."}
         return
+    seen_tools: set[str] = set()
     async for event in agent.stream_async(prompt):
-        # Surface tool activity so the frontend can show progress between text.
-        tool_use = event.get('current_tool_use') if isinstance(event, dict) else None
-        if tool_use and tool_use.get('name') and event.get('start', False):
+        if not isinstance(event, dict):
+            continue
+        # Surface tool activity so the frontend can show progress between text. Strands re-emits
+        # current_tool_use on every input-delta chunk (and never alongside `start`), so announce
+        # each tool once, on the first chunk that names it.
+        tool_use = event.get('current_tool_use')
+        if tool_use and tool_use.get('name') and tool_use.get('toolUseId') not in seen_tools:
+            seen_tools.add(tool_use['toolUseId'])
             yield {'tool': tool_use['name']}
-        if isinstance(event, dict) and 'data' in event:
+        if 'data' in event:
             yield event['data']  # text delta
 
 

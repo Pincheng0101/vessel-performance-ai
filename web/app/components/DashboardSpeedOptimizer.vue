@@ -1,5 +1,5 @@
 <script setup>
-const { options, shipId, fallbackImo, selectedVessel } = await useDashboardVesselSelection();
+const { options, shipId, selectedVessel } = await useDashboardVesselSelection();
 </script>
 
 <template>
@@ -8,7 +8,6 @@ const { options, shipId, fallbackImo, selectedVessel } = await useDashboardVesse
       <DashboardSpeedOptimizerDetail
         :key="shipId"
         v-model:ship-id="shipId"
-        :fallback-imo="fallbackImo"
         :vessel="selectedVessel"
         :vessel-options="options"
       />

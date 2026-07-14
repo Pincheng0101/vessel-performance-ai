@@ -1,8 +1,12 @@
 <script setup>
-// Fleet-wide maintenance planner: a Gantt of per-vessel service windows, capex by quarter
-// (stacked by service type), and an ROI-ranked action backlog. Not vessel-scoped (unlike the
+// Fleet-wide maintenance planner: a Gantt of per-ship service windows, net saving by quarter
+// (stacked by service type), and a saving-ranked action backlog. Not vessel-scoped (unlike the
 // vessel deep-dive / speed optimizer tabs) — mirrors DashboardFleetOverview's structure (KPI
-// grid + AppTable, no vessel selector). Row click opens that vessel's deep-dive.
+// grid + AppTable, no vessel selector). Row click opens that ship's deep-dive.
+//
+// fact_maintenance_recommendation carries the *saving* of an action (net_saving_usd), not its
+// cost — so this tab answers "what will this earn back", not "what will this cost", and there is
+// no ROI ratio to compute. Non-economic actions (e.g. engine_inspection) carry no saving at all.
 import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
 
 const server = useServer();
@@ -19,26 +23,13 @@ const fmtUsdCompact = (v) => {
   if (n >= 1e3) return `$${Math.round(v / 1e3)}k`;
   return `$${Math.round(v)}`;
 };
-const fmtRoi = v => (v == null ? '–' : `${v.toFixed(1)}×`);
 
-// v2's fleet_maintenance_recommendation has no cost, plan date, or service-type window at all
-// (doc/api_v2.md §4) — the Gantt, capex chart, and ROI backlog below all need those fields, so
-// they stay v1. v2's own real recommendations (priority + due-day ETA, no cost) get their own
-// section instead, since that data does exist and is worth surfacing (see realBacklog below).
-//
 // Floors the Suspense fallback at 1s — without it, a cache-warm reload can resolve fast enough
 // that the loading illustration flashes for a single frame.
-const [fetched] = await Promise.all([
-  Promise.all([
-    server.datalake.v1FleetMaintenanceRecommendation({ lazy: false }),
-    server.datalake.v1FleetVessels({ lazy: false }),
-    server.datalake.v2FleetMaintenanceRecommendation({ lazy: false }),
-  ]),
+const [{ data: plans }] = await Promise.all([
+  server.datalake.factMaintenanceRecommendation({}, { lazy: false }),
   delay(1000),
 ]);
-const [{ data: plans }, { data: vessels }, { data: realActions }] = fetched;
-
-const nameByImo = computed(() => Object.fromEntries((vessels.value ?? []).map(v => [v.imo_number, v.vessel_name])));
 
 const ACTION_LABEL = {
   hull_cleaning: '船體清潔',
@@ -63,89 +54,70 @@ const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
 const serviceColor = t => FleetChartConstant.ServiceTypeColor[t] || FleetChartConstant.FallbackColor;
 const priorityColor = p => FleetChartConstant.SeverityColor[p] || FleetChartConstant.FallbackColor;
 
-// --- ROI-ranked backlog (one row per recommended action) ---
-// A vessel can have several rows (one per action), so `imo` alone isn't a unique row key —
+// --- Saving-ranked backlog (one row per recommended action) ---
+// A ship can have several rows (one per action), so `shipId` alone isn't a unique row key —
 // needed once the table paginates/sorts and Vue has to track row identity across re-renders.
-const backlog = computed(() => (plans.value ?? []).map((r, i) => {
-  const est = r.est_cost_usd ?? null;
-  const net = r.net_saving_usd ?? null;
-  return {
-    id: `${r.imo_number}-${r.action_type}-${r.plan_date}-${i}`,
-    imo: r.imo_number,
-    name: nameByImo.value[r.imo_number] || r.imo_number,
-    action: r.action_type,
-    priority: r.priority,
-    serviceType: r.plan_service_type,
-    planDate: r.plan_date,
-    dueDate: r.due_date,
-    est,
-    netSaving: net,
-    roi: net != null && est ? net / est : null,
-  };
-}));
+const backlog = computed(() => (plans.value ?? []).map((r, i) => ({
+  id: `${r.ship_id}-${r.action_type}-${r.plan_date}-${i}`,
+  shipId: r.ship_id,
+  action: r.action_type,
+  priority: r.priority,
+  serviceType: r.plan_service_type,
+  planDate: r.plan_date,
+  dueDay: r.due_day,
+  netSaving: r.net_saving_usd ?? null,
+  rationale: r.rationale,
+})));
 
-// --- Service windows (Gantt + capex): actions sharing (vessel, plan date, service type) merge
-// into one call — grouping the recommendation engine already uses so a single port stop isn't
-// fragmented into several bars/budget lines.
+// --- Service windows (Gantt + quarterly saving): actions sharing (ship, plan date, service type)
+// merge into one call — the batching the recommendation engine already applies, so a single port
+// stop isn't fragmented into several bars/lines.
 const windows = computed(() => {
   const groups = new Map();
   (plans.value ?? []).forEach((r) => {
     if (!r.plan_date) return;
-    const key = `${r.imo_number}|${r.plan_date}|${r.plan_service_type}`;
+    const key = `${r.ship_id}|${r.plan_date}|${r.plan_service_type}`;
     let w = groups.get(key);
     if (!w) {
       w = {
-        imo: r.imo_number,
-        name: nameByImo.value[r.imo_number] || r.imo_number,
+        shipId: r.ship_id,
         planDate: r.plan_date,
         serviceType: r.plan_service_type,
         actions: [],
-        estCost: 0,
+        netSaving: 0,
         priority: 'low',
       };
       groups.set(key, w);
     }
     w.actions.push(r.action_type);
-    w.estCost += r.est_cost_usd || 0;
+    w.netSaving += r.net_saving_usd || 0;
     if ((PRIORITY_RANK[r.priority] ?? 9) < (PRIORITY_RANK[w.priority] ?? 9)) w.priority = r.priority;
   });
   return [...groups.values()];
 });
 
 // --- KPIs ---
-const totalCapex = computed(() => backlog.value.reduce((s, r) => s + (r.est || 0), 0));
 const totalNetSaving = computed(() => backlog.value.reduce((s, r) => s + Math.max(0, r.netSaving || 0), 0));
+const highPriorityCount = computed(() => backlog.value.filter(r => r.priority === 'high').length);
 const dryDockCount = computed(() => windows.value.filter(w => w.serviceType === 'dry_dock').length);
 const nextWindowDate = computed(() => {
   const dates = windows.value.map(w => w.planDate).filter(Boolean);
   return dates.length ? dates.reduce((mn, d) => (d < mn ? d : mn)) : null;
 });
-const fleetRoi = computed(() => (totalCapex.value > 0 ? totalNetSaving.value / totalCapex.value : null));
 
 const kpis = computed(() => [
-  { label: 'Total capex', value: fmtUsdCompact(totalCapex.value), sub: 'indicative · backlog total', tooltip: T.capex, version: 'v1' },
+  { label: 'Open actions', value: `${backlog.value.length}`, sub: 'backlog total', tooltip: T.maintenanceAction },
   {
-    label: 'Net saving', value: fmtUsdCompact(totalNetSaving.value), sub: 'backlog total', tooltip: T.netSaving, color: FleetChartConstant.SemanticRamp.good, version: 'v1',
+    label: 'High priority', value: `${highPriorityCount.value}`, sub: 'need priority attention',
+    color: highPriorityCount.value > 0 ? FleetChartConstant.SemanticRamp.critical : undefined,
   },
-  { label: 'Dry-dock windows', value: `${dryDockCount.value}`, sub: 'haul-out service windows', tooltip: T.dryDockWindow, version: 'v1' },
-  { label: 'Next window', value: nextWindowDate.value || '–', sub: 'earliest plan date', tooltip: T.nextMaintenance, version: 'v1' },
   {
-    label: 'Fleet ROI', value: fmtRoi(fleetRoi.value), sub: 'net saving ÷ capex', tooltip: T.maintenanceRoi,
-    color: fleetRoi.value != null && fleetRoi.value >= 1 ? FleetChartConstant.SemanticRamp.good : undefined,
-    version: 'v1',
+    label: 'Net saving', value: fmtUsdCompact(totalNetSaving.value), sub: 'backlog total', tooltip: T.netSaving, color: FleetChartConstant.SemanticRamp.good,
   },
-  { label: 'Open actions (real fleet)', value: `${(realActions.value ?? []).length}`, sub: 'v2 open recommendations', tooltip: T.maintenanceAction, version: 'v2' },
+  { label: 'Dry-dock windows', value: `${dryDockCount.value}`, sub: 'haul-out service windows', tooltip: T.dryDockWindow },
+  { label: 'Next window', value: nextWindowDate.value || '–', sub: 'earliest plan date', tooltip: T.nextMaintenance },
 ]);
 
-// --- Real fleet action backlog (v2, no cost/ROI — priority + due-day ETA only) ---
-const realActionRows = computed(() => (realActions.value ?? []).map((r, i) => ({
-  id: `${r.ship_id}-${r.action_type}-${i}`,
-  shipId: r.ship_id,
-  action: r.action_type,
-  priority: r.priority,
-  dueDay: r.due_day,
-  rationale: r.rationale,
-})).sort((a, b) => (a.dueDay ?? Infinity) - (b.dueDay ?? Infinity)));
 const openShipDetail = async (item) => {
   if (!item?.shipId) return;
   await router.push({
@@ -165,25 +137,18 @@ const openShipDetail = async (item) => {
 // dataset has no real backend, so `server-side` is left on and the on-*-change callbacks below
 // implement a small local "fake server": filter + sort + paginate the in-memory backlog
 // ourselves and hand AppTable only the current page, exactly as a real backend response would.
-const realActionTableHeaders = [
-  { title: 'Ship', key: 'shipId', sortable: true, minWidth: 90 },
-  { title: 'Action', key: 'action', sortable: true, minWidth: 160, tooltip: T.maintenanceAction },
-  { title: 'Priority', key: 'priority', sortable: true, width: 90, minWidth: 90 },
-  { title: 'Due (ETA)', key: 'dueDay', sortable: true, minWidth: 110, tooltip: T.nextMaintenance },
-  { title: 'Rationale', key: 'rationale', sortable: false, minWidth: 220 },
-];
 const tableHeaders = [
-  { title: 'Vessel', key: 'name', sortable: true, minWidth: 150 },
+  { title: 'Ship', key: 'shipId', sortable: true, minWidth: 90 },
   { title: 'Action', key: 'action', sortable: true, minWidth: 160, tooltip: T.maintenanceAction },
   { title: 'Priority', key: 'priority', sortable: true, width: 90, minWidth: 90 },
   { title: 'Service', key: 'serviceType', sortable: true, minWidth: 110, tooltip: T.serviceType },
   { title: 'Plan date', key: 'planDate', sortable: true, minWidth: 110 },
-  { title: 'Est. cost', key: 'est', sortable: true, minWidth: 110, tooltip: T.capex },
+  { title: 'Due (ETA)', key: 'dueDay', sortable: true, minWidth: 110, tooltip: T.nextMaintenance },
   { title: 'Net saving', key: 'netSaving', sortable: true, minWidth: 110, tooltip: T.netSaving },
-  { title: 'ROI', key: 'roi', sortable: true, minWidth: 90, tooltip: T.maintenanceRoi },
+  { title: 'Rationale', key: 'rationale', sortable: false, minWidth: 220 },
 ];
 const filterOptions = [
-  { title: 'Vessel', field: 'name' },
+  { title: 'Ship', field: 'shipId' },
   { title: 'Action', field: 'action', values: Object.entries(ACTION_LABEL).map(([value, title]) => ({ title, value })) },
   { title: 'Priority', field: 'priority', values: Object.entries(PRIORITY_LABEL).map(([value, title]) => ({ title, value })) },
   { title: 'Service', field: 'serviceType', values: Object.entries(SERVICE_LABEL).map(([value, title]) => ({ title, value })) },
@@ -194,13 +159,13 @@ const tableState = reactive({
   perPage: 10,
   query: '',
   filters: [],
-  sortField: 'roi',
+  sortField: 'netSaving',
   sortOrder: 'DESC',
 });
 const matchesQuery = (row, q) => {
   if (!q) return true;
   const needle = q.toLowerCase();
-  return [row.name, row.imo, ACTION_LABEL[row.action] || row.action, PRIORITY_LABEL[row.priority], SERVICE_LABEL[row.serviceType], row.planDate]
+  return [row.shipId, ACTION_LABEL[row.action] || row.action, PRIORITY_LABEL[row.priority], SERVICE_LABEL[row.serviceType], row.planDate, row.rationale]
     .some(v => String(v ?? '').toLowerCase().includes(needle));
 };
 const matchesFilters = (row, filters) => filters.every((f) => {
@@ -250,11 +215,8 @@ const handlePerPageChange = (pp) => {
   tableState.perPage = pp;
   tableState.page = 1;
 };
-// This backlog's 9 v1 vessels have no correspondence to the v2 ship roster the vessel tab now
-// keys off of (see openShipDetail above for the v2 real-fleet backlog's own row click), so rows
-// here no longer navigate anywhere.
 
-// --- Maintenance Gantt (swim lanes by vessel) ---
+// --- Maintenance Gantt (swim lanes by ship) ---
 // Same custom-series technique as the vessel tab's anomaly-episode timeline: a silent
 // alternating-band series for lane chrome, plus a bar series with a renderItem that draws a
 // floating [start, end] rect per window (a plain 'bar' series can't float on a time axis).
@@ -314,13 +276,13 @@ const maintenanceGanttOption = computed(() => {
   });
 
   // Lane order: earliest window first, so the chart reads top-to-bottom like a schedule.
-  const firstByVessel = new Map();
+  const firstByShip = new Map();
   list.forEach((w) => {
-    const cur = firstByVessel.get(w.name);
-    if (cur == null || w.startTs < cur) firstByVessel.set(w.name, w.startTs);
+    const cur = firstByShip.get(w.shipId);
+    if (cur == null || w.startTs < cur) firstByShip.set(w.shipId, w.startTs);
   });
-  const lanes = [...firstByVessel.keys()].sort((a, b) => firstByVessel.get(a) - firstByVessel.get(b));
-  const laneIndex = new Map(lanes.map((name, i) => [name, i]));
+  const lanes = [...firstByShip.keys()].sort((a, b) => firstByShip.get(a) - firstByShip.get(b));
+  const laneIndex = new Map(lanes.map((shipId, i) => [shipId, i]));
 
   const minTs = Math.min(...list.map(w => w.startTs));
   const maxTs = Math.max(...list.map(w => w.endTs));
@@ -332,9 +294,7 @@ const maintenanceGanttOption = computed(() => {
   const serviceTypes = SERVICE_ORDER.filter(t => list.some(w => w.serviceType === t));
 
   return {
-    // left is wide enough for the longest vessel name ("YM EXCELLENCE") — 104 clipped its
-    // leading character.
-    grid: { left: 132, right: 20, top: 40, bottom: 40 },
+    grid: { left: 72, right: 20, top: 40, bottom: 40 },
     legend: {
       top: 8, left: 'center', itemGap: 16, itemWidth: 18, itemHeight: 9,
       textStyle: { fontSize: 11 },
@@ -345,7 +305,7 @@ const maintenanceGanttOption = computed(() => {
       formatter: (p) => {
         const w = p.data.row;
         const acts = (w.actions || []).map(a => ACTION_LABEL[a] || a).join('、');
-        return `${w.name} · ${w.planDate}<br/>${SERVICE_LABEL[w.serviceType] || w.serviceType} · 優先度${PRIORITY_LABEL[w.priority] || w.priority}<br/>${acts}<br/>指示性資本支出 ${fmtUsd(w.estCost)}`;
+        return `${w.shipId} · ${w.planDate}<br/>${SERVICE_LABEL[w.serviceType] || w.serviceType} · 優先度${PRIORITY_LABEL[w.priority] || w.priority}<br/>${acts}<br/>淨節省 ${fmtUsd(w.netSaving)}`;
       },
     },
     xAxis: { type: 'time', min: xMin, max: xMax },
@@ -366,7 +326,7 @@ const maintenanceGanttOption = computed(() => {
         data: list
           .filter(w => w.serviceType === type)
           .map(w => ({
-            value: [laneIndex.get(w.name), w.startTs, w.endTs],
+            value: [laneIndex.get(w.shipId), w.startTs, w.endTs],
             itemStyle: { opacity: styleForPriority(w.priority).opacity, borderColor: styleForPriority(w.priority).stroke, borderWidth: styleForPriority(w.priority).strokeWidth },
             row: w,
           })),
@@ -375,24 +335,26 @@ const maintenanceGanttOption = computed(() => {
   };
 });
 
-// --- Capex by quarter (stacked bar, dry_dock / in_water) ---
+// --- Net saving by quarter (stacked bar, dry_dock / in_water) ---
 const quarterOf = (planDate) => {
   const [y, m] = planDate.split('-');
   return `${y}-Q${Math.floor((Number(m) - 1) / 3) + 1}`;
 };
-const capexByQuarter = computed(() => {
+const savingByQuarter = computed(() => {
   const byQ = new Map();
   (plans.value ?? []).forEach((r) => {
     if (!r.plan_date) return;
     const q = quarterOf(r.plan_date);
     const rec = byQ.get(q) ?? { quarter: q, dry_dock: 0, in_water: 0 };
-    rec[r.plan_service_type] = (rec[r.plan_service_type] || 0) + (r.est_cost_usd || 0);
+    // Non-economic actions (engine_inspection) have no net_saving_usd — they still occupy a
+    // service window, they just add nothing to the bar.
+    rec[r.plan_service_type] = (rec[r.plan_service_type] || 0) + (r.net_saving_usd || 0);
     byQ.set(q, rec);
   });
   return [...byQ.values()].sort((a, b) => a.quarter.localeCompare(b.quarter));
 });
-const capexCashflowOption = computed(() => {
-  const rows = capexByQuarter.value;
+const savingByQuarterOption = computed(() => {
+  const rows = savingByQuarter.value;
   if (!rows.length) return {};
   return {
     grid: { left: 64, right: 20, top: 40, bottom: 40 },
@@ -414,8 +376,8 @@ const capexCashflowOption = computed(() => {
     xAxis: { type: 'category', data: rows.map(r => r.quarter) },
     yAxis: { type: 'value', name: 'USD', nameGap: 14, axisLabel: { formatter: fmtUsdCompact } },
     series: [
-      { name: '乾塢', type: 'bar', stack: 'capex', itemStyle: { color: serviceColor('dry_dock') }, data: rows.map(r => Math.round(r.dry_dock)) },
-      { name: '水下', type: 'bar', stack: 'capex', itemStyle: { color: serviceColor('in_water') }, data: rows.map(r => Math.round(r.in_water)) },
+      { name: '乾塢', type: 'bar', stack: 'saving', itemStyle: { color: serviceColor('dry_dock') }, data: rows.map(r => Math.round(r.dry_dock)) },
+      { name: '水下', type: 'bar', stack: 'saving', itemStyle: { color: serviceColor('in_water') }, data: rows.map(r => Math.round(r.in_water)) },
     ],
   };
 });
@@ -435,10 +397,6 @@ const capexCashflowOption = computed(() => {
         <div class="text-caption text-medium-emphasis mt-1">
           {{ k.sub }}
         </div>
-        <AppDataSourceBadge
-          :version="k.version"
-          class="mt-2"
-        />
       </DashboardKpiCard>
     </div>
 
@@ -446,9 +404,6 @@ const capexCashflowOption = computed(() => {
       :title="FleetGlossaryConstant.Title.maintenanceGantt"
       :tooltip="T.maintenanceGantt"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v1" />
-      </template>
       <UsageResultCard>
         <AppEChart
           :option="maintenanceGanttOption"
@@ -458,60 +413,14 @@ const capexCashflowOption = computed(() => {
     </UsageResultCardFrame>
 
     <UsageResultCardFrame
-      :title="FleetGlossaryConstant.Title.capexCashflow"
-      :tooltip="T.capexCashflow"
+      :title="FleetGlossaryConstant.Title.savingByQuarter"
+      :tooltip="T.savingByQuarter"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v1" />
-      </template>
       <UsageResultCard>
         <AppEChart
-          :option="capexCashflowOption"
+          :option="savingByQuarterOption"
           :height="260"
         />
-      </UsageResultCard>
-    </UsageResultCardFrame>
-
-    <UsageResultCardFrame
-      title="真實船隊待辦事項"
-      tooltip="以真實船舶量測資料計算的維修觸發建議（優先度、預計觸發天數），無成本／ROI 資訊。"
-    >
-      <template #actions>
-        <AppDataSourceBadge version="v2" />
-      </template>
-      <UsageResultCard>
-        <AppTable
-          :headers="realActionTableHeaders"
-          :items="realActionRows"
-          item-value="id"
-          :server-side="false"
-          :enable-search="false"
-          :show-pagination="false"
-          :on-row-click="openShipDetail"
-          is-row-selectable
-          bordered
-        >
-          <template #item.action="{ item }">
-            <div class="d-flex align-center ga-2">
-              <v-icon
-                :icon="actionIcon(item.action)"
-                size="18"
-                class="text-medium-emphasis"
-              />
-              <span>{{ ACTION_LABEL[item.action] || item.action }}</span>
-            </div>
-          </template>
-          <template #item.priority="{ item }">
-            <AppChip
-              variant="outlined"
-              :text="PRIORITY_LABEL[item.priority] || item.priority"
-              :color="priorityColor(item.priority)"
-            />
-          </template>
-          <template #item.dueDay="{ item }">
-            {{ item.dueDay == null ? '–' : `第 ${item.dueDay} 天` }}
-          </template>
-        </AppTable>
       </UsageResultCard>
     </UsageResultCardFrame>
 
@@ -519,9 +428,6 @@ const capexCashflowOption = computed(() => {
       :title="FleetGlossaryConstant.Title.maintenanceBacklog"
       :tooltip="T.maintenanceBacklog"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v1" />
-      </template>
       <UsageResultCard>
         <!-- enable-url-params defaults on and would sync filter/sort/page into the shared page
              query string — this table never reads them back on mount, so it would only pollute
@@ -537,10 +443,12 @@ const capexCashflowOption = computed(() => {
           :has-next-page="hasNextPage"
           :sort-field="tableState.sortField"
           :sort-order="tableState.sortOrder"
+          :on-row-click="openShipDetail"
           :on-filters-change="handleFiltersChange"
           :on-sort-by-change="handleSortByChange"
           :on-page-change="handlePageChange"
           :on-per-page-change="handlePerPageChange"
+          is-row-selectable
           bordered
         >
           <template
@@ -554,9 +462,8 @@ const capexCashflowOption = computed(() => {
               :tooltip="h.tooltip"
             />
           </template>
-          <template #item.name="{ item }">
-            <span class="font-weight-medium">{{ item.name }}</span>
-            <span class="text-caption text-medium-emphasis ml-1">{{ item.imo }}</span>
+          <template #item.shipId="{ item }">
+            <span class="font-weight-medium">{{ item.shipId }}</span>
           </template>
           <template #item.action="{ item }">
             <div class="d-flex align-center ga-2">
@@ -587,17 +494,12 @@ const capexCashflowOption = computed(() => {
               class="text-medium-emphasis"
             >–</span>
           </template>
-          <template #item.est="{ item }">
-            {{ fmtUsd(item.est) }}
+          <template #item.dueDay="{ item }">
+            {{ item.dueDay == null ? '–' : `第 ${item.dueDay} 天` }}
           </template>
           <template #item.netSaving="{ item }">
             <span :class="item.netSaving > 0 ? 'text-success font-weight-medium' : 'text-medium-emphasis'">
               {{ fmtUsd(item.netSaving) }}
-            </span>
-          </template>
-          <template #item.roi="{ item }">
-            <span :class="item.roi >= 1 ? 'text-success font-weight-bold' : 'text-medium-emphasis'">
-              {{ fmtRoi(item.roi) }}
             </span>
           </template>
         </AppTable>

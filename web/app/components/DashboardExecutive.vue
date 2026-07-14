@@ -1,7 +1,8 @@
 <script setup>
 // Executive scorecard: fleet-wide trend tiles (with sparklines) + CII rating migration +
-// savings captured + fleet speed-loss trend. Consumes the full multi-year fleet_overview
-// series (all-fleet rollup). Self-contained so it only loads when its tab is opened.
+// savings captured + fleet speed-loss trend. Consumes the full multi-year agg_fleet_daily
+// series (the 'ALL' rollup — every KPI on this tab is already aggregated there, so no per-ship
+// fan-out is needed). Self-contained so it only loads when its tab is opened.
 import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
 
 const server = useServer();
@@ -15,60 +16,31 @@ const fmtUsdCompact = (v) => {
   return `$${Math.round(v)}`;
 };
 
-// v2 has no cost, CII, or fleet-wide alert-trend data at all (see doc/api_v2.md §4), so the
-// excess-cost/CII/active-alerts KPIs, the CII migration chart, and savings captured all stay
-// on v1. Fleet-wide avg speed loss and its trend line ARE derivable from v2 (aggregated across
-// all ships' vessel_speed_loss — see speedLossDaily below), so those go v2.
+// agg_fleet_daily already carries every fleet-wide figure this tab shows (speed loss, excess
+// cost, alert count, CII counts), one row per day. fact_recommendation is one row per ship
+// (15 rows, no ship_id filter) — the savings-potential total.
 //
 // Floors the Suspense fallback at 1s — without it, a cache-warm reload can resolve fast enough
 // that the loading illustration flashes for a single frame.
 const [fetched] = await Promise.all([
   Promise.all([
-    server.datalake.v1FleetOverview({}, { lazy: false }),
-    server.datalake.v1FleetVessels({ lazy: false }),
-    server.datalake.v1FleetAlerts({}, { lazy: false }),
-    server.datalake.v2FleetVessels({ lazy: false }),
+    server.datalake.aggFleetDaily({}, { lazy: false }),
+    server.datalake.factRecommendation({ lazy: false }),
   ]),
   delay(1000),
 ]);
-const [{ data: overviewRows }, { data: vessels }, { data: alerts }, { data: shipsV2 }] = fetched;
+const [{ data: overviewRows }, { data: recommendations }] = fetched;
 const latestDate = computed(() => overviewRows.value?.at(-1)?.report_date ?? '');
-const recommendations = await Promise.all(
-  (vessels.value ?? []).map(v => server.datalake.v1VesselRecommendation({ imoNumber: v.imo_number }, { lazy: false })),
-);
 
-// Fleet-wide speed-loss trend (v2): average each relative day's speed_loss_pct across every
-// ship with a valid reading that day. Per-ship day 0 is a different real calendar date, so
-// this is an approximate overview, not a calendar-aligned trend — the same caveat
-// doc/api_v2.md gives fleet_overview's own noon_utc axis.
-const speedLossByShip = await Promise.all(
-  (shipsV2.value ?? []).map(v => server.datalake.v2VesselSpeedLoss({ shipId: v.ship_id }, { lazy: false })),
-);
-const speedLossDaily = computed(() => {
-  const byDay = new Map();
-  speedLossByShip.forEach(({ data }) => {
-    (data.value ?? []).forEach((r) => {
-      if (!r.valid_flag || r.speed_loss_pct == null) return;
-      if (!byDay.has(r.noon_utc)) byDay.set(r.noon_utc, []);
-      byDay.get(r.noon_utc).push(r.speed_loss_pct);
-    });
-  });
-  return [...byDay.entries()]
-    .map(([noonUtc, vals]) => ({ noon_utc: noonUtc, avg_speed_loss_pct: vals.reduce((s, v) => s + v, 0) / vals.length }))
-    .sort((a, b) => a.noon_utc - b.noon_utc);
-});
-
-const isAlertActiveOn = (alert, date) => (
-  alert.status === 'open'
-  && alert.opened_date <= date
-  && alert.last_seen_date >= date
-);
-const activeAlertCountOn = date => (alerts.value ?? []).filter(alert => isAlertActiveOn(alert, date)).length;
+// Fleet speed-loss trend: avg_speed_loss_pct is the mean of that day's *valid* (ISO 19030-gated)
+// per-ship readings, so it already excludes weather-spoiled days. The noon_utc axis is a relative
+// day — each ship's day 0 is a different real calendar date — so this is an approximate fleet
+// overview, not a calendar-aligned trend.
+const speedLossDaily = computed(() => (overviewRows.value ?? []).filter(r => r.avg_speed_loss_pct != null));
 
 // Daily rows augmented with fleet CII risk (share of vessels rated D or E).
 const series = computed(() => (overviewRows.value ?? []).map(r => ({
   ...r,
-  active_alerts: activeAlertCountOn(r.report_date),
   cii_risk_pct: r.n_vessels ? ((r.cii_count_d || 0) + (r.cii_count_e || 0)) / r.n_vessels * 100 : null,
 })));
 // One row per month — light enough for sparklines and the migration area.
@@ -90,22 +62,12 @@ const deltaTextClass = d => (d == null || d === 0 ? 'text-medium-emphasis' : d >
 
 // Sparklines share the muted speed-loss color, matching the fleet speed-loss trend line.
 const SPEED_LOSS_COLOR = FleetChartConstant.SpeedLossColor;
-// Excess cost / active alerts / CII risk have no v2 source at all (no cost or CII data, and
-// per-ship relative days can't be aligned into one fleet-wide daily trend) — v1 only.
-const METRICS_V1 = [
-  { key: 'total_excess_cost_usd', label: 'Excess fuel cost', fmt: fmtUsdCompact, tooltip: FleetGlossaryConstant.Term.excessFuelCost, version: 'v1' },
-  { key: 'active_alerts', label: 'Active alerts', fmt: fmtInt, tooltip: FleetGlossaryConstant.Term.activeAlerts, version: 'v1' },
-  { key: 'cii_risk_pct', label: 'CII risk (D/E share)', fmt: fmtPct, tooltip: FleetGlossaryConstant.Term.ciiRisk, version: 'v1' },
+const METRICS = [
+  { key: 'avg_speed_loss_pct', label: 'Avg speed loss', fmt: fmtPct, tooltip: FleetGlossaryConstant.Term.avgSpeedLoss },
+  { key: 'total_excess_cost_usd', label: 'Excess fuel cost', fmt: fmtUsdCompact, tooltip: FleetGlossaryConstant.Term.excessFuelCost },
+  { key: 'n_alerts', label: 'Active alerts', fmt: fmtInt, tooltip: FleetGlossaryConstant.Term.activeAlerts },
+  { key: 'cii_risk_pct', label: 'CII risk (D/E share)', fmt: fmtPct, tooltip: FleetGlossaryConstant.Term.ciiRisk },
 ];
-const SPEED_LOSS_METRIC_V2 = {
-  key: 'avg_speed_loss_pct', label: 'Avg speed loss', fmt: fmtPct, tooltip: FleetGlossaryConstant.Term.avgSpeedLoss, version: 'v2',
-};
-
-const downsample = (rows, targetPoints) => {
-  if (rows.length <= targetPoints) return rows;
-  const stride = Math.ceil(rows.length / targetPoints);
-  return rows.filter((_, i) => i % stride === 0);
-};
 
 const buildTile = (dailyRows, sparkRows, m) => {
   const vals = dailyRows.map(r => r[m.key]).filter(v => v != null);
@@ -136,10 +98,7 @@ const buildTile = (dailyRows, sparkRows, m) => {
   };
 };
 
-const tiles = computed(() => [
-  buildTile(speedLossDaily.value, downsample(speedLossDaily.value, 60), SPEED_LOSS_METRIC_V2),
-  ...METRICS_V1.map(m => buildTile(series.value, monthly.value, m)),
-]);
+const tiles = computed(() => METRICS.map(m => buildTile(series.value, monthly.value, m)));
 const fmtDeltaMag = m => (m.delta == null ? '–' : m.fmt(Math.abs(m.delta)));
 
 // CII rating migration — monthly stacked area (annual rating broadcast daily reads as
@@ -164,7 +123,7 @@ const ciiTrendOption = computed(() => ({
   })),
 }));
 
-// Fleet speed-loss trend — daily fleet mean over relative day (v2, see speedLossDaily above).
+// Fleet speed-loss trend — daily fleet mean over relative day (see speedLossDaily above).
 const speedLossTrendOption = computed(() => ({
   grid: { left: 44, right: 16, top: 16, bottom: 28 },
   tooltip: { trigger: 'axis', valueFormatter: v => (v == null ? '–' : `${(+v).toFixed(1)}%`) },
@@ -184,7 +143,7 @@ const speedLossTrendOption = computed(() => ({
 
 // Savings captured: realized (peak-to-latest drop of excess cost) vs potential (Σ recommendations).
 const potential = computed(() =>
-  recommendations.reduce((sum, rec) => sum + Math.max(0, rec.data.value?.[0]?.net_saving_usd ?? 0), 0),
+  (recommendations.value ?? []).reduce((sum, rec) => sum + Math.max(0, rec.net_saving_usd ?? 0), 0),
 );
 const realized = computed(() => {
   const vals = (overviewRows.value ?? []).map(r => r.total_excess_cost_usd).filter(v => v != null);
@@ -226,10 +185,6 @@ const capturedPct = computed(() => (potential.value > 0 ? realized.value / poten
           :bordered="false"
           class="mt-2"
         />
-        <AppDataSourceBadge
-          :version="m.version"
-          class="mt-2"
-        />
       </DashboardKpiCard>
     </div>
 
@@ -238,9 +193,6 @@ const capturedPct = computed(() => (potential.value > 0 ? realized.value / poten
         :title="FleetGlossaryConstant.Title.ciiTrend"
         :tooltip="FleetGlossaryConstant.Term.cii"
       >
-        <template #actions>
-          <AppDataSourceBadge version="v1" />
-        </template>
         <UsageResultCard>
           <AppEChart
             :option="ciiTrendOption"
@@ -253,9 +205,6 @@ const capturedPct = computed(() => (potential.value > 0 ? realized.value / poten
         :title="FleetGlossaryConstant.Title.savingsCaptured"
         :tooltip="FleetGlossaryConstant.Term.savingsPotential"
       >
-        <template #actions>
-          <AppDataSourceBadge version="v1" />
-        </template>
         <UsageResultCard>
           <div class="pa-2 d-flex flex-column ga-3">
             <div class="d-flex align-baseline ga-2">
@@ -299,9 +248,6 @@ const capturedPct = computed(() => (potential.value > 0 ? realized.value / poten
       :title="FleetGlossaryConstant.Title.fleetSpeedLossTrend"
       :tooltip="FleetGlossaryConstant.Term.speedLoss"
     >
-      <template #actions>
-        <AppDataSourceBadge version="v2" />
-      </template>
       <UsageResultCard>
         <AppEChart
           :option="speedLossTrendOption"
