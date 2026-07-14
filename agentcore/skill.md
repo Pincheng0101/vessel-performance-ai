@@ -71,8 +71,13 @@ Each one of these is a *wrong answer*, not a style nit.
    double-counts the rollup against the fleets it already contains.
 
 2. **`fact_performance_daily.valid_flag` is the ISO 19030 gate** (≥22 h full speed, Beaufort ≤ 4,
-   deep water, steady load). Any speed-loss / hull-condition / fouling-trend work **must filter
-   `valid_flag`** — without it you are plotting weather, not hull.
+   deep water, measured displacement, plausible Admiralty coefficient). Any speed-loss /
+   hull-condition / fouling-trend work **must filter `valid_flag`** — without it you are plotting
+   weather, not hull. It drops **77.8 %** of the days (4,657 valid of 20,938).
+   **`reject_reason`** names the gate that dropped each excluded day, so "why was this day
+   excluded?" is answerable — it is null exactly when `valid_flag` is true. There is **no
+   steady-load filter** and **no rudder filter**: the dataset has no rudder column, and a 24 h
+   mean cannot show a telegraph change.
 
 3. **`masked_flag`** marks the hackathon-masked rows (S21–S23 only): their fuel-consumption value
    was blanked. **Exclude them from consumption statistics** (`WHERE NOT masked_flag`).
@@ -107,6 +112,29 @@ Each one of these is a *wrong answer*, not a style nit.
    Beaufort ≤ 4. Alerts are raised from anomalies (plus the biofouling model), so a cause that never
    fires on an anomaly can never reach an alert either. It is in both enums; it appears in neither
    table. Don't offer it as a finding.
+
+9. **This is an ISO 19030-*3* alternative method, and four claims about it are false.** The source
+   is daily noon reports, so Part 2's default method (≥ 0.1 Hz sampling, 10-min block averaging) is
+   *physically impossible* here. Part 3 permits the alternative — but only if it is declared. Full
+   statement in `doc/iso-19030-conformance.md`. **Never tell a user:**
+
+   - *"the speed loss is wind/wave-corrected"* — **it is not.** The ISO 15016 correction is
+     computed, scored and **rejected** (`correction_applied = false`); `power_corrected_kw` is the
+     measured power unchanged. The **Beaufort ≤ 4 gate** does the weather work.
+   - *"positive speed loss follows ISO's sign convention"* — **it is the negation of it.** Here
+     **positive = degradation**; ISO 19030-2 signs degradation *negative*.
+   - *"speed loss / `excess_cost_fouling_usd` is the hull"* — it is the **combined hull + propeller**
+     effect. **ISO 19030 provides no method to separate them.** Any hull-vs-propeller split is an
+     **inference layer** and must be labelled as one, with a confidence level. Never present it as a
+     direct ISO output — it ends up in owner/charterer disputes.
+   - *"a step recovery after a cleaning proves the cleaning worked"* — **recalibrating or replacing
+     the speed log produces the same step**, and the data model has **no sensor-event entity** to
+     rule it out. Since the whole metric is STW-based, this is the dominant uncertainty. Flag it.
+
+   Also honest-but-easy-to-miss: **~half of all clean-hull days sit at a *negative* speed loss by
+   construction** (the curve takes a median intercept), and **S6 / S8 / S21 / S22 borrow a pooled
+   curve scale** (`n_fit_points < 8`), so their speed-loss *levels* carry a constant offset — their
+   *trends* are still sound, their absolute values are not.
 
 ---
 
@@ -336,10 +364,12 @@ gate; **`valid_flag` says which may be fitted on** (trap 2).
 | `sea_height` | double | m |
 | `resistance_wind_kn` | double | ISO 15016: Blendermann wind added resistance (kN) |
 | `resistance_wave_kn` | double | ISO 15016: STAWAVE-1 wave added resistance (kN) |
-| `power_corrected_kw` | double | ISO 15016: `horse_power` minus wind/wave power |
-| `speed_corrected_kn` | double | ISO 15016: STW (current is already excluded) |
-| `v_expected_kn` | double | ISO 19030: clean-hull speed at the corrected power |
-| `speed_loss_pct` | double | **ISO 19030: `(v_expected − STW) / v_expected * 100`** — the headline hull metric |
+| `power_corrected_kw` | double | **= `horse_power`, UNCHANGED. NOT wind-corrected** — the ISO 15016 correction is computed, scored and **rejected** on this dataset (the no-correction control wins: 4.432 pp vs 4.878 / 4.940). The Beaufort ≤ 4 gate, not a correction term, is what excludes weather. The name is a retained misnomer. |
+| `correction_applied` | boolean | **`false`** on this dataset — the honest answer to "is this wind-corrected?" |
+| `correction_convention` | string | the arm chosen empirically: `none` here (vs `bow_relative` / `true_compass`) |
+| `speed_corrected_kn` | double | = STW, unchanged (current is already excluded) |
+| `v_expected_kn` | double | ISO 19030: clean-hull speed at that power |
+| `speed_loss_pct` | double | **ISO 19030: `(v_expected − STW) / v_expected * 100`.** **POSITIVE = speed lost = degradation** — the **negation** of ISO 19030-2's convention (where degradation is negative); a declared deviation under ISO 19030-3. It is the **combined hull + propeller** effect: ISO offers **no method to separate them**, so this is *not* a hull-only number. |
 | `slip_apparent` | double | `(V_th − SOG) / V_th` |
 | `slip_real` | double | `(V_th − STW) / V_th` |
 | `sfoc_g_kwh` | double | source SFOC (clipped) |
@@ -365,7 +395,8 @@ gate; **`valid_flag` says which may be fitted on** (trap 2).
 | `anomaly_flag` | boolean | filled from `fact_anomaly` |
 | `anomaly_cause` | string | filled from `fact_anomaly` |
 | `anomaly_severity` | string | filled from `fact_anomaly` |
-| `valid_flag` | boolean | **the ISO 19030 gate** (≥22 h full speed, Bft ≤ 4, deep water, …) |
+| `valid_flag` | boolean | **the ISO 19030 gate** (≥22 h full speed, Bft ≤ 4, deep water, …). Drops 77.8 % of days. |
+| `reject_reason` | string | **why the gate dropped this day**; null iff `valid_flag`. One of `masked` / `missing_propulsion` / `displacement_backfilled` / `admiralty` / `not_full_speed` / `beaufort` / `low_speed` / `displacement_band` / `shallow_water`. This is the ISO 19030 drill-down — use it to answer "why was this day excluded?" |
 | `masked_flag` | boolean | S21–S23 masked window — exclude from consumption stats |
 
 ### `fact_performance_indicator`
@@ -380,18 +411,34 @@ have no `DDP` rows.
 |---|---|---|
 | `ship_id` | string | — |
 | `indicator` | string | `ISP` / `DDP` / `ME` / `MT` |
-| `period_start_day` | int | ISP: cycle start |
-| `period_end_day` | int | ISP: cycle end; DDP: `event_day` + 45 |
+| `period_start_day` | int | ISP, MT: cycle start |
+| `period_end_day` | int | ISP, MT: cycle end; DDP: `event_day` + 45 |
 | `event_type` | string | ME, DDP: the event the row is keyed to |
 | `event_day` | int | ME, DDP, MT: event / crossing day |
 | `value` | double | **per indicator** — see the enum section |
 | `reference_value` | double | **per indicator** — see the enum section |
+| `n_points` | int | **sample count behind `value`.** A DDP on 3 points is not the same claim as one on 90 — always report it alongside the number. |
+| `n_reference_points` | int | sample count behind `reference_value`; null for MT |
 | `detail` | string | free text |
+
+**`MT` is emitted per hull-fouling cycle**, so a ship that crosses the 8 % trigger again after a
+cleaning triggers again — **a ship can carry several `MT` rows** (26 rows across the fleet; S12
+has 3). Do not assume one per ship. ISO's own caveat: MT has the shortest evaluation period and
+is therefore **the noisiest of the four indicators** — do not present it as more certain than it is.
 
 ### `fact_uwi`
 
 The `uwi` projection + the calendar + the real 14-day trailing speed loss measured at the
-inspection. This is where you correlate a **real grade** against a **real** ISO 19030 number.
+inspection.
+
+> ⚠️ **CIRCULARITY — do not correlate `hull_fouling_rating` against `speed_loss_pct`.**
+> `hull_fouling_rating` is **not an independent observation**: it is *synthesized from* the
+> speed loss (`hull_fouling_rating ≈ speed_loss × k + jitter`, see
+> `ym_datalake/etl/raw/uwi.py`). Regressing one on the other recovers `k` and the jitter —
+> it is speed loss correlated with **itself**, and it will look like a stunningly strong
+> result. The only genuinely measured columns on this table are `hull_fouling_type`,
+> `propeller_condition`, `hull_coating_condition` and `cavitation_found`; the numeric
+> ratings/percentages are all estimated. Say so if you use them.
 
 **Grain:** inspection · **Rows:** 53 · **Columns:** 15
 
@@ -831,13 +878,20 @@ LIMIT  100
 
 ```sql
 -- Fouling growth: how speed loss climbs with days since the last hull cleaning.
-SELECT days_since_cleaning / 30 AS months_since_cleaning,
-       ROUND(AVG(speed_loss_pct), 2) AS avg_speed_loss_pct,
-       COUNT(*) AS n_days
+--
+-- NOTE the cycle_start column. Bucketing by days_since_cleaning ALONE pools every cleaning
+-- cycle the ship has ever had into one curve — cycles of different length, and (because the
+-- reference curve's median-intercept fit gives each cycle its own baseline) different starting
+-- levels. That average is a blend of unlike things: a long fouled cycle and a short clean one
+-- land in the same bucket. Keep the cycles separate, then compare them.
+SELECT noon_utc - days_since_cleaning        AS cycle_start,
+       days_since_cleaning / 30              AS months_since_cleaning,
+       ROUND(AVG(speed_loss_pct), 2)         AS avg_speed_loss_pct,
+       COUNT(*)                              AS n_days
 FROM   fact_performance_daily
 WHERE  ship_id = 'S4' AND valid_flag AND speed_loss_pct IS NOT NULL
-GROUP  BY 1
-ORDER  BY 1
+GROUP  BY 1, 2
+ORDER  BY 1, 2
 LIMIT  100
 ```
 

@@ -376,6 +376,9 @@ have five things done.
 > `T*`, `net_saving_usd` and the propeller/coating thresholds are all **estimated** —
 > `T*` is USD-derived, and the roughness it keys off is synthesized.
 
+Full derivation, cost constants and limits:
+[`doc/maintenance-optimization.md`](maintenance-optimization.md).
+
 ### `trends.py` — why Theil-Sen
 
 Ordinary least squares is the wrong tool here: one sensor spike drags the slope, and this

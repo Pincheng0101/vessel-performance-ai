@@ -435,6 +435,7 @@ Start at the top; each doc answers one question.
 | [`doc/dataset.md`](doc/dataset.md) | **What is in `dataset/`?** The three source files — grain, counts, fill rates, and the five traps that will corrupt a result if you miss them. |
 | [`doc/synthetic-dataset.md`](doc/synthetic-dataset.md) | **What did we make up, and how?** Every estimated column, both RNG call sites, and how to reproduce them. |
 | [`doc/curated-dataset.md`](doc/curated-dataset.md) | **What does the ETL compute?** The DAG, a section per module, and *why* each non-obvious call was made. |
+| [`doc/maintenance-optimization.md`](doc/maintenance-optimization.md) | **When does a ship get serviced, and why that date?** The hull-cleaning cost model, the five actions, and how they batch into windows. |
 | [`doc/schema.md`](doc/schema.md) | **What are the 20 tables?** Full column dictionary, provenance tags, enums, worked Athena queries. |
 | [`doc/vessel.md`](doc/vessel.md) | How `dataset/vessel.jsonl` was reverse-engineered from `vt_fd.csv`, column by column. |
 | [`doc/vessel_particulars.md`](doc/vessel_particulars.md) | The hull-particulars inference working note (Chinese). |

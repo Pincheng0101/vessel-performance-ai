@@ -239,9 +239,9 @@ Every mutation (dedupe, outlier clipping, displacement backfill) and every deriv
 
 ### `fact_performance_daily`
 
-The analytical spine. Every other curated table reads it. One row per day the ship reported, including days that fail the ISO gate; `valid_flag` says which may be fitted on.
+The analytical spine. Every other curated table reads it. One row per day the ship reported, including days that fail the ISO gate; `valid_flag` says which may be fitted on, and `reject_reason` says why the rest were dropped. The gate keeps **4,657 of 20,938 days (22.2 %)** — see [`iso-19030-conformance.md`](iso-19030-conformance.md).
 
-**Grain:** ship × day — **unique** · **Rows:** 20,938 · **Columns:** 60
+**Grain:** ship × day — **unique** · **Rows:** 20,938 · **Columns:** 63
 
 | # | column | type | provenance | unit / notes |
 |---:|---|---|---|---|
@@ -274,55 +274,60 @@ The analytical spine. Every other curated table reads it. One row per day the sh
 | 27 | `sea_height` | double | measured | m |
 | 28 | `resistance_wind_kn` | double | derived | ISO 15016: Blendermann wind added resistance (kN) |
 | 29 | `resistance_wave_kn` | double | derived | ISO 15016: STAWAVE-1 wave added resistance (kN) |
-| 30 | `power_corrected_kw` | double | derived | ISO 15016: horse_power - wind/wave power |
-| 31 | `speed_corrected_kn` | double | derived | ISO 15016: STW (current is already excluded) |
-| 32 | `v_expected_kn` | double | derived | ISO 19030: clean-hull speed at the corrected power |
-| 33 | `speed_loss_pct` | double | derived | ISO 19030: (v_expected - STW) / v_expected * 100 |
-| 34 | `slip_apparent` | double | derived | (V_th - SOG) / V_th |
-| 35 | `slip_real` | double | derived | (V_th - STW) / V_th |
-| 36 | `sfoc_g_kwh` | double | measured | source SFOC (clipped) |
-| 37 | `admiralty_coef` | double | derived | disp^(2/3) * STW^3 / power |
-| 38 | `eeoi` | double | derived | gCO2 / t.nm; null on ballast / zero-cargo days |
-| 39 | `fuel_type` | string | measured | the day's ME fuel (from the me_fullspeed_consump_* columns) |
-| 40 | `total_foc_mt` | double | measured | total_consump |
-| 41 | `me_foc_mt` | double | measured | me_consumption |
-| 42 | `co2_mt` | double | derived | total_foc_mt * carbon factor |
-| 43 | `excess_foc_mt` | double | derived | fuel wasted to fouling: me_foc * [1 - (1-s)^n] |
-| 44 | `excess_cost_usd` | double | estimated (USD) | excess_foc * fuel price |
-| 45 | `cum_excess_cost_usd` | double | estimated (USD) | running sum within the fouling cycle |
-| 46 | `excess_cost_fouling_usd` | double | estimated (USD) | = excess_cost_usd |
-| 47 | `excess_cost_weather_usd` | double | estimated (USD) | wind+wave channel |
-| 48 | `excess_cost_operational_usd` | double | estimated (USD) | off-design engine-load channel |
-| 49 | `cii_aer` | double | derived | annual AER attained (gCO2/dwt.nm), broadcast onto each day |
-| 50 | `cii_rating_aer` | string | derived | A-E vs the base reference line |
-| 51 | `cii_imo` | double | derived | annual IMO attained (= AER for container ships) |
-| 52 | `cii_rating_imo` | string | derived | A-E vs the year's reduced required line |
-| 53 | `days_since_cleaning` | int | derived | resets on UWC / DD |
-| 54 | `days_since_polish` | int | derived | resets on PP / DD |
-| 55 | `days_since_dry_dock` | int | derived | resets on DD |
-| 56 | `anomaly_flag` | boolean | derived | filled from fact_anomaly |
-| 57 | `anomaly_cause` | string | derived | filled from fact_anomaly |
-| 58 | `anomaly_severity` | string | derived | filled from fact_anomaly |
-| 59 | `valid_flag` | boolean | derived | ISO 19030 gate (>=22h full speed, Bft <=4, deep water, ...) |
-| 60 | `masked_flag` | boolean | measured | S21-S23 masked window |
+| 30 | `power_corrected_kw` | double | measured | **= horse_power, UNCHANGED — NOT wind-corrected.** The ISO 15016 correction is computed, scored and **rejected** (control wins: 4.432 pp vs 4.878 / 4.940); the Beaufort ≤ 4 gate excludes weather instead. Name retained as a misnomer. |
+| 31 | `speed_corrected_kn` | double | measured | = STW, unchanged (current is already excluded) |
+| 32 | `correction_applied` | boolean | derived | **false** on this dataset — the ISO 15016 correction is rejected |
+| 33 | `correction_convention` | string | derived | the arm chosen empirically: none / bow_relative / true_compass |
+| 34 | `v_expected_kn` | double | derived | ISO 19030: clean-hull speed at that power |
+| 35 | `speed_loss_pct` | double | derived | ISO 19030: (v_expected - STW) / v_expected * 100. **POSITIVE = degradation** — the negation of ISO 19030-2's convention; declared under Part 3. **Combined hull + propeller** (ISO offers no split). |
+| 36 | `slip_apparent` | double | derived | (V_th - SOG) / V_th |
+| 37 | `slip_real` | double | derived | (V_th - STW) / V_th |
+| 38 | `sfoc_g_kwh` | double | measured | source SFOC (clipped) |
+| 39 | `admiralty_coef` | double | derived | disp^(2/3) * STW^3 / power |
+| 40 | `eeoi` | double | derived | gCO2 / t.nm; null on ballast / zero-cargo days |
+| 41 | `fuel_type` | string | measured | the day's ME fuel (from the me_fullspeed_consump_* columns) |
+| 42 | `total_foc_mt` | double | measured | total_consump |
+| 43 | `me_foc_mt` | double | measured | me_consumption |
+| 44 | `co2_mt` | double | derived | total_foc_mt * carbon factor |
+| 45 | `excess_foc_mt` | double | derived | fuel wasted to fouling: me_foc * [1 - (1-s)^n] |
+| 46 | `excess_cost_usd` | double | estimated (USD) | excess_foc * fuel price |
+| 47 | `cum_excess_cost_usd` | double | estimated (USD) | running sum within the fouling cycle |
+| 48 | `excess_cost_fouling_usd` | double | estimated (USD) | = excess_cost_usd |
+| 49 | `excess_cost_weather_usd` | double | estimated (USD) | wind+wave channel |
+| 50 | `excess_cost_operational_usd` | double | estimated (USD) | off-design engine-load channel |
+| 51 | `cii_aer` | double | derived | annual AER attained (gCO2/dwt.nm), broadcast onto each day |
+| 52 | `cii_rating_aer` | string | derived | A-E vs the base reference line |
+| 53 | `cii_imo` | double | derived | annual IMO attained (= AER for container ships) |
+| 54 | `cii_rating_imo` | string | derived | A-E vs the year's reduced required line |
+| 55 | `days_since_cleaning` | int | derived | resets on UWC / DD |
+| 56 | `days_since_polish` | int | derived | resets on PP / DD |
+| 57 | `days_since_dry_dock` | int | derived | resets on DD |
+| 58 | `anomaly_flag` | boolean | derived | filled from fact_anomaly |
+| 59 | `anomaly_cause` | string | derived | filled from fact_anomaly |
+| 60 | `anomaly_severity` | string | derived | filled from fact_anomaly |
+| 61 | `valid_flag` | boolean | derived | ISO 19030 gate (>=22h full speed, Bft <=4, deep water, ...) |
+| 62 | `reject_reason` | string | derived | **why the ISO gate dropped this day**; null iff valid_flag. One of masked / missing_propulsion / displacement_backfilled / admiralty / not_full_speed / beaufort / low_speed / displacement_band / shallow_water. The ISO 19030 drill-down. |
+| 63 | `masked_flag` | boolean | measured | S21-S23 masked window |
 
 ### `fact_performance_indicator`
 
-The four ISO 19030 period indicators, long format. `value` / `reference_value` mean different things per `indicator` — see the enum table below.
+The four ISO 19030 period indicators, long format. `value` / `reference_value` mean different things per `indicator` — see the enum table below. **`MT` is emitted per hull-fouling cycle**, so a ship that crosses the 8 % trigger again after a cleaning triggers again — a ship can carry several `MT` rows.
 
-**Grain:** ship × indicator × period/event · **Rows:** 87 · **Columns:** 9
+**Grain:** ship × indicator × period/event · **Rows:** 100 · **Columns:** 11
 
 | # | column | type | provenance | unit / notes |
 |---:|---|---|---|---|
 | 1 | `ship_id` | string | derived | — |
 | 2 | `indicator` | string | derived | ISP / DDP / ME / MT |
-| 3 | `period_start_day` | int | derived | ISP: cycle start |
-| 4 | `period_end_day` | int | derived | ISP: cycle end; DDP: event_day + 45 |
+| 3 | `period_start_day` | int | derived | ISP, MT: cycle start |
+| 4 | `period_end_day` | int | derived | ISP, MT: cycle end; DDP: event_day + 45 |
 | 5 | `event_type` | string | derived | ME, DDP: the event the row is keyed to |
 | 6 | `event_day` | int | derived | ME, DDP, MT: event / crossing day |
 | 7 | `value` | double | derived | per indicator (see doc) |
 | 8 | `reference_value` | double | derived | per indicator (see doc) |
-| 9 | `detail` | string | derived | free-text |
+| 9 | `n_points` | int | derived | **sample count behind `value`** — a DDP on 3 points is not the claim a DDP on 90 is |
+| 10 | `n_reference_points` | int | derived | sample count behind `reference_value`; null for MT |
+| 11 | `detail` | string | derived | free-text |
 
 ### `fact_uwi`
 
@@ -656,7 +661,7 @@ The slow-steaming economics. `usd_per_nm` is convex **only** because of the per-
 | `ISP` | this cleaning cycle's mean speed loss | the **first** cycle's mean |
 | `DDP` | mean speed loss in the 45 d **after** the dry dock | mean in the 45 d before |
 | `ME` | `before − after` (positive = the hull recovered) | `before` |
-| `MT` | `8.0` (the trigger) | null |
+| `MT` | `8.0` (the trigger) | null — **one row per hull cycle that crosses it**, so a ship may have several |
 
 **On the `weather` anomaly cause** — it is in the enum but is **unreachable**. The rule needs
 `wind_scale ≥ 5`, and anomalies are only scored on `valid_flag` rows, which the ISO gate
