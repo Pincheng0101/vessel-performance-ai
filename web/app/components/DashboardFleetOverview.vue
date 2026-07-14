@@ -9,6 +9,10 @@ const router = useRouter();
 // One source of truth for the action line — re-typing the literal here is how it drifts.
 const THRESHOLD = FleetChartConstant.SpeedLossThreshold;
 const SLOPE_EPS = 0.0015;
+// The window every other tab already reads speed loss over (營運總覽's fleet trend, the vessel
+// deep-dive). A single ISO-valid day carries ~4.4 pp of fit scatter — enough to read negative on
+// a clean hull — so the hull condition only shows up in the mean.
+const SPEED_LOSS_WINDOW = 30;
 
 const fmtPct = v => (v == null ? '–' : `${v.toFixed(1)}%`);
 const fmtInt = v => (v == null ? '–' : Math.round(v).toLocaleString());
@@ -61,13 +65,10 @@ const openAlertCount = computed(() => (alerts.value ?? []).filter(a => a.status 
 const savingsPotential = computed(() =>
   (recommendations.value ?? []).reduce((sum, rec) => sum + Math.max(0, rec.net_saving_usd ?? 0), 0),
 );
-// Only ISO 19030-valid days carry a meaningful speed loss — an unfiltered "latest" reading would
-// be reporting the weather on that ship's last day, not its hull condition.
-const avgSpeedLossLatest = computed(() => {
-  const vals = roster.map((v) => {
-    const rows = performanceByShip.value[v.ship_id] ?? [];
-    return rows.filter(r => r.valid_flag).at(-1)?.speed_loss_pct ?? null;
-  }).filter(v => v != null);
+// Off tableRows, so the KPI, the table column and the histogram all read the same number —
+// re-walking performanceByShip here is how the tiles drift from the table below them.
+const avgSpeedLoss30d = computed(() => {
+  const vals = tableRows.value.map(r => r.sl).filter(v => v != null);
   return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : null;
 });
 const kpis = computed(() => [
@@ -79,8 +80,8 @@ const kpis = computed(() => [
   },
   {
     label: 'Avg speed loss',
-    value: fmtPct(avgSpeedLossLatest.value),
-    sub: 'each ship’s own latest reading',
+    value: fmtPct(avgSpeedLoss30d.value),
+    sub: 'each ship’s own 30-day mean',
     tooltip: FleetGlossaryConstant.Term.avgSpeedLoss,
   },
   {
@@ -140,19 +141,19 @@ const nextByShip = computed(() => {
 });
 // The fouling clocks (days_since_dry_dock / days_since_cleaning) are carried on every daily row,
 // already reset by the maintenance events — read them off the ship's last day rather than
-// re-deriving them from the event log. Speed loss reads off the last *valid* day (ISO 19030).
+// re-deriving them from the event log. Speed loss is the mean over the ship's last 30 ISO
+// 19030-valid days, the same window the trend arrow beside it is fitted on.
 const tableRows = computed(() => roster.map((v) => {
   const daily = performanceByShip.value[v.ship_id] ?? [];
   const valid = daily.filter(r => r.valid_flag);
   const last = daily.at(-1) ?? {};
-  const lastValid = valid.at(-1) ?? {};
   const next = nextByShip.value[v.ship_id] ?? null;
   return {
     id: v.ship_id,
     shipId: v.ship_id,
     name: v.ship_id,
-    sl: lastValid.speed_loss_pct ?? null,
-    slope: slopeOf(valid.slice(-30).map(r => r.speed_loss_pct).filter(x => x != null)),
+    sl: fleetUtils.trailingMean(valid, 'speed_loss_pct', SPEED_LOSS_WINDOW),
+    slope: slopeOf(valid.slice(-SPEED_LOSS_WINDOW).map(r => r.speed_loss_pct).filter(x => x != null)),
     daysDryDock: last.days_since_dry_dock ?? null,
     daysInWater: last.days_since_cleaning ?? null,
     alerts30: (anomaliesByShip.value[v.ship_id] ?? []).filter(r => r.noon_utc > (last.noon_utc ?? 0) - 30).length,
@@ -233,18 +234,24 @@ const ciiCountOption = computed(() => {
   };
 });
 
-// --- Speed-loss distribution (histogram of each vessel's current speed loss) ---
+// --- Speed-loss distribution (histogram of each vessel's 30-day mean speed loss) ---
+// A ship whose mean is not positive is at its clean-hull baseline — it has no measurable loss,
+// not a negative one. The ships below MIN_SHIP_FIT_POINTS borrow the pool's curve scale and carry
+// a constant offset of unknown sign (doc/iso-19030-conformance.md), so a mean can legitimately sit
+// just under zero. Folding those into a single "≤ 0%" bin tells the truth without clamping them
+// away or putting a minus sign on the axis; the dynamic bins then span the positive range only.
+const NON_POSITIVE_LABEL = '≤ 0%';
 const speedLossHistOption = computed(() => {
   const vals = tableRows.value.map(r => r.sl).filter(v => v != null);
   if (!vals.length) return {};
   const total = vals.length;
-  const min = Math.floor(Math.min(...vals));
-  const max = Math.ceil(Math.max(...vals));
-  const step = Math.max(1, Math.ceil((max - min) / 8));
-  const bins = [];
-  for (let lo = min; lo < Math.max(max, min + 1); lo += step) bins.push({ lo, hi: lo + step, count: 0 });
-  vals.forEach((v) => {
-    const bin = bins.find(b => v >= b.lo && v < b.hi) ?? bins.at(-1);
+  const positives = vals.filter(v => v > 0);
+  const bins = [{ label: NON_POSITIVE_LABEL, count: total - positives.length }];
+  const max = Math.ceil(Math.max(...positives, 1));
+  const step = Math.max(1, Math.ceil(max / 7));
+  for (let lo = 0; lo < max; lo += step) bins.push({ lo, hi: lo + step, label: `${lo}–${lo + step}%`, count: 0 });
+  positives.forEach((v) => {
+    const bin = bins.slice(1).find(b => v >= b.lo && v < b.hi) ?? bins.at(-1);
     bin.count += 1;
   });
   return {
@@ -257,7 +264,7 @@ const speedLossHistOption = computed(() => {
         return `${p.name}: ${(p.value / total * 100).toFixed(0)}%`;
       },
     },
-    xAxis: { type: 'category', data: bins.map(b => `${b.lo}–${b.hi}%`), name: 'speed loss', nameLocation: 'middle', nameGap: 26 },
+    xAxis: { type: 'category', data: bins.map(b => b.label), name: 'speed loss', nameLocation: 'middle', nameGap: 26 },
     yAxis: { type: 'value', minInterval: 1, name: 'vessels', nameGap: 18 },
     series: [{
       type: 'bar',

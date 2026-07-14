@@ -9,6 +9,10 @@
 const CII_RATINGS = ['A', 'B', 'C', 'D', 'E'];
 
 class fleetUtils {
+  // A mean over one or two points is that point wearing the window's name — the same floor the
+  // ETL applies (MIN_WINDOW_POINTS in indicators.py, MIN_SPEED_LOSS_SHIPS in aggregate.py).
+  static MIN_TRAILING_POINTS = 3;
+
   /**
    * Folds one row per ship into the fleet-wide figures the dashboards show.
    *
@@ -96,6 +100,25 @@ class fleetUtils {
       if (i >= window) sum -= valued[i - window][key];
       return { noon_utc: row.noon_utc, value: sum / Math.min(i + 1, window) };
     });
+  }
+
+  /**
+   * Mean of the last `window` *valued* rows — the scalar sibling of rollingMean, with the same
+   * "last N valued rows, not N calendar days" semantics.
+   *
+   * A single day's speed loss is noise-dominated: the clean-hull reference curve is fitted on a
+   * median intercept, so ~half of a clean hull's days land above it and read negative. Only the
+   * window carries hull condition.
+   *
+   * @param {object[]} rows - day-ascending daily rows
+   * @param {string} key - the numeric column to mean
+   * @param {number} [window] - how many valued points the mean spans
+   * @returns {number | null} null when too few valued rows exist to mean anything
+   */
+  static trailingMean(rows, key, window = 30) {
+    const valued = (rows ?? []).filter(row => row[key] != null).slice(-window);
+    if (valued.length < fleetUtils.MIN_TRAILING_POINTS) return null;
+    return valued.reduce((sum, row) => sum + row[key], 0) / valued.length;
   }
 }
 

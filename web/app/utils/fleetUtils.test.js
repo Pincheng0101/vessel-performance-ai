@@ -188,3 +188,42 @@ describe('fleetUtils.rollingMean', () => {
     expect(fleetUtils.rollingMean(rows, 'avg_speed_loss_pct')).toEqual([]);
   });
 });
+
+describe('fleetUtils.trailingMean', () => {
+  const dailyRow = value => ({ speed_loss_pct: value });
+
+  test('means the last valued rows within the window, dropping the older ones', () => {
+    const rows = [dailyRow(10), dailyRow(2), dailyRow(4), dailyRow(6)];
+    expect(fleetUtils.trailingMean(rows, 'speed_loss_pct', 3)).toBe(4);
+  });
+
+  test('spans the last 30 valued rows by default', () => {
+    const rows = Array.from({ length: 31 }, (_, i) => dailyRow(i));
+    expect(fleetUtils.trailingMean(rows, 'speed_loss_pct')).toBe(15.5);
+  });
+
+  test('skips the days the ISO gate leaves null rather than meaning them as holes', () => {
+    const rows = [dailyRow(2), dailyRow(null), dailyRow(4), dailyRow(6)];
+    expect(fleetUtils.trailingMean(rows, 'speed_loss_pct', 3)).toBe(4);
+  });
+
+  test('means over the valued rows that exist when they are fewer than the window', () => {
+    expect(fleetUtils.trailingMean([dailyRow(2), dailyRow(4), dailyRow(6)], 'speed_loss_pct', 30)).toBe(4);
+  });
+
+  test('keeps a genuinely negative mean negative', () => {
+    expect(fleetUtils.trailingMean([dailyRow(-3), dailyRow(-1), dailyRow(-2)], 'speed_loss_pct')).toBe(-2);
+  });
+
+  test('returns null for fewer valued rows than MIN_TRAILING_POINTS', () => {
+    expect(fleetUtils.trailingMean([dailyRow(2), dailyRow(4), dailyRow(null)], 'speed_loss_pct')).toBeNull();
+  });
+
+  test.each([
+    [[]],
+    [null],
+    [undefined],
+  ])('returns null for %j rows', (rows) => {
+    expect(fleetUtils.trailingMean(rows, 'speed_loss_pct')).toBeNull();
+  });
+});
