@@ -3,6 +3,8 @@ import os
 import aws_cdk
 from pyhocon import ConfigFactory
 
+from deployment.agent_auth_stack import YmGenbiAgentAuthStack
+from deployment.agent_runtime_stack import YmGenbiAgentRuntimeStack
 from deployment.athena_tool_stack import AthenaToolStack
 from deployment.ui_stack import YmDatalakeUiStack
 
@@ -24,5 +26,14 @@ project_name = conf.get_string('app.project_name')
 
 AthenaToolStack(app, f'{project_name}AthenaToolStack', conf=conf, env=env)
 YmDatalakeUiStack(app, f'{project_name}UiStack', conf=conf, env=env)
+auth_stack = YmGenbiAgentAuthStack(app, f'{project_name}GenbiAgentAuthStack', conf=conf, env=env)
+YmGenbiAgentRuntimeStack(
+    app,
+    f'{project_name}GenbiAgentRuntimeStack',
+    conf=conf,
+    user_pool=auth_stack.user_pool,
+    client=auth_stack.client,
+    env=env,
+)
 
 app.synth()

@@ -37,6 +37,12 @@ cdk.out/
 # ...but never commit the user-filled config (holds the api key).
 web/config.js
 
+# AgentCore agent — frontend example is source, not CDK build output.
+!agentcore/**/*.js
+# Local starter-toolkit config (retired; CLI regenerates it) and playwright artifacts.
+.bedrock_agentcore.yaml
+.playwright-mcp/
+
 # IDE
 .idea/
 .vscode/
