@@ -13,8 +13,8 @@ import os
 import sys
 from pathlib import Path
 
-from table.schema import CURATED_TABLES, RAW_TABLES
 from ym_datalake.etl.jsonl import _write_jsonl
+from ym_datalake.schema import CURATED_TABLES, RAW_TABLES
 
 _DEFAULT_REGION = 'us-west-2'
 

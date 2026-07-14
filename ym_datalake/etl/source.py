@@ -24,7 +24,7 @@ import csv
 import json
 from pathlib import Path
 
-from table.schema import MAINTENANCE_EVENT_COLUMNS, NOON_REPORT_COLUMNS, VESSEL_MASTER_COLUMNS
+from ym_datalake.schema import MAINTENANCE_EVENT_COLUMNS, NOON_REPORT_COLUMNS, VESSEL_MASTER_COLUMNS
 
 _SHIP_ID_HEADER = 'De-identification Name'
 _MARKER_COLUMNS = ('masked_flag', 'predict_fuel_type')

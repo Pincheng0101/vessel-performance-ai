@@ -24,35 +24,35 @@ class TestSubmit:
     def test_returns_query_id_and_pending(self, ssm_mock, athena_mock, table_mock):
         ssm_mock.get.return_value = SSM_ATHENA_CONFIG_JSON
         athena_mock.start_query_execution.return_value = {'QueryExecutionId': 'exec-abc'}
-        out = submit(_body({'query_type': 'vessel_recommendation', 'params': {'imo_number': '9700006'}}))
+        out = submit(_body({'query_type': 'fact_recommendation', 'params': {'ship_id': 'S1'}}))
         assert out['status'] == 'PENDING'
         assert out['query_id'].startswith('q_')
 
     def test_execution_parameters_bind_values(self, ssm_mock, athena_mock, table_mock):
         ssm_mock.get.return_value = SSM_ATHENA_CONFIG_JSON
         athena_mock.start_query_execution.return_value = {'QueryExecutionId': 'exec-abc'}
-        submit(_body({'query_type': 'vessel_recommendation', 'params': {'imo_number': '9700006'}}))
+        submit(_body({'query_type': 'fact_recommendation', 'params': {'ship_id': 'S1'}}))
         kwargs = athena_mock.start_query_execution.call_args[1]
         # Athena requires string execution parameters to be single-quoted literals.
-        assert kwargs['ExecutionParameters'] == ["'9700006'"]
+        assert kwargs['ExecutionParameters'] == ["'S1'"]
         assert kwargs['WorkGroup'] == 'ym-hackathon'
         assert kwargs['QueryExecutionContext'] == {'Database': 'test_db', 'Catalog': 'AwsDataCatalog'}
 
     def test_no_execution_parameters_when_no_binds(self, ssm_mock, athena_mock, table_mock):
         ssm_mock.get.return_value = SSM_ATHENA_CONFIG_JSON
         athena_mock.start_query_execution.return_value = {'QueryExecutionId': 'exec-abc'}
-        # fleet_vessels takes no params → no execution parameters (fleet_overview now binds fleet_id).
-        submit(_body({'query_type': 'fleet_vessels', 'params': {}}))
+        # dim_port takes no params → no execution parameters (agg_fleet_daily always binds fleet_id).
+        submit(_body({'query_type': 'dim_port', 'params': {}}))
         assert 'ExecutionParameters' not in athena_mock.start_query_execution.call_args[1]
 
     def test_registry_written_with_exec_id_type_ttl(self, ssm_mock, athena_mock, table_mock):
         ssm_mock.get.return_value = SSM_ATHENA_CONFIG_JSON
         athena_mock.start_query_execution.return_value = {'QueryExecutionId': 'exec-abc'}
-        out = submit(_body({'query_type': 'vessel_recommendation', 'params': {'imo_number': '9700006'}}))
+        out = submit(_body({'query_type': 'fact_recommendation', 'params': {'ship_id': 'S1'}}))
         item = table_mock.put_item.call_args[1]['Item']
         assert item['query_id'] == out['query_id']
         assert item['exec_id'] == 'exec-abc'
-        assert item['query_type'] == 'vessel_recommendation'
+        assert item['query_type'] == 'fact_recommendation'
         assert isinstance(item['ttl'], int)
 
     def test_unknown_query_type_rejected_by_model(self, ssm_mock, athena_mock, table_mock):
@@ -61,9 +61,9 @@ class TestSubmit:
             _body({'query_type': 'nope', 'params': {}})
 
     def test_wrong_params_for_type_rejected(self, ssm_mock, athena_mock, table_mock):
-        # vessel_recommendation requires params.imo_number; omitting it fails the typed variant.
+        # ship_speed_power requires params.ship_id; omitting it fails the typed variant.
         with pytest.raises(ValidationError):
-            _body({'query_type': 'vessel_recommendation', 'params': {}})
+            _body({'query_type': 'ship_speed_power', 'params': {}})
 
 
 class TestStrLiteral:

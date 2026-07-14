@@ -46,7 +46,7 @@ SSM_ATHENA_CONFIG_JSON = json.dumps(SSM_ATHENA_CONFIG)
 REGISTRY_ITEM = {
     'query_id': 'q_test',
     'exec_id': 'exec-123',
-    'query_type': 'vessel_recommendation',
+    'query_type': 'fact_recommendation',
     'status': 'PENDING',
     'ttl': 9999999999,
 }

@@ -12,15 +12,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from pathlib import Path
 from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.compose import ColumnTransformer
 from generate_submission import build_submission_frame
+from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression
@@ -31,6 +30,7 @@ from sklearn.preprocessing import OneHotEncoder
 
 try:
     from xgboost import XGBRegressor
+
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
@@ -46,27 +46,36 @@ def load_csv(path: Path) -> pd.DataFrame:
 
 def build_models(preprocessor: ColumnTransformer) -> dict[str, Pipeline]:
     models: dict[str, Pipeline] = {
-        'LinearRegression': Pipeline(steps=[
-            ('preprocess', preprocessor),
-            ('regressor', LinearRegression()),
-        ]),
-        'RandomForest': Pipeline(steps=[
-            ('preprocess', preprocessor),
-            ('regressor', RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)),
-        ]),
+        'LinearRegression': Pipeline(
+            steps=[
+                ('preprocess', preprocessor),
+                ('regressor', LinearRegression()),
+            ]
+        ),
+        'RandomForest': Pipeline(
+            steps=[
+                ('preprocess', preprocessor),
+                ('regressor', RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)),
+            ]
+        ),
     }
 
     if XGBOOST_AVAILABLE:
-        models['XGBoost'] = Pipeline(steps=[
-            ('preprocess', preprocessor),
-            ('regressor', XGBRegressor(
-                objective='reg:squarederror',
-                n_estimators=200,
-                random_state=42,
-                n_jobs=-1,
-                verbosity=0,
-            )),
-        ])
+        models['XGBoost'] = Pipeline(
+            steps=[
+                ('preprocess', preprocessor),
+                (
+                    'regressor',
+                    XGBRegressor(
+                        objective='reg:squarederror',
+                        n_estimators=200,
+                        random_state=42,
+                        n_jobs=-1,
+                        verbosity=0,
+                    ),
+                ),
+            ]
+        )
 
     return models
 
@@ -97,10 +106,16 @@ def train_and_evaluate(train_df: pd.DataFrame, test_df: pd.DataFrame, prediction
     preprocessor = ColumnTransformer(
         transformers=[
             ('num', SimpleImputer(strategy='median'), numeric_features),
-            ('cat', Pipeline(steps=[
-                ('imputer', SimpleImputer(strategy='most_frequent')),
-                ('onehot', OneHotEncoder(handle_unknown='ignore')),
-            ]), categorical_features),
+            (
+                'cat',
+                Pipeline(
+                    steps=[
+                        ('imputer', SimpleImputer(strategy='most_frequent')),
+                        ('onehot', OneHotEncoder(handle_unknown='ignore')),
+                    ]
+                ),
+                categorical_features,
+            ),
         ],
         remainder='drop',
     )
@@ -134,16 +149,17 @@ def train_and_evaluate(train_df: pd.DataFrame, test_df: pd.DataFrame, prediction
         metrics_summary[model_name] = metrics
 
         converted_predictions = [
-            convert_total_energy_to_fuel_amount(float(pred), fuel)
-            for pred, fuel in zip(pred_pred, fuel_types)
+            convert_total_energy_to_fuel_amount(float(pred), fuel) for pred, fuel in zip(pred_pred, fuel_types)
         ]
 
-        submissions[model_name] = pd.DataFrame({
-            'ship_id': prediction_df['De-identification Name'].astype(str),
-            'day': prediction_df['NOON_UTC'].astype(int),
-            'fuel_type': fuel_types,
-            'predicted_value': converted_predictions,
-        })
+        submissions[model_name] = pd.DataFrame(
+            {
+                'ship_id': prediction_df['De-identification Name'].astype(str),
+                'day': prediction_df['NOON_UTC'].astype(int),
+                'fuel_type': fuel_types,
+                'predicted_value': converted_predictions,
+            }
+        )
 
         if metrics['mae'] < best_mae:
             best_mae = metrics['mae']
@@ -160,9 +176,17 @@ def train_and_evaluate(train_df: pd.DataFrame, test_df: pd.DataFrame, prediction
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Train a baseline model and generate submission predictions')
-    parser.add_argument('--train', default='tmp/yangming-aws-summit-hackathon/train_model_ready.csv', help='Training CSV path')
-    parser.add_argument('--test', default='tmp/yangming-aws-summit-hackathon/test_model_ready.csv', help='Testing CSV path')
-    parser.add_argument('--prediction', default='tmp/yangming-aws-summit-hackathon/prediction_model_ready.csv', help='Prediction CSV path')
+    parser.add_argument(
+        '--train', default='tmp/yangming-aws-summit-hackathon/train_model_ready.csv', help='Training CSV path'
+    )
+    parser.add_argument(
+        '--test', default='tmp/yangming-aws-summit-hackathon/test_model_ready.csv', help='Testing CSV path'
+    )
+    parser.add_argument(
+        '--prediction',
+        default='tmp/yangming-aws-summit-hackathon/prediction_model_ready.csv',
+        help='Prediction CSV path',
+    )
     parser.add_argument('--output-dir', default='tmp/yangming-aws-summit-hackathon', help='Directory for output files')
     args = parser.parse_args()
 

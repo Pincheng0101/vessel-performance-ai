@@ -1,518 +1,243 @@
 import pytest
 from aws_lambda_powertools.event_handler.exceptions import BadRequestError
-from queries import render
+from queries import _EXTRAS, _TABLES, QUERY_TYPES, render
+
+from ym_datalake.schema import ALL_TABLES
+
+# The 3 derived types: the only hand-written column lists in queries.py. TestCatalogDrift
+# checks each name here against the real catalog, which is the whole point of the guard.
+DERIVED = ('fleet_positions', 'ship_speed_power', 'predict_targets')
 
 
-class TestRender:
-    def test_fleet_overview_no_dates(self):
-        sql, binds = render('fleet_overview', {})
-        assert 'FROM agg_fleet_daily' in sql
-        # agg_fleet_daily grain is (fleet, day); default fleet_id 'ALL' selects the rollup.
+class TestCatalogDrift:
+    """The guard that would have caught the /v1 + /v2 rot: every column queries.py names
+    must exist in ym_datalake.schema, the single source of truth for the Glue catalog."""
+
+    def test_every_table_has_a_query_type(self):
+        # 20 tables + 3 derived = 23 query types, and no table is left unreachable.
+        assert set(_TABLES) == set(ALL_TABLES)
+        assert len(QUERY_TYPES) == len(ALL_TABLES) + len(DERIVED) == 23
+
+    @pytest.mark.parametrize('table', sorted(_TABLES))
+    def test_spec_columns_exist(self, table):
+        spec = _TABLES[table]
+        columns = {name for name, _type in ALL_TABLES[table]}
+
+        if spec.ship_col:
+            assert spec.ship_col in columns
+        if spec.day_col:
+            assert spec.day_col in columns
+        for key in spec.extras:
+            assert _EXTRAS[key].column in columns
+        for column in (c.strip() for c in spec.order_by.split(',')):
+            assert column in columns, f'{table} ORDER BY names a column it does not have: {column}'
+
+    @pytest.mark.parametrize(
+        'table,needed',
+        [
+            # fleet_positions + ship_speed_power's measured leg
+            (
+                'fact_performance_daily',
+                (
+                    'ship_id',
+                    'noon_utc',
+                    'report_date',
+                    'latitude',
+                    'longitude',
+                    'heading_deg',
+                    'speed_loss_pct',
+                    'cii_rating_aer',
+                    'port_from',
+                    'port_to',
+                    'voyage',
+                    'speed_corrected_kn',
+                    'power_corrected_kw',
+                    'days_since_cleaning',
+                    'valid_flag',
+                ),
+            ),
+            # ship_speed_power's reference leg
+            ('dim_reference_curve', ('ship_id', 'speed_kn', 'shaft_power_kw')),
+            # predict_targets
+            ('noon_report', ('ship_id', 'noon_utc', 'predict_fuel_type')),
+        ],
+    )
+    def test_derived_columns_exist(self, table, needed):
+        columns = {name for name, _type in ALL_TABLES[table]}
+        assert set(needed) <= columns
+
+
+class TestTableQueries:
+    def test_select_star_no_filter(self):
+        # No params → a bare scan; the projection is SELECT * so it cannot drift.
+        sql, binds = render('dim_port', {})
+        assert sql == 'SELECT * FROM dim_port ORDER BY locode'
+        assert binds == []
+
+    def test_ship_filter(self):
+        sql, binds = render('fact_performance_daily', {'ship_id': 'S1'})
+        assert sql == 'SELECT * FROM fact_performance_daily WHERE ship_id = ? ORDER BY ship_id, noon_utc'
+        assert binds == ['S1']
+
+    def test_ship_id_optional(self):
+        # Every table is small, so an unfiltered scan is allowed (and is how you get a roster).
+        sql, binds = render('dim_vessel', {})
+        assert 'WHERE' not in sql
+        assert binds == []
+
+    def test_day_range(self):
+        sql, binds = render('noon_report', {'ship_id': 'S21', 'start_day': 100, 'end_day': 200})
+        assert 'WHERE ship_id = ? AND noon_utc BETWEEN CAST(? AS integer) AND CAST(? AS integer)' in sql
+        # Binds render as string literals, so the int column needs the CAST.
+        assert binds == ['S21', '100', '200']
+
+    def test_day_range_start_only(self):
+        sql, binds = render('noon_report', {'start_day': 50})
+        assert 'WHERE noon_utc >= CAST(? AS integer)' in sql
+        assert binds == ['50']
+
+    def test_day_range_end_only(self):
+        sql, binds = render('maintenance_event', {'end_day': 500})
+        assert 'WHERE event_day <= CAST(? AS integer)' in sql
+        assert binds == ['500']
+
+    @pytest.mark.parametrize(
+        'query_type,day_col',
+        [
+            ('uwi', 'inspection_day'),
+            ('fuel_price', 'day'),
+            ('fact_voyage', 'depart_day'),
+            ('fact_alert', 'opened_day'),
+            ('fact_maintenance_recommendation', 'due_day'),
+        ],
+    )
+    def test_each_table_filters_its_own_day_axis(self, query_type, day_col):
+        sql, binds = render(query_type, {'start_day': 10})
+        assert f'{day_col} >= CAST(? AS integer)' in sql
+        assert binds == ['10']
+
+    def test_agg_fleet_daily_always_binds_fleet_id(self):
+        # 'ALL' is a real rollup row that COEXISTS with FL-W1/FL-W2, so the filter is
+        # never optional — an unbound fleet_id would double-count the rollup.
+        sql, binds = render('agg_fleet_daily', {})
         assert 'WHERE fleet_id = ?' in sql
-        assert 'report_date BETWEEN' not in sql
-        assert sql.rstrip().endswith('ORDER BY report_date')
         assert binds == ['ALL']
 
-    def test_fleet_overview_date_range(self):
-        sql, binds = render('fleet_overview', {'start_date': '2026-01-01', 'end_date': '2026-06-30'})
-        assert 'WHERE fleet_id = ? AND report_date BETWEEN ? AND ?' in sql
-        assert binds == ['ALL', '2026-01-01', '2026-06-30']
+    def test_agg_fleet_daily_sub_fleet(self):
+        sql, binds = render('agg_fleet_daily', {'fleet_id': 'FL-W2', 'start_day': 0, 'end_day': 30})
+        assert 'WHERE fleet_id = ? AND noon_utc BETWEEN' in sql
+        assert binds == ['FL-W2', '0', '30']
 
-    def test_fleet_overview_start_only(self):
-        sql, binds = render('fleet_overview', {'start_date': '2026-01-01'})
-        assert 'WHERE fleet_id = ? AND report_date >= ?' in sql
-        assert binds == ['ALL', '2026-01-01']
-
-    def test_fleet_overview_end_only(self):
-        sql, binds = render('fleet_overview', {'end_date': '2026-06-30'})
-        assert 'WHERE fleet_id = ? AND report_date <= ?' in sql
-        assert binds == ['ALL', '2026-06-30']
-
-    def test_fleet_overview_fleet_id(self):
-        sql, binds = render('fleet_overview', {'fleet_id': 'FL-AE'})
-        assert 'WHERE fleet_id = ?' in sql
-        assert binds == ['FL-AE']
-
-    def test_fleet_overview_bad_fleet_id_raises(self):
+    def test_agg_fleet_daily_rejects_legacy_fleet_id(self):
+        # The old pattern accepted FL-AE and rejected the real FL-W1/FL-W2.
         with pytest.raises(BadRequestError):
-            render('fleet_overview', {'fleet_id': 'fl-lower'})
+            render('agg_fleet_daily', {'fleet_id': 'FL-AE'})
 
-    def test_vessel_speed_loss_imo_and_dates(self):
-        sql, binds = render(
-            'vessel_speed_loss',
-            {'imo_number': '9700006', 'start_date': '2026-01-01', 'end_date': '2026-06-30'},
-        )
-        assert 'FROM fact_performance_daily WHERE imo_number = ?' in sql
-        assert 'AND report_date BETWEEN ? AND ?' in sql
-        assert sql.rstrip().endswith('ORDER BY report_date')
-        # imo bind precedes the date binds (matches ? order).
-        assert binds == ['9700006', '2026-01-01', '2026-06-30']
+    def test_fact_alert_filters(self):
+        sql, binds = render('fact_alert', {'ship_id': 'S3', 'fleet_id': 'FL-W1', 'severity': 'high', 'status': 'open'})
+        assert 'WHERE ship_id = ? AND fleet_id = ? AND severity = ? AND status = ?' in sql
+        assert binds == ['S3', 'FL-W1', 'high', 'open']
 
-    def test_vessel_speed_loss_imo_only(self):
-        sql, binds = render('vessel_speed_loss', {'imo_number': '9700006'})
-        assert 'BETWEEN' not in sql
-        assert binds == ['9700006']
-
-    def test_vessel_metrics_imo_and_dates(self):
-        sql, binds = render(
-            'vessel_metrics',
-            {'imo_number': '9700006', 'start_date': '2026-01-01', 'end_date': '2026-06-30'},
-        )
-        assert 'FROM fact_performance_daily WHERE imo_number = ?' in sql
-        assert 'AND report_date BETWEEN ? AND ?' in sql
-        # full metric set the deep-dive panels need (incl. the Phase-4 attribution split).
-        for col in (
-            'slip_real',
-            'sfoc_g_kwh',
-            'admiralty_coef',
-            'cum_excess_cost_usd',
-            'excess_cost_fouling_usd',
-            'excess_cost_weather_usd',
-            'excess_cost_operational_usd',
-            'cii_aer',
-            'valid_flag',
-        ):
-            assert col in sql
-        assert sql.rstrip().endswith('ORDER BY report_date')
-        assert binds == ['9700006', '2026-01-01', '2026-06-30']
-
-    def test_vessel_metrics_imo_only(self):
-        sql, binds = render('vessel_metrics', {'imo_number': '9700006'})
-        assert 'BETWEEN' not in sql
-        assert binds == ['9700006']
-
-    def test_fleet_vessels(self):
-        sql, binds = render('fleet_vessels', {})
-        assert 'FROM dim_vessel' in sql
-        assert 'WHERE' not in sql
-        # roster carries the fleet grouping so the dropdown can filter client-side.
-        assert 'fleet_id' in sql and 'fleet_name' in sql
-        assert sql.rstrip().endswith('ORDER BY imo_number')
-        assert binds == []
-
-    def test_fleet_vessels_extra_param_rejected(self):
+    def test_fact_alert_rejects_all_fleet(self):
+        # fact_alert has no 'ALL' rollup row, so accepting it would silently return nothing.
         with pytest.raises(BadRequestError):
-            render('fleet_vessels', {'imo_number': '9700006'})
+            render('fact_alert', {'fleet_id': 'ALL'})
 
-    def test_fleet_list(self):
-        sql, binds = render('fleet_list', {})
-        assert 'SELECT DISTINCT fleet_id, fleet_name FROM dim_vessel' in sql
-        assert sql.rstrip().endswith('ORDER BY fleet_id')
-        assert binds == []
+    def test_fact_anomaly_severity(self):
+        sql, binds = render('fact_anomaly', {'ship_id': 'S5', 'severity': 'medium'})
+        assert 'WHERE ship_id = ? AND severity = ?' in sql
+        assert binds == ['S5', 'medium']
 
-    def test_fleet_alerts_defaults(self):
-        sql, binds = render('fleet_alerts', {})
-        assert 'FROM fact_alert WHERE status = ?' in sql
-        assert 'fleet_id' not in sql.split('WHERE', 1)[1]  # no fleet filter for ALL
-        assert 'AND severity' not in sql
-        assert sql.rstrip().endswith('ORDER BY last_seen_date DESC')
-        assert binds == ['open']
-
-    def test_fleet_alerts_fleet_and_severity(self):
-        sql, binds = render('fleet_alerts', {'fleet_id': 'FL-TP', 'severity': 'high'})
-        assert 'AND fleet_id = ?' in sql
-        assert 'AND severity = ?' in sql
-        assert binds == ['open', 'FL-TP', 'high']
-
-    def test_fleet_alerts_bad_severity_rejected(self):
+    def test_bad_severity_rejected(self):
         with pytest.raises(BadRequestError):
-            render('fleet_alerts', {'severity': 'critical'})
+            render('fact_anomaly', {'severity': 'critical'})
 
-    def test_vessel_alerts(self):
-        sql, binds = render('vessel_alerts', {'imo_number': '9700006'})
-        assert 'FROM fact_alert WHERE imo_number = ?' in sql
-        assert sql.rstrip().endswith('ORDER BY last_seen_date DESC')
-        for col in ('cause', 'severity', 'opened_date', 'last_seen_date', 'message_zh', 'recommended_action'):
-            assert col in sql
-        assert binds == ['9700006']
-
-    def test_vessel_speed_power_union(self):
-        sql, binds = render('vessel_speed_power', {'imo_number': '9700006'})
-        assert 'UNION ALL' in sql
-        assert 'FROM fact_performance_daily' in sql
-        assert 'FROM dim_reference_curve' in sql
-        assert sql.count('?') == 2
-        assert binds == ['9700006', '9700006']
-
-    def test_vessel_anomalies(self):
-        sql, binds = render('vessel_anomalies', {'imo_number': '9700006'})
-        assert 'FROM fact_anomaly WHERE imo_number = ?' in sql
-        assert binds == ['9700006']
-
-    def test_vessel_maintenance_effect(self):
-        sql, binds = render('vessel_maintenance_effect', {'imo_number': '9700006'})
-        assert 'FROM fact_maintenance_event WHERE imo_number = ?' in sql
-        assert binds == ['9700006']
-
-    def test_vessel_recommendation(self):
-        sql, binds = render('vessel_recommendation', {'imo_number': '9700006'})
-        assert 'FROM fact_recommendation WHERE imo_number = ?' in sql
-        assert binds == ['9700006']
-
-    def test_vessel_maintenance_recommendation(self):
-        sql, binds = render('vessel_maintenance_recommendation', {'imo_number': '9700006'})
-        assert 'FROM fact_maintenance_recommendation WHERE imo_number = ?' in sql
-        # grouped by planner window (plan_date), then priority (high→medium→low), then action_type.
-        assert 'ORDER BY plan_date, CASE priority' in sql
-        # per-action analytics strip columns (parity with fact_recommendation) + planner window tags.
-        for col in (
-            'degradation_rate',
-            'degradation_unit',
-            'current_value',
-            'threshold_value',
-            'trigger_eta',
-            't_star_days',
-            'net_saving_usd',
-            'plan_date',
-            'plan_service_type',
-        ):
-            assert col in sql
-        assert binds == ['9700006']
-
-    def test_vessel_maintenance_recommendation_missing_imo_raises(self):
+    @pytest.mark.parametrize('bad', ['S0', 'S13', 'S24', '9700006', 's1'])
+    def test_bad_ship_id_rejected(self, bad):
         with pytest.raises(BadRequestError):
-            render('vessel_maintenance_recommendation', {})
+            render('fact_performance_daily', {'ship_id': bad})
 
-    def test_fleet_maintenance_recommendation(self):
-        sql, binds = render('fleet_maintenance_recommendation', {})
-        # fleet-wide backlog: no imo filter, imo_number in SELECT, LEFT JOIN median event cost.
-        assert 'FROM fact_maintenance_recommendation r' in sql
-        assert 'imo_number' in sql
-        assert 'WHERE imo_number' not in sql
-        assert 'LEFT JOIN' in sql and 'fact_maintenance_event' in sql
-        assert 'est_cost_usd' in sql
-        # engine_inspection remaps to the engine_overhaul event cost in the join ON.
-        assert "CASE r.action_type WHEN 'engine_inspection'" in sql
-        # pre-grouped by planner window, then priority rank, then action_type.
-        assert 'ORDER BY r.plan_date' in sql
-        for col in (
-            'action_type',
-            'priority',
-            'due_date',
-            'net_saving_usd',
-            'plan_date',
-            'plan_service_type',
-        ):
-            assert col in sql
-        assert binds == []
-
-    def test_fleet_maintenance_recommendation_extra_param_rejected(self):
+    def test_negative_day_rejected(self):
         with pytest.raises(BadRequestError):
-            render('fleet_maintenance_recommendation', {'imo_number': '9700006'})
+            render('noon_report', {'start_day': -1})
 
-    def test_vessel_uwi(self):
-        sql, binds = render('vessel_uwi', {'imo_number': '9700006'})
-        assert 'FROM fact_uwi WHERE imo_number = ?' in sql
-        assert sql.rstrip().endswith('ORDER BY inspection_date')
-        for col in (
-            'propeller_condition',
-            'propeller_roughness_um',
-            'coating_breakdown_pct',
-            'coating_condition',
-            'hull_fouling_rating',
-        ):
-            assert col in sql
-        assert binds == ['9700006']
-
-    def test_vessel_uwi_extra_param_rejected(self):
+    def test_calendar_date_is_not_filterable(self):
+        # The relative-day axis is the only day filter; report_date comes back in SELECT *
+        # but the old date params are gone.
         with pytest.raises(BadRequestError):
-            render('vessel_uwi', {'imo_number': '9700006', 'evil': "'; DROP TABLE x --"})
-
-    def test_vessel_track_imo_only(self):
-        sql, binds = render('vessel_track', {'imo_number': '9700006'})
-        assert 'FROM fact_performance_daily WHERE imo_number = ?' in sql
-        for col in ('latitude', 'longitude', 'speed_loss_pct', 'cii_rating_aer', 'port_from', 'port_to'):
-            assert col in sql
-        assert 'BETWEEN' not in sql
-        assert sql.rstrip().endswith('ORDER BY report_date')
-        assert binds == ['9700006']
-
-    def test_vessel_track_date_range(self):
-        sql, binds = render(
-            'vessel_track', {'imo_number': '9700006', 'start_date': '2026-01-01', 'end_date': '2026-06-30'}
-        )
-        assert 'AND report_date BETWEEN ? AND ?' in sql
-        assert binds == ['9700006', '2026-01-01', '2026-06-30']
-
-    def test_vessel_track_extra_param_rejected(self):
-        with pytest.raises(BadRequestError):
-            render('vessel_track', {'imo_number': '9700006', 'evil': "'; DROP TABLE x --"})
-
-    def test_vessel_voyages(self):
-        sql, binds = render('vessel_voyages', {'imo_number': '9700006'})
-        assert 'FROM fact_voyage WHERE imo_number = ?' in sql
-        for col in (
-            'from_port',
-            'to_port',
-            'distance_nm',
-            'sea_days',
-            'avg_speed_kn',
-            'fuel_cost_usd',
-            'usd_per_nm',
-            'on_time_flag',
-            'planned_eta',
-        ):
-            assert col in sql
-        assert sql.rstrip().endswith('ORDER BY depart_date')
-        assert binds == ['9700006']
-
-    def test_vessel_voyages_missing_imo_raises(self):
-        with pytest.raises(BadRequestError):
-            render('vessel_voyages', {})
-
-    def test_vessel_speed_profile(self):
-        sql, binds = render('vessel_speed_profile', {'imo_number': '9700006'})
-        assert 'FROM fact_speed_profile WHERE imo_number = ?' in sql
-        # convex usd/nm curve + fuel decomposition + vessel-level current/economical speed.
-        for col in (
-            'speed_kn',
-            'usd_per_nm',
-            'fuel_usd_per_nm',
-            'recommended_speed_kn',
-            'current_speed_kn',
-            'annual_distance_nm',
-        ):
-            assert col in sql
-        assert sql.rstrip().endswith('ORDER BY speed_kn')
-        assert binds == ['9700006']
-
-    def test_vessel_speed_profile_missing_imo_raises(self):
-        with pytest.raises(BadRequestError):
-            render('vessel_speed_profile', {})
-
-    def test_vessel_speed_profile_extra_param_rejected(self):
-        with pytest.raises(BadRequestError):
-            render('vessel_speed_profile', {'imo_number': '9700006', 'evil': "'; DROP TABLE x --"})
-
-    def test_fleet_positions_latest_row_per_vessel(self):
-        sql, binds = render('fleet_positions', {})
-        assert 'FROM fact_performance_daily' in sql
-        # first window query: newest row per imo (report_date DESC → chronological).
-        assert 'row_number() OVER (PARTITION BY imo_number ORDER BY report_date DESC)' in sql
-        assert 'WHERE rn = 1' in sql
-        for col in ('imo_number', 'latitude', 'longitude', 'speed_loss_pct', 'cii_rating_aer'):
-            assert col in sql
-        assert sql.rstrip().endswith('ORDER BY imo_number')
-        assert binds == []
-
-    def test_fleet_positions_extra_param_rejected(self):
-        with pytest.raises(BadRequestError):
-            render('fleet_positions', {'imo_number': '9700006'})
-
-    def test_new_query_types_registered(self):
-        from queries import QUERY_TYPES
-
-        assert {
-            'vessel_track',
-            'vessel_voyages',
-            'vessel_speed_profile',
-            'fleet_positions',
-            'fleet_maintenance_recommendation',
-        } <= set(QUERY_TYPES)
-
-    def test_unknown_query_type_raises(self):
-        with pytest.raises(BadRequestError):
-            render('vessel_report', {})
-
-    def test_missing_imo_raises(self):
-        with pytest.raises(BadRequestError):
-            render('vessel_recommendation', {})
-
-    def test_bad_imo_number_raises(self):
-        with pytest.raises(BadRequestError):
-            render('vessel_recommendation', {'imo_number': '123'})
-
-    def test_bad_date_raises(self):
-        with pytest.raises(BadRequestError):
-            render('vessel_speed_loss', {'imo_number': '9700006', 'start_date': '2026/01/01'})
+            render('fact_performance_daily', {'start_date': '2026-01-01'})
 
     def test_extra_param_rejected(self):
         with pytest.raises(BadRequestError):
-            render('vessel_recommendation', {'imo_number': '9700006', 'evil': "'; DROP TABLE x --"})
+            render('fact_recommendation', {'ship_id': 'S1', 'evil': "'; DROP TABLE x --"})
+
+    def test_ship_param_rejected_on_shipless_table(self):
+        # fuel_price is fleet-wide (no ship_id column), so the param must not be accepted.
+        with pytest.raises(BadRequestError):
+            render('fuel_price', {'ship_id': 'S1'})
+
+    def test_unknown_query_type_raises(self):
+        with pytest.raises(BadRequestError):
+            render('vt_fd', {})
+
+    @pytest.mark.parametrize('table', sorted(_TABLES))
+    def test_every_table_renders(self, table):
+        sql, _binds = render(table, {})
+        assert sql.startswith(f'SELECT * FROM {table}')
+        assert 'ORDER BY' in sql
 
 
-class TestRealDataRender:
-    """v2 real-dataset catalog over vt_fd / maintenance (old type names, ship_id + day axis)."""
-
-    @staticmethod
-    def _render(query_type, params):
-        from queries import QUERY_TYPES_V2
-
-        return render(query_type, params, QUERY_TYPES_V2)
-
-    def test_fleet_vessels_roster(self):
-        sql, binds = self._render('fleet_vessels', {})
-        assert 'FROM vt_fd' in sql
-        assert 'GROUP BY ship_id' in sql
-        for col in ('n_rows', 'first_day', 'last_day', 'n_predict', 'n_masked'):
-            assert col in sql
+class TestDerivedQueries:
+    def test_fleet_positions_latest_row_per_ship(self):
+        sql, binds = render('fleet_positions', {})
+        assert 'FROM fact_performance_daily' in sql
+        # noon_utc (not the synthesized calendar) is the real axis, so the window orders on it.
+        assert 'row_number() OVER (PARTITION BY ship_id ORDER BY noon_utc DESC)' in sql
+        assert 'WHERE rn = 1' in sql
         assert sql.rstrip().endswith('ORDER BY ship_id')
         assert binds == []
 
-    def test_vessel_metrics_day_range(self):
-        sql, binds = self._render('vessel_metrics', {'ship_id': 'S21', 'start_day': 100, 'end_day': 200})
-        assert 'FROM vt_fd WHERE ship_id = ?' in sql
-        assert 'AND noon_utc BETWEEN CAST(? AS integer) AND CAST(? AS integer)' in sql
-        for col in (
-            'speed_through_water',
-            'me_avg_rpm',
-            'horse_power',
-            'me_fullspeed_consump_hshfo',
-            'me_fullspeed_consump_bio_hsfo',
-            'hours_full_speed',
-            'masked_flag',
-            'predict_fuel_type',
-        ):
-            assert col in sql
-        assert sql.rstrip().endswith('ORDER BY noon_utc')
-        assert binds == ['S21', '100', '200']
-
-    def test_vessel_metrics_ship_only(self):
-        sql, binds = self._render('vessel_metrics', {'ship_id': 'S1'})
-        assert 'BETWEEN' not in sql
-        assert binds == ['S1']
-
-    def test_vessel_metrics_start_only(self):
-        sql, binds = self._render('vessel_metrics', {'ship_id': 'S1', 'start_day': 50})
-        assert 'AND noon_utc >= CAST(? AS integer)' in sql
-        assert binds == ['S1', '50']
-
-    def test_vessel_metrics_bad_ship_raises(self):
-        for bad in ('S0', 'S13', 'S24', '9700006', 's1'):
-            with pytest.raises(BadRequestError):
-                self._render('vessel_metrics', {'ship_id': bad})
-
-    def test_vessel_metrics_negative_day_raises(self):
+    def test_fleet_positions_takes_no_params(self):
         with pytest.raises(BadRequestError):
-            self._render('vessel_metrics', {'ship_id': 'S1', 'start_day': -1})
+            render('fleet_positions', {'ship_id': 'S1'})
 
-    def test_vessel_maintenance_effect(self):
-        sql, binds = self._render('vessel_maintenance_effect', {'ship_id': 'S3'})
-        assert 'FROM maintenance WHERE ship_id = ?' in sql
-        for col in ('event_day', 'event_type', 'propeller_condition', 'hull_fouling_type', 'cavitation_found'):
-            assert col in sql
-        assert sql.rstrip().endswith('ORDER BY event_day')
-        assert binds == ['S3']
+    def test_ship_speed_power_union(self):
+        sql, binds = render('ship_speed_power', {'ship_id': 'S9'})
+        assert 'UNION ALL' in sql
+        assert 'FROM fact_performance_daily WHERE ship_id = ? AND valid_flag' in sql
+        assert 'FROM dim_reference_curve WHERE ship_id = ?' in sql
+        assert sql.count('?') == 2
+        assert binds == ['S9', 'S9']
+
+    def test_ship_speed_power_requires_ship(self):
+        with pytest.raises(BadRequestError):
+            render('ship_speed_power', {})
 
     def test_predict_targets_all_ships(self):
-        sql, binds = self._render('predict_targets', {})
-        assert 'FROM vt_fd WHERE predict_fuel_type IS NOT NULL' in sql
+        sql, binds = render('predict_targets', {})
+        # The PREDICT cells survive only in raw noon_report.
+        assert sql.startswith('SELECT * FROM noon_report WHERE predict_fuel_type IS NOT NULL')
         assert sql.rstrip().endswith('ORDER BY ship_id, noon_utc')
         assert binds == []
 
     def test_predict_targets_one_ship(self):
-        sql, binds = self._render('predict_targets', {'ship_id': 'S22'})
+        sql, binds = render('predict_targets', {'ship_id': 'S22'})
         assert 'predict_fuel_type IS NOT NULL AND ship_id = ?' in sql
         assert binds == ['S22']
 
-    def test_vessel_speed_power(self):
-        sql, binds = self._render('vessel_speed_power', {'ship_id': 'S9'})
-        assert 'FROM vt_fd WHERE ship_id = ?' in sql
-        assert 'horse_power IS NOT NULL' in sql
-        assert 'speed_through_water IS NOT NULL' in sql
-        assert binds == ['S9']
 
-    def test_fleet_overview_day_aggregate(self):
-        sql, binds = self._render('fleet_overview', {'start_day': 0, 'end_day': 30})
-        assert 'FROM vt_fd' in sql
-        assert 'GROUP BY noon_utc' in sql
-        assert 'WHERE noon_utc BETWEEN CAST(? AS integer) AND CAST(? AS integer)' in sql
-        assert sql.rstrip().endswith('ORDER BY noon_utc')
-        assert binds == ['0', '30']
-
-    def test_v2_registry_names(self):
-        from queries import QUERY_TYPES, QUERY_TYPES_V2
-
-        assert set(QUERY_TYPES_V2) >= {
-            'fleet_overview',
-            'fleet_vessels',
-            'vessel_metrics',
-            'vessel_speed_power',
-            'vessel_maintenance_effect',
-            'predict_targets',
-        }
-        # v1 registry carries only the 18 legacy synthetic types.
-        assert len(QUERY_TYPES) == 18
-        assert 'predict_targets' not in QUERY_TYPES
-
-    def test_v2_unknown_type_lists_v2_names(self):
+class TestLegacyTypesGone:
+    @pytest.mark.parametrize(
+        'query_type',
+        ['fleet_overview', 'fleet_vessels', 'fleet_list', 'fleet_alerts', 'vessel_metrics', 'vessel_speed_loss'],
+    )
+    def test_v1_query_types_removed(self, query_type):
+        # The /v1 names keyed on imo_number against tables that no longer exist.
+        assert query_type not in QUERY_TYPES
         with pytest.raises(BadRequestError):
-            self._render('ship_daily', {'ship_id': 'S1'})
+            render(query_type, {})
 
-    def test_v1_render_does_not_know_v2_semantics(self):
-        # Same name, different registry: v1 fleet_overview rejects day params.
-        with pytest.raises(BadRequestError):
-            render('fleet_overview', {'start_day': 0})
+    def test_no_versioned_registry(self):
+        import queries
 
-
-class TestCuratedRealDataRender:
-    """v2 curated types over the compute-real output tables."""
-
-    @staticmethod
-    def _render(query_type, params):
-        from queries import QUERY_TYPES_V2
-
-        return render(query_type, params, QUERY_TYPES_V2)
-
-    def test_vessel_speed_loss(self):
-        sql, binds = self._render('vessel_speed_loss', {'ship_id': 'S6', 'start_day': 0, 'end_day': 365})
-        assert 'FROM fact_ship_daily WHERE ship_id = ?' in sql
-        assert 'AND noon_utc BETWEEN CAST(? AS integer) AND CAST(? AS integer)' in sql
-        for col in ('speed_loss_pct', 'v_expected_kn', 'days_since_cleaning', 'days_since_polish', 'valid_flag'):
-            assert col in sql
-        assert sql.rstrip().endswith('ORDER BY noon_utc')
-        assert binds == ['S6', '0', '365']
-
-    def test_vessel_anomalies(self):
-        sql, binds = self._render('vessel_anomalies', {'ship_id': 'S2'})
-        assert 'FROM fact_ship_anomaly WHERE ship_id = ?' in sql
-        for col in ('metric', 'value', 'z_score', 'severity'):
-            assert col in sql
-        assert binds == ['S2']
-
-    def test_vessel_alerts(self):
-        sql, binds = self._render('vessel_alerts', {'ship_id': 'S2'})
-        assert 'FROM fact_ship_alert WHERE ship_id = ?' in sql
-        assert sql.rstrip().endswith('ORDER BY last_seen_day DESC')
-        assert binds == ['S2']
-
-    def test_fleet_alerts_open_only(self):
-        sql, binds = self._render('fleet_alerts', {})
-        assert "WHERE status = 'open'" in sql
-        assert 'ship_id' in sql
-        assert binds == []
-
-    def test_fleet_alerts_severity_filter(self):
-        sql, binds = self._render('fleet_alerts', {'severity': 'high'})
-        assert 'AND severity = ?' in sql
-        assert binds == ['high']
-
-    def test_fleet_alerts_bad_severity_raises(self):
-        with pytest.raises(BadRequestError):
-            self._render('fleet_alerts', {'severity': 'critical'})
-
-    def test_vessel_maintenance_recommendation(self):
-        sql, binds = self._render('vessel_maintenance_recommendation', {'ship_id': 'S12'})
-        assert 'FROM fact_ship_maintenance_recommendation' in sql
-        assert 'WHERE ship_id = ?' in sql
-        assert "CASE priority WHEN 'high' THEN 0" in sql
-        assert binds == ['S12']
-
-    def test_fleet_maintenance_recommendation(self):
-        sql, binds = self._render('fleet_maintenance_recommendation', {})
-        assert 'SELECT ship_id' in sql
-        assert 'ORDER BY due_day' in sql
-        assert binds == []
-
-    def test_v2_registry_now_twelve(self):
-        from queries import QUERY_TYPES_V2
-
-        assert len(QUERY_TYPES_V2) == 12
-        assert {
-            'vessel_speed_loss',
-            'vessel_anomalies',
-            'vessel_alerts',
-            'fleet_alerts',
-            'vessel_maintenance_recommendation',
-            'fleet_maintenance_recommendation',
-        } <= set(QUERY_TYPES_V2)
+        assert not hasattr(queries, 'QUERY_TYPES_V2')

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import boto3
 
-from table.schema import CURATED_TABLES, RAW_TABLES
+from ym_datalake.schema import CURATED_TABLES, RAW_TABLES
 
 s3 = boto3.client('s3', endpoint_url=os.environ.get('S3_ENDPOINT_URL') or None)
 

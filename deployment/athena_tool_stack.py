@@ -18,7 +18,7 @@ from aws_cdk import (
 from constructs import Construct
 from pyhocon import ConfigTree
 
-from table.schema import CURATED_TABLES, RAW_TABLES
+from ym_datalake.schema import CURATED_TABLES, RAW_TABLES
 
 SSM_PREFIX = '/ym-hackathon'
 
@@ -296,7 +296,7 @@ class AthenaToolStack(Stack):
         if glue_db is not None:
             async_fn.node.add_dependency(glue_db)
 
-        # REST API — /v1/* proxied to the Lambda; x-api-key auth; CORS allow-all for the browser.
+        # REST API — /queries/* proxied to the Lambda; x-api-key auth; CORS allow-all for the browser.
         api = aws_apigateway.RestApi(
             self,
             'AsyncQueryApi',
@@ -308,17 +308,15 @@ class AthenaToolStack(Stack):
             ),
         )
         integration = aws_apigateway.LambdaIntegration(async_fn, proxy=True)
-        # /v1 (legacy synthetic catalog) and /v2 (real-dataset catalog) share the
-        # Lambda and lifecycle; only the query_type registry differs per version.
-        for version in ('v1', 'v2'):
-            queries_resource = api.root.add_resource(version).add_resource('queries')
-            queries_resource.add_method('POST', integration, api_key_required=True)
-            query_id_resource = queries_resource.add_resource('{query_id}')
-            query_id_resource.add_method('GET', integration, api_key_required=True)
-            query_id_resource.add_resource('results').add_method('GET', integration, api_key_required=True)
+        # One unversioned namespace over the current 20-table catalog (queries.QUERY_TYPES).
+        queries_resource = api.root.add_resource('queries')
+        queries_resource.add_method('POST', integration, api_key_required=True)
+        query_id_resource = queries_resource.add_resource('{query_id}')
+        query_id_resource.add_method('GET', integration, api_key_required=True)
+        query_id_resource.add_resource('results').add_method('GET', integration, api_key_required=True)
 
         # Public docs — Swagger UI + OpenAPI schema served by the Lambda. No API key so a
-        # browser can open them directly; the /v1 routes above stay key-protected.
+        # browser can open them directly; the /queries routes above stay key-protected.
         api.root.add_resource('swagger').add_method('GET', integration, api_key_required=False)
         api.root.add_resource('openapi.json').add_method('GET', integration, api_key_required=False)
 

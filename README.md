@@ -1,31 +1,32 @@
 # ym-hackathon
 
-陽明海運 (Yang Ming) AI 船舶效能分析 (vessel-performance analytics) POC — the data
-lake and query stack behind the spec in [`doc/poc-spec.md`](doc/poc-spec.md).
+陽明海運 (Yang Ming) AI 船舶效能分析 (vessel-performance analytics) — the data lake and
+query stack over the **real hackathon dataset**: hull fouling and propeller roughness
+against propulsion performance, under ISO 19030.
 
-Everything runs **locally** to produce the dataset (numpy / scikit-learn, no AWS),
-then a single CDK stack lands it in S3 and exposes it through Athena, an async REST
-API, and a no-build web Dashboard.
+The ETL runs **locally** (stdlib only, no AWS) to turn the three source files in
+`dataset/` into 20 flat tables; a single CDK stack then lands them in S3 and exposes them
+through Athena, an async REST API, and a no-build web Dashboard.
+
+**New here? Start with [`doc/dataset.md`](doc/dataset.md)** — what is actually in the data.
 
 ## Pipeline
 
 ```
- M1 generate          M2+M3 compute         M4 catalog + M5 API           M6 dashboard
- numpy · local        sklearn · local       Glue · Athena · Lambda        Vue+D3 · localhost
- ────────────         ─────────────         ─────────────────────         ─────────────────
- raw/*.jsonl   ──▶    curated/*.jsonl  ──▶   S3 data lake ─▶ Athena ─▶ async REST API ─▶ browser
-      └──────── upload ────────┴──────────▶  s3://<bucket>/{raw,curated}/   (submit→poll→page)
+ build (local, stdlib)                 catalog + API                  dashboard
+ ─────────────────────                 ─────────────────────          ─────────────────
+ dataset/{vt_fd,maintenance,vessel}    Glue · Athena · Lambda         Vue+D3 · localhost
+        │
+        └─▶ raw/*.jsonl + curated/*.jsonl ─▶ S3 ─▶ Athena ─▶ async REST API ─▶ browser
+                     └──── upload ────────▶  s3://<bucket>/{raw,curated}/  (submit→poll→page)
 ```
 
-| Milestone | What it delivers | Where |
+| Component | What it delivers | Where |
 |---|---|---|
-| **M1** | Synthetic raw zone (6 tables) + per-day ground truth | `ym_datalake/synthetic_data/` |
-| **M2** | Curated tables — ISO 15016/19030 corrections + derived indicators | `ym_datalake/etl/` |
-| **M3** | Statistical insights — anomaly detection, cause classification, maintenance recommendation | `ym_datalake/etl/` |
-| **M4** | Glue catalog + Athena WorkGroup (partition projection, no crawler) | `deployment/athena_tool_stack.py` |
-| **M5** | Async query API — API Gateway + Lambda + DynamoDB registry | `lambda_function/async_query_api/` |
-| **M6** | Dashboard — Fleet Overview, Fleet Map, Vessel Deep-dive, Optimizer, Planner, Alerts | `web/` |
-| **M7** | ML forecasting — speed-loss / FOC point forecasts, health score, ML maintenance plan | `ym_datalake/ml/` |
+| **ETL** | 3 source files → 20 flat tables (clean · ISO 15016/19030 · CII · anomalies · recommendations) | `ym_datalake/etl/` |
+| **Catalog** | Glue database + Athena WorkGroup — 20 flat, **unpartitioned** tables, no crawler | `deployment/athena_tool_stack.py` |
+| **Async API** | API Gateway + Lambda + DynamoDB registry (submit → poll → page) | `lambda_function/async_query_api/` |
+| **Dashboard** | Fleet Overview, Fleet Map, Vessel Deep-dive, Optimizer, Planner, Alerts | `web/` |
 
 Region is **`us-west-2`**; the CDK stack is **`YmHackathonAthenaToolStack`**.
 
@@ -38,12 +39,10 @@ Region is **`us-west-2`**; the CDK stack is **`YmHackathonAthenaToolStack`**.
 - [Configuration](#configuration)
 - [Develop & test](#develop--test)
 - [1. Deploy (CDK)](#1-deploy-cdk)
-- [2. Generate synthetic data (M1)](#2-generate-synthetic-data-m1)
-- [3. ETL the real dataset](#3-etl-the-real-dataset)
-- [4. Query / verify Athena](#4-query--verify-athena)
-- [5. Async query API (M5)](#5-async-query-api-m5)
-- [6. Dashboard (M6)](#6-dashboard-m6)
-- [7. ML forecasts (M7)](#7-ml-forecasts-m7)
+- [2. Build the data lake](#2-build-the-data-lake)
+- [3. Query / verify Athena](#3-query--verify-athena)
+- [4. Async query API](#4-async-query-api)
+- [5. Dashboard](#5-dashboard)
 - [Documentation](#documentation)
 
 ## Prerequisites
@@ -55,8 +54,8 @@ Region is **`us-west-2`**; the CDK stack is **`YmHackathonAthenaToolStack`**.
 | Docker | Lambda bundling at `cdk deploy` | must be running |
 | AWS credentials | deploy + upload + query | examples use `AWS_PROFILE=ym-hackathon`; account must be CDK-bootstrapped |
 
-Generating and computing the dataset need **none** of the AWS tooling — only
-`uv`. AWS is required only to deploy, upload, and query.
+Building the data lake needs **none** of the AWS tooling — only `uv`. AWS is required
+only to deploy, upload, and query.
 
 ## Quick start (end-to-end)
 
@@ -69,28 +68,19 @@ uv sync                                                        # install deps
 # 1. Deploy — note the CfnOutputs (bucket name, API url/key ids)
 bash scripts/export-requirements.sh
 AWS_PROFILE=ym-hackathon npx aws-cdk@latest deploy -c env=dev
-BUCKET=$(AWS_PROFILE=ym-hackathon aws cloudformation describe-stacks --stack-name YmHackathonAthenaToolStack \
-  --query "Stacks[0].Outputs[?OutputKey=='DataLakeBucketName'].OutputValue" --output text)
 
-# 2. Generate raw data (M1) + upload raw/ → s3://$BUCKET/raw/
-AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.synthetic_data generate \
-  --out ./tmp --seed 42 --validate --upload --bucket "$BUCKET"
+# 2. Build all 20 tables from ./dataset and upload them to the lake bucket
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl build --upload
 
-# 3. Load the real dataset → raw/, compute curated fact_ship_* → curated/, upload both
-AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl load-real \
-  --data ./dataset --out ./tmp --upload --bucket "$BUCKET"
-AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl compute-real \
-  --data ./dataset --out ./tmp --upload --bucket "$BUCKET"
+# 3. Data is now queryable — no crawler, no MSCK, no partitions. See §3–§4.
 
-# 4. Data is now queryable (partition projection — no crawler / MSCK). See §4–§5.
-
-# 5. Dashboard
-cp web/config.example.js web/config.js   # fill apiBaseUrl + apiKey (see §6)
+# 4. Dashboard
+cp web/config.example.js web/config.js   # fill apiBaseUrl + apiKey (see §5)
 python -m http.server 8000 -d web        # open http://localhost:8000
 ```
 
-Drop `--upload --bucket` from steps 2–3 to build the dataset **fully offline** under
-`./tmp/` without touching AWS.
+Drop `--upload` from step 2 to build the whole lake **fully offline** under `./tmp/`
+without touching AWS.
 
 ## Real dataset pipeline (hackathon data)
 
@@ -113,7 +103,7 @@ S3 keys are overwritten. The bucket resolves from `app.datalake.bucket_name` in
 `conf/<env>.conf` (`--env`, default `dev`); `--bucket` overrides it. Other flags:
 `--data` (source directory, default `./dataset`), `--out`, `--seed`, `--region`.
 
-**The catalog** (schemas: `table/schema.py`). Every table is flat — 21,282 noon
+**The catalog** (schemas: `ym_datalake/schema.py`). Every table is flat — 21,282 noon
 rows / ~4 MB is far below the size where partition pruning pays for itself, so
 `ship_id` is an ordinary body column and each table is one JSONL file. No
 projection, no crawler, no `MSCK`, no partition predicates.
@@ -136,14 +126,23 @@ which expands rather than loses: `source_event_type` keeps the original on every
 atom, so grouping on `(ship_id, event_day)` reconstructs the 77 source rows
 exactly. `tests/unit/ym_datalake/test_preservation.py` enforces all of this.
 
-**Provenance is mandatory.** Every column in `table/schema.py` is tagged
+**Provenance is mandatory.** Every column in `ym_datalake/schema.py` is tagged
 *measured* (read from the source), *class* (a W1/W2 design value), or
 *estimated* (synthesized — **never quote as fact**). The estimated set is: the
 calendar epoch (day 0 = 2021-07-01), all geography, all USD, the UWI numeric
-signals, and event cost/downtime/location.
+signals, and event cost/downtime/location. Full column dictionary:
+[`doc/schema.md`](doc/schema.md).
 
 Analytics thresholds (the ISO 19030 gate, the 8 % cleaning trigger, the z-score
 bands) are constants in the `ym_datalake/etl/curated/` modules that own them.
+
+**One finding worth knowing before you read a speed-loss number.** The ISO 15016
+wind/wave correction is **decorative on this dataset**: the pipeline tests
+bow-relative / true-compass / no-correction empirically and *no correction wins*
+(4.534 pp detrended scatter vs 5.009 / 5.068), so `power_corrected_kw ==
+horse_power`. The Beaufort ≤ 4 gate is what excludes weather here, not a
+correction term. The verdict is re-derived and printed on every build. See
+[`doc/curated-dataset.md`](doc/curated-dataset.md#corrections).
 
 ## Repository layout
 
@@ -152,7 +151,7 @@ app.py                                  CDK entrypoint (requires -c env=<env>)
 cdk.json                                "app": "uv run python app.py"
 deployment/athena_tool_stack.py         data lake (bucket + glue tables) + athena workgroup + lambdas + API + SSM + IAM
 conf/default.conf  conf/dev.conf        HOCON per-env config (include pattern)
-table/schema.py                         the catalog: all 20 tables, every column tagged measured / class / estimated
+ym_datalake/schema.py                   the catalog: all 20 tables, every column tagged measured / class / estimated
 ym_datalake/etl/                        the pipeline: 3 source files → 20 flat JSONL tables (local-only)
   __main__.py                           CLI: build
   source.py                             load the 3 sources VERBATIM (+ the maintenance `+` split)
@@ -164,11 +163,12 @@ ym_datalake/etl/                        the pipeline: 3 source files → 20 flat
   curated/daily.py                      fact_performance_daily: the spine every other table reads
   curated/compute.py                    the orchestrator → {table_name: rows}
   jsonl.py uploader.py                  JSONL writer, put raw/ + curated/ trees to S3
-lambda_function/athena_query/           M4 sync query Lambda (router + pydantic handler + SSM/Athena I/O)
-lambda_function/async_query_api/        M5 async REST API Lambda (aws-lambda-powertools resolver)
+lambda_function/athena_query/           sync query Lambda (router + pydantic handler + SSM/Athena I/O)
+lambda_function/async_query_api/        async REST API Lambda (aws-lambda-powertools resolver)
 scripts/export-requirements.sh          pin lambda deps into requirements.txt
-web/                                    M6 Dashboard — no-build Vue 3 + D3 static app
-tests/unit/                             offline suite (boto3/numpy/sklearn mocked; no AWS/network)
+web/                                    Dashboard — no-build Vue 3 + D3 static app
+doc/                                    dataset · synthetic-dataset · curated-dataset · schema · vessel · iso-19030
+tests/unit/                             offline suite (boto3 mocked; no AWS/network)
 tests/e2e/                              live suite against the deployed API (auto-skips offline)
 ```
 
@@ -216,189 +216,112 @@ AWS_PROFILE=ym-hackathon npx aws-cdk@latest deploy -c env=dev  # note the CfnOut
 
 The stack (`deployment/athena_tool_stack.py`) provisions:
 
-- **Data lake** — a Glue database (`ym_hackathon`) over a raw + curated S3 bucket
-  (20 tables total; see [`doc/table-schema.md`](doc/table-schema.md)). Raw zone: six
-  JSON-SerDe tables (`noon_report` partitioned by `imo_number`+`year`; `vessel_master`
-  (+`fleet_id`/`fleet_name`), `reference_curve`, `uwi`, `maintenance_event`,
-  `fuel_price` unpartitioned). Curated zone (M2): `fact_performance_daily`
-  (partitioned `imo_number`+`year`+`month`) and `fact_performance_indicator` /
-  `fact_uwi` / `fact_maintenance_event` / `fact_voyage` (partitioned by
-  `imo_number`) — these, like raw `noon_report`, use partition projection; plus flat
-  `dim_vessel` (+`fleet_id`/`fleet_name`), `dim_reference_curve`, `dim_port`,
-  `agg_fleet_daily` (grain = fleet × day — `ALL` rollup + 3 sub-fleets). Curated zone
-  (M3): `fact_anomaly` (partitioned by `imo_number`, projection) plus flat
-  `fact_recommendation`, `fact_maintenance_recommendation`, `fact_alert`. Curated
-  zone (Phase 2, M2): `fact_speed_profile` (partitioned by `imo_number`, projection)
-  — the bunker & slow-steaming optimizer, grain vessel × speed-grid point (columns
-  in [`doc/skill/`](doc/skill/fact_speed_profile.md)).
+- **Data lake** — a Glue database (`ym_hackathon`) over a raw + curated S3 bucket.
+  **All 20 tables are flat, unpartitioned `EXTERNAL_TABLE`s** using the OpenX JSON
+  SerDe over one JSONL file each, at `s3://<bucket>/{raw,curated}/<table>/`. No
+  partition projection, no crawler, no `MSCK`. Column dictionary:
+  [`doc/schema.md`](doc/schema.md).
 - **Athena** — a WorkGroup, its results bucket, and a Lambda that runs SQL against
   Athena via boto3 (SSM runtime config + IAM).
-- **Async query API (M5)** — a DynamoDB query registry (TTL), a second Lambda
+- **Async query API** — a DynamoDB query registry (TTL), a second Lambda
   (`async_query_api`, aws-lambda-powertools REST resolver), and a REST API Gateway
-  (`/v1/*`, `x-api-key` auth, CORS allow-all) implementing submit → poll → page.
+  (`x-api-key` auth, CORS allow-all) implementing submit → poll → page.
 
 **Outputs:** `DataLakeBucketName` (upload target), `AthenaQueryFunctionArn`
-(sync invoke), `AthenaResultsBucketName`, and — for the async API (M5) —
+(sync invoke), `AthenaResultsBucketName`, and — for the async API —
 `AsyncQueryApiUrl`, `AsyncQueryApiKeyId`, `QueryRegistryTableName`.
 
-## 2. Generate synthetic data (M1)
+## 2. Build the data lake
 
-Pure local Python — no AWS needed to produce or validate. Emits the raw-zone JSONL
-tree under `./tmp/raw/` and per-day ground truth under `./tmp/truth/` (the latter is
-never uploaded). See [`doc/synthetic-dataset.md`](doc/synthetic-dataset.md) (raw,
-C1–C12) for the field-level design.
+One command, reading the three source files under `./dataset` (`vt_fd.csv`,
+`maintenance.csv`, `vessel.jsonl`) and writing all 20 tables:
 
 ```bash
-# generate 5 years × 9-vessel fleet, then run the C1–C12 consistency checks
-uv run python -m ym_datalake.synthetic_data generate --out ./tmp --seed 42 --validate
+# fully offline — writes ./tmp/{raw,curated}/<table>/<table>.jsonl
+uv run python -m ym_datalake.etl build
 
-# re-run only the consistency checks against an existing tree
-uv run python -m ym_datalake.synthetic_data validate --dir ./tmp
+# same, uploading every table to s3://<bucket>/{raw,curated}/
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl build --upload
 ```
 
-`generate` flags: `--out` (default `./tmp`), `--seed` (default `42`, deterministic),
-`--start` / `--end` (default `2021-07-01`..`2026-06-30`), `--validate`, `--upload`,
-`--bucket` (required with `--upload`), `--region` (default `us-west-2`).
+Flags: `--data` (source dir, default `./dataset`), `--out` (default `./tmp`),
+`--seed` (default `42` — moves only the estimated columns), `--upload`, `--bucket`
+(falls back to `app.datalake.bucket_name` from `conf/<env>.conf`), `--env` (default
+`dev`), `--region` (default `us-west-2`). Re-running is safe: the same S3 keys are
+overwritten.
 
-Uploading requires the deployed data-lake bucket, so **deploy first** ([§1](#1-deploy-cdk)):
+The build prints per-table row counts and the three findings that decide whether any
+of the ISO numbers mean anything — the duplicate count (344), the ISO-valid row count
+(4,657), and the empirically-chosen wind convention with all three of its scores.
 
-```bash
-AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.synthetic_data generate \
-  --out ./tmp --seed 42 --upload --bucket <DataLakeBucketName>
-```
+## 3. Query / verify Athena
 
-`--upload` puts every `./tmp/raw/**/*.jsonl` to `s3://<bucket>/raw/...` (skipping
-`truth/`). The keys mirror the local layout, so the `noon_report` partition
-directories land exactly on the prefixes the Glue table projects — no crawler /
-`MSCK` needed.
-
-## 3. ETL the real dataset
-
-`ym_datalake.etl` has two subcommands, both reading the source files under `./dataset`
-(`vt_fd.csv`, `maintenance.csv`, `vessel.jsonl`):
-
-- **`load-real`** — parses the three source files and writes the partitioned raw JSONL
-  tree under `./tmp/raw/{vt_fd,maintenance,vessel}/`.
-- **`compute-real`** — derives the curated tables from the same sources and writes them
-  under `./tmp/curated/fact_ship_{daily,anomaly,alert,maintenance_recommendation}/`.
-
-```bash
-# raw zone (./tmp/raw/) from ./dataset
-uv run python -m ym_datalake.etl load-real --data ./dataset --out ./tmp
-
-# curated fact_ship_* tables (./tmp/curated/)
-uv run python -m ym_datalake.etl compute-real --data ./dataset --out ./tmp
-
-# same, uploading to s3://<bucket>/... (keys mirror the local layout)
-AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl load-real \
-  --data ./dataset --out ./tmp --upload --bucket <DataLakeBucketName>
-AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl compute-real \
-  --data ./dataset --out ./tmp --upload --bucket <DataLakeBucketName>
-```
-
-Flags (both commands): `--data` (source dir, default `./dataset`), `--out` (output dir,
-default `./tmp`), `--upload`, `--bucket` (falls back to `app.datalake.bucket_name` from
-`conf/<env>.conf`), `--env` (default `dev`), `--region` (default `us-west-2`). Upload is
-an allowlist of the real-data prefixes, so a shared `--out` never sweeps up other trees.
-
-## 4. Query / verify Athena
-
-Once data is uploaded, the tables are immediately queryable (partition projection
-means no partition load step). Query via the Athena console, the `aws athena` CLI, or
-the deployed sync Lambda:
+Once uploaded, the tables are immediately queryable — nothing is partitioned, so there
+is no partition load step and no partition predicate to write. Query via the Athena
+console, the `aws athena` CLI, or the deployed sync Lambda:
 
 ```bash
 aws lambda invoke --function-name <AthenaQueryFunctionArn> \
   --cli-binary-format raw-in-base64-out \
-  --payload '{"action":"run_query","sql":"SELECT count(*) AS n FROM noon_report WHERE imo_number='\''9700006'\'' AND year=2023"}' \
+  --payload '{"action":"run_query","sql":"SELECT count(*) AS n FROM noon_report WHERE ship_id='\''S4'\''"}' \
   out.json
-# out.json → {"query_execution_id":"...","columns":["n"],"rows":[["365"]],"row_count":1}
+# out.json → {"query_execution_id":"...","columns":["n"],"rows":[["1461"]],"row_count":1}
 ```
 
 Payload fields: `action` (`run_query`), `sql` (required), `max_rows` (default 1000),
-optional `database` / `catalog` overrides. The curated (M2 + M3) tables query the
-same way — only the `sql` changes:
+optional `database` / `catalog` overrides. Curated tables query the same way — only the
+`sql` changes:
 
 ```bash
-# fact_performance_daily — daily rows for one vessel-month (projection prunes to one partition)
-... "sql":"SELECT count(*) AS n FROM fact_performance_daily WHERE imo_number='\''9700006'\'' AND year=2023 AND month=6"
+# fact_performance_daily — ISO-valid speed-loss points for one ship
+... "sql":"SELECT report_date, speed_loss_pct FROM fact_performance_daily WHERE ship_id='\''S4'\'' AND valid_flag ORDER BY noon_utc"
 
-# dim_vessel — flat dimension
-... "sql":"SELECT imo_number, vessel_name, dwt FROM dim_vessel LIMIT 3"
+# dim_vessel — the flat vessel dimension
+... "sql":"SELECT ship_id, hull_class, propeller_variant, dwt FROM dim_vessel ORDER BY ship_id"
 
-# agg_fleet_daily — fleet-wide daily rollup
-... "sql":"SELECT report_date, n_vessels, avg_speed_loss_pct FROM agg_fleet_daily ORDER BY report_date DESC LIMIT 5"
+# agg_fleet_daily — ALWAYS filter fleet_id, or the 'ALL' rollup double-counts
+... "sql":"SELECT report_date, n_vessels, avg_speed_loss_pct FROM agg_fleet_daily WHERE fleet_id='\''ALL'\'' ORDER BY noon_utc DESC LIMIT 5"
 
-# fact_anomaly (M3) — anomaly count by cause for one vessel (projection prunes to imo_number)
-... "sql":"SELECT cause, count(*) AS n FROM fact_anomaly WHERE imo_number='\''9700006'\'' GROUP BY cause ORDER BY n DESC"
+# fact_anomaly — anomaly count by cause for one ship
+... "sql":"SELECT cause, count(*) AS n FROM fact_anomaly WHERE ship_id='\''S4'\'' GROUP BY cause ORDER BY n DESC"
 
-# fact_recommendation (M3) — recommended cleaning date + net saving per vessel
-... "sql":"SELECT imo_number, recommended_clean_date, trigger_eta, net_saving_usd FROM fact_recommendation WHERE imo_number='\''9700006'\''"
+# fact_recommendation — recommended cleaning day + net saving per ship
+... "sql":"SELECT ship_id, recommended_clean_date, trigger_eta_day, net_saving_usd FROM fact_recommendation WHERE ship_id='\''S4'\''"
 ```
 
-Per-table column definitions live in [`doc/table-schema.md`](doc/table-schema.md).
+More worked queries — and every column of every table — in
+[`doc/schema.md`](doc/schema.md).
 
-## 5. Async query API (M5)
+## 4. Async query API
 
 The Dashboard doesn't invoke the Lambda directly — Athena runs can exceed API
-Gateway's 29s sync cap, so M5 exposes an **async** REST API: submit a query, poll its
-status, then page the results inline. Clients never write SQL; they pick a
-`query_type` from an allow-list of predefined, parameterized queries (all binds via
-Athena `?` placeholders — no string interpolation), which the API validates
-(pydantic) before starting the query. Full reference: [`doc/api.md`](doc/api.md).
+Gateway's 29s sync cap, so the API is **async**: submit a query, poll its status, then
+page the results inline. Clients never write SQL; they pick a `query_type` from an
+allow-list of predefined, parameterized queries (all binds via Athena `?` placeholders
+— no string interpolation), which the API validates (pydantic) before starting the
+query.
+
+**Full reference — every `query_type`, its params, and its response shape:**
+[`doc/api.md`](doc/api.md).
 
 | Method | Path | Returns |
 |---|---|---|
-| `POST` | `/v1/queries` | `202 {query_id, status:"PENDING"}` |
-| `GET` | `/v1/queries/{query_id}` | `200 {query_id, status, result_location?}` — status is `PENDING`/`RUNNING`/`SUCCEEDED`/`FAILED` |
-| `GET` | `/v1/queries/{query_id}/results?page_token=` | `200 {query_id, columns, rows, next_page_token?}` (`409` until `SUCCEEDED`) |
+| `POST` | `/queries` | `202 {query_id, status:"PENDING"}` |
+| `GET` | `/queries/{query_id}` | `200 {query_id, status, result_location?}` — status is `PENDING`/`RUNNING`/`SUCCEEDED`/`FAILED` |
+| `GET` | `/queries/{query_id}/results?page_token=` | `200 {query_id, columns, rows, next_page_token?}` (`409` until `SUCCEEDED`) |
 
-`query_type` → main table (poc-spec §8.6):
+Query types are named after the table they serve (`fact_performance_daily`,
+`fact_anomaly`, `agg_fleet_daily`, `noon_report`, `predict_targets`, …) and are keyed on
+**`ship_id`**, matching the catalog in [`doc/schema.md`](doc/schema.md).
 
-| `query_type` | params | main table(s) |
-|---|---|---|
-| `fleet_overview` | `fleet_id?`, `start_date?`, `end_date?` | `agg_fleet_daily` |
-| `fleet_vessels` | — | `dim_vessel` |
-| `fleet_list` | — | `dim_vessel` |
-| `fleet_alerts` | `fleet_id?`, `severity?` | `fact_alert` |
-| `vessel_speed_loss` | `imo_number`, `start_date?`, `end_date?` | `fact_performance_daily` |
-| `vessel_metrics` | `imo_number`, `start_date?`, `end_date?` | `fact_performance_daily` |
-| `vessel_speed_power` | `imo_number` | `fact_performance_daily` ∪ `dim_reference_curve` |
-| `vessel_anomalies` | `imo_number` | `fact_anomaly` |
-| `vessel_alerts` | `imo_number` | `fact_alert` |
-| `vessel_maintenance_effect` | `imo_number` | `fact_maintenance_event` |
-| `vessel_recommendation` | `imo_number` | `fact_recommendation` |
-| `vessel_maintenance_recommendation` | `imo_number` | `fact_maintenance_recommendation` |
-| `vessel_uwi` | `imo_number` | `fact_uwi` |
-| `fleet_positions` | — | `fact_performance_daily` |
-| `vessel_track` | `imo_number`, `start_date?`, `end_date?` | `fact_performance_daily` |
-| `vessel_voyages` | `imo_number` | `fact_voyage` |
-| `vessel_speed_profile` | `imo_number` | `fact_speed_profile` |
-
-`fleet_id` (pattern `ALL|FL-[A-Z]{2,}`, default `ALL`) scopes `fleet_overview` and
-`fleet_alerts` to one sub-fleet or the all-fleet rollup. `fleet_vessels` returns the
-fleet roster + specs (deep-dive header); `fleet_list` feeds the fleet-picker dropdown
-(distinct `fleet_id`/`fleet_name`); `vessel_metrics` returns the full daily metric set
-(slip / SFOC / admiralty / CII / cumulative excess cost / data-quality flags)
-powering the Dashboard deep-dive panels; `fleet_alerts` / `vessel_alerts` return open
-`fact_alert` episodes (fleet-wide or per-vessel, newest first); `vessel_maintenance_recommendation`
-returns the per-action planner strip (ordered by `plan_date`, then priority); `vessel_uwi`
-returns underwater-inspection history. The three Phase-1 map/voyage types (§8.2):
-`fleet_positions` returns the latest daily position per vessel (one dot each on the Fleet
-Map), `vessel_track` returns a vessel's daily lat/lon polyline (deep-dive track map), and
-`vessel_voyages` returns per-voyage economics from `fact_voyage` (sortable voyage table).
-The Phase-2 optimizer type: `vessel_speed_profile` returns a vessel's convex
-usd/nm-vs-speed curve from `fact_speed_profile` (24 speed-grid points with the
-economical-speed marker) backing the Optimizer page.
-
-`imo_number` is a 7-digit string; dates are `YYYY-MM-DD`. Auth is `x-api-key`
-(throttled by a usage plan); the API stage is `prod`, so URLs are `…/prod/v1/…`.
-The query registry (`query_id` → Athena execution id, type, status) lives in DynamoDB
-with a 24h TTL that auto-cleans old records.
+Auth is `x-api-key` (throttled by a usage plan); the API stage is `prod`, so URLs are
+`…/prod/queries`. The query registry (`query_id` → Athena execution id, type, status)
+lives in DynamoDB with a 24h TTL that auto-cleans old records.
 
 ### Call flow
 
-Deploy ([§1](#1-deploy-cdk)), upload M1/M2/M3 data, then grab the URL + key from the outputs:
+Deploy ([§1](#1-deploy-cdk)), [build and upload the lake](#2-build-the-data-lake), then
+grab the URL + key from the stack outputs:
 
 ```bash
 URL=$(AWS_PROFILE=ym-hackathon aws cloudformation describe-stacks --stack-name YmHackathonAthenaToolStack \
@@ -409,14 +332,14 @@ KEY=$(AWS_PROFILE=ym-hackathon aws apigateway get-api-key --api-key "$KEY_ID" \
   --include-value --query value --output text)
 
 # 1. submit → {query_id, status:"PENDING"}
-QID=$(curl -s -XPOST "${URL}v1/queries" -H "x-api-key: $KEY" -H 'content-type: application/json' \
-  -d '{"query_type":"vessel_recommendation","params":{"imo_number":"9700006"}}' | jq -r .query_id)
+QID=$(curl -s -XPOST "${URL}queries" -H "x-api-key: $KEY" -H 'content-type: application/json' \
+  -d '{"query_type":"fact_recommendation","params":{"ship_id":"S4"}}' | jq -r .query_id)
 
 # 2. poll until SUCCEEDED
-curl -s "${URL}v1/queries/$QID" -H "x-api-key: $KEY"          # {"query_id":...,"status":"RUNNING"}
+curl -s "${URL}queries/$QID" -H "x-api-key: $KEY"             # {"query_id":...,"status":"RUNNING"}
 
 # 3. page results inline (follow next_page_token if present)
-curl -s "${URL}v1/queries/$QID/results" -H "x-api-key: $KEY"  # {"columns":[...],"rows":[[...]]}
+curl -s "${URL}queries/$QID/results" -H "x-api-key: $KEY"     # {"columns":[...],"rows":[[...]]}
 ```
 
 The `async_query_api` Lambda is self-contained (its own `config.py` I/O boundary,
@@ -426,8 +349,8 @@ Unit tests live under `tests/unit/lambda_function/async_query_api/`.
 > **Athena string binds:** every `query_type` binds user values via Athena `?`
 > execution parameters (never string-interpolated). Athena parses each parameter as a
 > SQL literal, so string values must be single-quoted — `config._str_literal` wraps
-> every bind as a quoted, quote-escaped literal (a bare `9700006` would otherwise read
-> as an integer, `2024-01-01` as arithmetic, failing `TYPE_MISMATCH` against the
+> every bind as a quoted, quote-escaped literal (a bare `S4` would otherwise fail to
+> parse, `2024-01-01` would read as arithmetic, failing `TYPE_MISMATCH` against the
 > varchar column).
 
 ### End-to-end tests
@@ -436,9 +359,9 @@ Unit tests live under `tests/unit/lambda_function/async_query_api/`.
 across every `query_type`, plus pagination (`next_page_token`) and the 400 / 403 /
 404 / 409 error paths. The suite resolves the API URL + key straight from the
 `YmHackathonAthenaToolStack` CloudFormation outputs (via boto3 — no manual copying), so it needs
-AWS credentials and a deployed stack **with M1/M2/M3 data uploaded** (otherwise
-queries succeed but return no rows). It is marked `e2e` and **auto-skips** when the
-stack or credentials are unavailable, so a plain `pytest` stays green offline.
+AWS credentials and a deployed stack **with the lake uploaded** (otherwise queries
+succeed but return no rows). It is marked `e2e` and **auto-skips** when the stack or
+credentials are unavailable, so a plain `pytest` stays green offline.
 
 ```bash
 AWS_PROFILE=ym-hackathon uv run pytest -s -m e2e tests/e2e/
@@ -448,12 +371,12 @@ Overridable via env: `E2E_STACK_NAME` (default `YmHackathonAthenaToolStack`) and
 AWS region vars (default `us-west-2`). The suite uses only the Python stdlib HTTP
 client (`urllib`) plus boto3 (already a dev dep) for output discovery.
 
-## 6. Dashboard (M6)
+## 5. Dashboard
 
-`web/` is the Dashboard frontend (poc-spec §8) — a **no-build** static app (Vue 3 +
+`web/` is the Dashboard frontend — a **no-build** static app (Vue 3 +
 D3 v7 via CDN/ESM import map; Tailwind prebuilt into `web/tailwind.css`) that the browser serves from localhost
 and that calls the **deployed** async query API directly (CORS is allow-all; auth is
-the `x-api-key`), consuming all 18 `query_type`s. A fleet picker (`ALL` + 3
+the `x-api-key`), consuming all 18 `query_type`s. A fleet picker (`ALL` + the
 sub-fleets) scopes the fleet-level views. It renders six views: **Fleet Overview**
 (KPI cards, sortable fleet table, CII + speed-loss distributions), **Fleet Map** (a
 self-contained D3 world map — Natural Earth land committed as `web/assets/world.geojson`,
@@ -482,14 +405,9 @@ anomaly list).
 ```bash
 cp web/config.example.js web/config.js   # then fill apiBaseUrl + apiKey (git-ignored)
 
-bin/dashboard-start.sh                    # serves ./web on http://localhost:8000 (backgrounded)
-bin/dashboard-stop.sh                     # stops it
-# open http://localhost:8000  (default vessel: YM WELLNESS / 9700006)
+python -m http.server 8000 -d web         # ES modules need http://, not file://
+# open http://localhost:8000
 ```
-
-`dashboard-start.sh` backgrounds a static file server (ES modules need `http://`,
-not `file://`), writing its pid + logs under `tmp/`; set `PORT` to override 8000.
-Equivalent one-liner: `python -m http.server 8000 -d web`.
 
 `web/tailwind.css` is the checked-in, prebuilt Tailwind v3 stylesheet (replaces the
 Play CDN, which console-warns against production use). Regenerate it after adding or
@@ -506,53 +424,20 @@ in traffic) — acceptable for this POC only. The client submits a `query_type`,
 status, then pages results (`api.js`), coercing the all-string Athena cells to
 numbers/booleans.
 
-**Not built (documented omissions):** **Reports** (§8.5 — GenAI, deferred by §5.7).
-(The fleet **map** (§8.2) is now built — Phase 1 added the decorative positions,
-`fact_voyage`/`dim_port`, and the `fleet_positions`/`vessel_track`/`vessel_voyages`
-queries that back it.) (The bunker & slow-steaming **optimizer** is now built —
-Phase 2 added the `fact_speed_profile` speed-cost profile, the `vessel_speed_profile`
-query, the **Optimizer** page, and the **C19** economical-speed check.)
-
-## 7. ML forecasts (M7)
-
-`ym_datalake/ml/` trains locally on the curated zone (plus raw `noon_report`
-for the FOC labels — never the ground truth) and **pre-computes** all inference
-as JSONL: per-vessel 1–90-day p10/p50/p90 forecasts of speed loss and daily
-FOC (`fact_ml_prediction`, imo-partitioned), an IsolationForest fleet-health
-score, and a predicted-curve hull-cleaning plan (`fact_ml_maintenance_plan`)
-with the M3 closed-form date as its comparison column. Models live in a local
-registry (`./tmp/models/`, traced by `dim_ml_model`); nothing serves online.
-Design + checks: [`doc/ml-pipeline-zh.md`](doc/ml-pipeline-zh.md).
-
-macOS needs the OpenMP runtime once: `brew install libomp` (xgboost).
-
-```bash
-# train: rolling-origin backtest (C21 gate vs persistence/Theil-Sen) → fit → registry
-uv run python -m ym_datalake.ml train --in ./tmp --models ./tmp/models --seed 42
-
-# batch pre-inference → ./tmp/ml/*.jsonl, validate C21–C23, upload to s3://<bucket>/ml/
-AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.ml infer \
-  --in ./tmp --models ./tmp/models --out ./tmp --validate --upload --bucket "$BUCKET"
-```
-
-Glue tables / API `query_type`s / Dashboard overlays for the `ml/` zone are a
-documented follow-up (`doc/ml-pipeline-zh.md` §7, §10).
+**Not built (documented omissions):** **Reports** (GenAI).
 
 ## Documentation
 
-| Doc | Contents |
-|---|---|
-| [`doc/poc-spec.md`](doc/poc-spec.md) | Full POC specification (all milestones). |
-| [`doc/poc-requirements.md`](doc/poc-requirements.md) | Requirements summary. |
-| [`doc/synthetic-dataset.md`](doc/synthetic-dataset.md) | M1 raw-zone field design + C1–C12 checks. |
-| [`doc/curated-dataset.md`](doc/curated-dataset.md) | M2 curated field design + C13 closed loop. |
-| [`doc/insights.md`](doc/insights.md) | M3 statistical-insight field design + C14 checks. |
-| [`doc/table-schema.md`](doc/table-schema.md) | Per-table Athena/Glue column dictionary (20 tables). |
-| [`doc/api.md`](doc/api.md) | Async query API (M5) reference — v1, legacy synthetic catalog. |
-| [`doc/api_v2.md`](doc/api_v2.md) | Async query API **v2** — real-dataset catalog (`/v2/queries`), data provenance, v1↔v2 mapping. |
-| [`doc/ml-pipeline-zh.md`](doc/ml-pipeline-zh.md) | M7 ML training & inference pipeline design + C21–C23 checks (Chinese). |
-| [`doc/skill/`](doc/skill/README.md) | One self-contained skill file per table (text→SQL reference), mirroring `table-schema.md`. |
-| [`doc/genbi-agent.md`](doc/genbi-agent.md) | GenBI agent (LangForge): what it is, how to create/update (`lfe_resource/` + `scripts/lfe_register.py`). |
+Start at the top; each doc answers one question.
 
-Chinese (`-zh`) editions (dataset, insight, schema, API) accompany their English
-twins section-for-section.
+| Doc | Answers |
+|---|---|
+| [`doc/dataset.md`](doc/dataset.md) | **What is in `dataset/`?** The three source files — grain, counts, fill rates, and the five traps that will corrupt a result if you miss them. |
+| [`doc/synthetic-dataset.md`](doc/synthetic-dataset.md) | **What did we make up, and how?** Every estimated column, both RNG call sites, and how to reproduce them. |
+| [`doc/curated-dataset.md`](doc/curated-dataset.md) | **What does the ETL compute?** The DAG, a section per module, and *why* each non-obvious call was made. |
+| [`doc/schema.md`](doc/schema.md) | **What are the 20 tables?** Full column dictionary, provenance tags, enums, worked Athena queries. |
+| [`doc/vessel.md`](doc/vessel.md) | How `dataset/vessel.jsonl` was reverse-engineered from `vt_fd.csv`, column by column. |
+| [`doc/vessel_particulars.md`](doc/vessel_particulars.md) | The hull-particulars inference working note (Chinese). |
+| [`doc/iso-19030.md`](doc/iso-19030.md) | The speed-loss standard the pipeline implements. |
+| [`doc/glossary.md`](doc/glossary.md) | Terms, units, and abbreviations. |
+| [`doc/api.md`](doc/api.md) | Async query API — every `query_type`, its params, and its response shape. |

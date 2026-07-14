@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from table.schema import (
+from ym_datalake.schema import (
     ALL_TABLES,
     CURATED_TABLES,
     MAINTENANCE_EVENT_COLUMNS,

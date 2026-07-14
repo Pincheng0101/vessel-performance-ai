@@ -30,8 +30,10 @@ REGION = (
     or 'us-west-2'
 )
 
-# YM WELLNESS — the star vessel with the engineered fouling arc; guarantees populated rows.
-WELLNESS_IMO = '9700006'
+# S1 — a training ship, so every curated table carries rows for it. S21 is a *prediction*
+# ship: it is the only place the PREDICT cells (and thus predict_targets rows) exist.
+SHIP_ID = 'S1'
+PREDICT_SHIP_ID = 'S21'
 
 _POLL_TIMEOUT_S = 120
 _POLL_INTERVAL_S = 2
@@ -66,13 +68,13 @@ class ApiClient:
                 return e.code, {'raw': raw.decode(errors='replace')}
 
     def submit(self, query_type: str, params: dict | None = None, *, api_key: bool = True):
-        return self._request('POST', 'v1/queries', {'query_type': query_type, 'params': params or {}}, api_key=api_key)
+        return self._request('POST', 'queries', {'query_type': query_type, 'params': params or {}}, api_key=api_key)
 
     def status(self, query_id: str):
-        return self._request('GET', f'v1/queries/{query_id}')
+        return self._request('GET', f'queries/{query_id}')
 
     def results(self, query_id: str, page_token: str | None = None):
-        path = f'v1/queries/{query_id}/results'
+        path = f'queries/{query_id}/results'
         if page_token:
             path += '?page_token=' + urllib.parse.quote(page_token, safe='')
         return self._request('GET', path)

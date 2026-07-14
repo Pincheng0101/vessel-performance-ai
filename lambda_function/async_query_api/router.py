@@ -2,7 +2,7 @@
 
 Serves interactive docs at /swagger and the raw OpenAPI schema at /openapi.json.
 Both doc routes are public (no x-api-key) so a browser can open them directly; the
-/v1 routes remain key-protected at the API Gateway layer.
+/queries routes remain key-protected at the API Gateway layer.
 """
 
 from typing import Annotated
@@ -16,7 +16,7 @@ _API_TITLE = 'YM Datalake Async Query API'
 _API_VERSION = '1.0.0'
 _API_DESCRIPTION = 'Submit Athena queries asynchronously, poll their status, and page through results.'
 # The API is served under the 'prod' stage, so document that prefix; a relative url keeps
-# it correct across accounts/regions and makes Swagger UI "Try it out" hit /prod/v1/*.
+# it correct across accounts/regions and makes Swagger UI "Try it out" hit /prod/queries.
 _SERVERS = [Server(url='/prod')]
 
 # CORS allow-all for the browser Dashboard; Powertools adds the headers to real responses
@@ -31,38 +31,18 @@ app.enable_swagger(
 )
 
 
-@app.post('/v1/queries', status_code=202, summary='Submit a query', tags=['queries'])
+@app.post('/queries', status_code=202, summary='Submit a query', tags=['queries'])
 def submit_query(body: Annotated[handlers.SubmitBody, Body()]) -> handlers.SubmitResponse:
     return handlers.submit(body)
 
 
-@app.get('/v1/queries/<query_id>', summary='Get query status', tags=['queries'])
+@app.get('/queries/<query_id>', summary='Get query status', tags=['queries'])
 def get_status(query_id: str) -> handlers.StatusResponse:
     return handlers.status(query_id)
 
 
-@app.get('/v1/queries/<query_id>/results', summary='Fetch query results', tags=['queries'])
+@app.get('/queries/<query_id>/results', summary='Fetch query results', tags=['queries'])
 def get_results(
-    query_id: str,
-    page_token: Annotated[str | None, Query(description='Token from a previous page.')] = None,
-) -> handlers.ResultsResponse:
-    return handlers.results(query_id, page_token)
-
-
-# v2 — real-dataset catalog (vt_fd / maintenance). Same submit → poll → results
-# lifecycle; only the query_type registry differs. status/results are shared.
-@app.post('/v2/queries', status_code=202, summary='Submit a query (real dataset)', tags=['queries-v2'])
-def submit_query_v2(body: Annotated[handlers.SubmitBodyV2, Body()]) -> handlers.SubmitResponse:
-    return handlers.submit_v2(body)
-
-
-@app.get('/v2/queries/<query_id>', summary='Get query status', tags=['queries-v2'])
-def get_status_v2(query_id: str) -> handlers.StatusResponse:
-    return handlers.status(query_id)
-
-
-@app.get('/v2/queries/<query_id>/results', summary='Fetch query results', tags=['queries-v2'])
-def get_results_v2(
     query_id: str,
     page_token: Annotated[str | None, Query(description='Token from a previous page.')] = None,
 ) -> handlers.ResultsResponse:

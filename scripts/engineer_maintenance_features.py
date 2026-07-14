@@ -27,7 +27,7 @@ def _to_int(value: str | None) -> int | None:
 
 def _normalize_event_type(event_type: str | None) -> str:
     if not event_type:
-        return ""
+        return ''
     mapping = {
         'DD': 'dry_dock',
         'PP': 'propeller_polishing',
@@ -72,24 +72,28 @@ def load_maintenance_rows(path: Path) -> dict[str, list[dict[str, Any]]]:
         day = _to_int(row.get('event_day'))
         if day is None:
             continue
-        by_ship.setdefault(ship_id, []).append({
-            'day': day,
-            'event_type': row.get('event_type', ''),
-            'event_type_normalized': _normalize_event_type(row.get('event_type', '')),
-            'propeller_condition': row.get('propeller_condition', ''),
-            'hull_fouling_type': row.get('hull_fouling_type', ''),
-            'hull_coating_condition': row.get('hull_coating_condition', ''),
-            'cavitation_found': row.get('cavitation_found', ''),
-            'draft_fwd_m': row.get('draft_fwd_m', ''),
-            'draft_aft_m': row.get('draft_aft_m', ''),
-        })
+        by_ship.setdefault(ship_id, []).append(
+            {
+                'day': day,
+                'event_type': row.get('event_type', ''),
+                'event_type_normalized': _normalize_event_type(row.get('event_type', '')),
+                'propeller_condition': row.get('propeller_condition', ''),
+                'hull_fouling_type': row.get('hull_fouling_type', ''),
+                'hull_coating_condition': row.get('hull_coating_condition', ''),
+                'cavitation_found': row.get('cavitation_found', ''),
+                'draft_fwd_m': row.get('draft_fwd_m', ''),
+                'draft_aft_m': row.get('draft_aft_m', ''),
+            }
+        )
 
     for events in by_ship.values():
         events.sort(key=lambda entry: entry['day'])
     return by_ship
 
 
-def engineer_features(voyage_rows: list[dict[str, str]], maintenance_by_ship: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+def engineer_features(
+    voyage_rows: list[dict[str, str]], maintenance_by_ship: dict[str, list[dict[str, Any]]]
+) -> list[dict[str, Any]]:
     output_rows: list[dict[str, Any]] = []
 
     for row in voyage_rows:
@@ -113,7 +117,9 @@ def engineer_features(voyage_rows: list[dict[str, str]], maintenance_by_ship: di
 
         last_polishing = next((event for event in reversed(history) if _is_polishing_event(event['event_type'])), None)
         last_cleaning = next((event for event in reversed(history) if _is_cleaning_event(event['event_type'])), None)
-        last_inspection = next((event for event in reversed(history) if _is_inspection_event(event['event_type'])), None)
+        last_inspection = next(
+            (event for event in reversed(history) if _is_inspection_event(event['event_type'])), None
+        )
         last_dock = next((event for event in reversed(history) if _is_dock_event(event['event_type'])), None)
 
         features['days_since_last_polishing'] = (day - last_polishing['day']) if last_polishing else day
@@ -152,8 +158,14 @@ def write_rows(path: Path, rows: list[dict[str, Any]]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description='Add maintenance-event features to vt_fd.csv')
     parser.add_argument('--voyage', default='tmp/yangming-aws-summit-hackathon/vt_fd.csv', help='Path to vt_fd.csv')
-    parser.add_argument('--maintenance', default='tmp/yangming-aws-summit-hackathon/maintenance.csv', help='Path to maintenance.csv')
-    parser.add_argument('--output', default='tmp/yangming-aws-summit-hackathon/vt_fd_with_maintenance_features.csv', help='Output CSV path')
+    parser.add_argument(
+        '--maintenance', default='tmp/yangming-aws-summit-hackathon/maintenance.csv', help='Path to maintenance.csv'
+    )
+    parser.add_argument(
+        '--output',
+        default='tmp/yangming-aws-summit-hackathon/vt_fd_with_maintenance_features.csv',
+        help='Output CSV path',
+    )
     args = parser.parse_args()
 
     voyage_path = Path(args.voyage)

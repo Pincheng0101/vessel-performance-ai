@@ -25,17 +25,16 @@ _STATE_MAP = {
 }
 
 
-def _submit_variant(query_type: str, params_model: type[BaseModel], *, prefix: str = 'Submit') -> type[BaseModel]:
+def _submit_variant(query_type: str, params_model: type[BaseModel]) -> type[BaseModel]:
     """Build one request-body variant: a fixed query_type + its typed params model.
 
     params is optional when the model has no required fields (so callers can omit it
-    for the no-parameter query types) and required otherwise. ``prefix`` keeps the
-    generated model names unique across the v1/v2 unions (shared OpenAPI components).
+    for the no-parameter query types) and required otherwise.
     """
     required = any(f.is_required() for f in params_model.model_fields.values())
     params_field = (params_model, ... if required else Field(default_factory=params_model))
     return create_model(
-        f'{prefix}_{query_type}',
+        f'Submit_{query_type}',
         __config__=ConfigDict(extra='forbid', title=f'{query_type} query'),
         query_type=(Literal[query_type], ...),
         params=params_field,
@@ -46,11 +45,6 @@ def _submit_variant(query_type: str, params_model: type[BaseModel], *, prefix: s
 # params schema for the selected type. Built from the registry so it never drifts.
 _SUBMIT_VARIANTS = tuple(_submit_variant(name, model) for name, (model, _builder) in queries.QUERY_TYPES.items())
 SubmitBody = Annotated[Union[_SUBMIT_VARIANTS], Field(discriminator='query_type')]
-
-_SUBMIT_VARIANTS_V2 = tuple(
-    _submit_variant(name, model, prefix='SubmitV2') for name, (model, _builder) in queries.QUERY_TYPES_V2.items()
-)
-SubmitBodyV2 = Annotated[Union[_SUBMIT_VARIANTS_V2], Field(discriminator='query_type')]
 
 
 class SubmitResponse(BaseModel):
@@ -78,17 +72,8 @@ class ResultsResponse(BaseModel):
 
 
 def submit(req: SubmitBody) -> dict:
-    """POST /v1/queries — start the query, register it, return the query_id (202)."""
-    return _submit(req, types=None)
-
-
-def submit_v2(req: SubmitBodyV2) -> dict:
-    """POST /v2/queries — same lifecycle, rendered against the real-dataset catalog."""
-    return _submit(req, types=queries.QUERY_TYPES_V2)
-
-
-def _submit(req, types: dict | None) -> dict:
-    sql, binds = queries.render(req.query_type, req.params.model_dump(), types)
+    """POST /queries — start the query, register it, return the query_id (202)."""
+    sql, binds = queries.render(req.query_type, req.params.model_dump())
     exec_id = config.start_query(sql, binds)
     query_id = 'q_' + uuid.uuid4().hex
     config.put_registry(query_id, exec_id, req.query_type)
@@ -97,7 +82,7 @@ def _submit(req, types: dict | None) -> dict:
 
 
 def status(query_id: str) -> dict:
-    """GET /v1/queries/{id} — map Athena state to API status; add result_location when done."""
+    """GET /queries/{id} — map Athena state to API status; add result_location when done."""
     item = config.get_registry(query_id)
     if item is None:
         raise NotFoundError(f'Unknown query_id: {query_id}')
@@ -113,7 +98,7 @@ def status(query_id: str) -> dict:
 
 
 def results(query_id: str, page_token: str | None = None) -> dict:
-    """GET /v1/queries/{id}/results — page results inline; 409 until the query has SUCCEEDED."""
+    """GET /queries/{id}/results — page results inline; 409 until the query has SUCCEEDED."""
     item = config.get_registry(query_id)
     if item is None:
         raise NotFoundError(f'Unknown query_id: {query_id}')
@@ -123,7 +108,7 @@ def results(query_id: str, page_token: str | None = None) -> dict:
         raise ServiceError(
             409,
             f'Query {query_id} is not ready (status={_STATE_MAP.get(state, state)}); '
-            f'poll GET /v1/queries/{query_id} until SUCCEEDED',
+            f'poll GET /queries/{query_id} until SUCCEEDED',
         )
 
     page = config.fetch_page(item['exec_id'], page_token)

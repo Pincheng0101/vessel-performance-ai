@@ -6,26 +6,25 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
 
 import joblib
 import pandas as pd
-
 from build_model_ready_data import convert_total_energy_to_fuel_amount
 from model_pipeline_utils import build_feature_columns, prepare_feature_frame
 
 
 def build_submission_frame(prediction_df: pd.DataFrame, predictions: list[float]) -> pd.DataFrame:
     fuel_types = prediction_df['target_fuel_column'].astype(str)
-    return pd.DataFrame({
-        'ship_id': prediction_df['De-identification Name'].astype(str),
-        'day': prediction_df['NOON_UTC'].astype(int),
-        'fuel_type': fuel_types,
-        'predicted_value': [
-            convert_total_energy_to_fuel_amount(float(pred), fuel)
-            for pred, fuel in zip(predictions, fuel_types)
-        ],
-    })
+    return pd.DataFrame(
+        {
+            'ship_id': prediction_df['De-identification Name'].astype(str),
+            'day': prediction_df['NOON_UTC'].astype(int),
+            'fuel_type': fuel_types,
+            'predicted_value': [
+                convert_total_energy_to_fuel_amount(float(pred), fuel) for pred, fuel in zip(predictions, fuel_types)
+            ],
+        }
+    )
 
 
 def generate_submission(

@@ -24,9 +24,9 @@ from pathlib import Path
 
 import pytest
 
-from table.schema import ALL_TABLES, CURATED_TABLES, RAW_TABLES
 from ym_datalake.etl.__main__ import _write
 from ym_datalake.etl.curated.compute import build_all
+from ym_datalake.schema import ALL_TABLES, CURATED_TABLES, RAW_TABLES
 
 DATASET = Path(__file__).resolve().parents[3] / 'dataset'
 HULL_RESET_EVENTS = {'UWC', 'DD'}
@@ -296,7 +296,7 @@ def test_synthesized_columns_are_flagged_estimated_in_the_schema() -> None:
     The guard is the schema file itself: if someone adds a synthesized column and forgets to
     say so, this fails and the lake stops presenting an assumption as a measurement.
     """
-    schema_text = (Path(__file__).resolve().parents[3] / 'table' / 'schema.py').read_text(encoding='utf-8')
+    schema_text = (Path(__file__).resolve().parents[3] / 'ym_datalake' / 'schema.py').read_text(encoding='utf-8')
 
     must_be_estimated = (
         'latitude',
@@ -314,6 +314,6 @@ def test_synthesized_columns_are_flagged_estimated_in_the_schema() -> None:
     )
     for column in must_be_estimated:
         declarations = [line for line in schema_text.splitlines() if line.strip().startswith(f"('{column}',")]
-        assert declarations, f'{column} is not declared in table/schema.py'
+        assert declarations, f'{column} is not declared in ym_datalake/schema.py'
         for line in declarations:
             assert 'estimated' in line.lower(), f'{column} is synthesized and must be tagged `estimated`'

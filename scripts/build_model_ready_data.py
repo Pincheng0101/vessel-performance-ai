@@ -15,7 +15,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 FUEL_HEAT_VALUES = {
     'ME_FULLSPEED_CONSUMP_HSHFO': 40.2,
     'ME_FULLSPEED_CONSUMP_ULSFO': 41.2,
@@ -140,9 +139,17 @@ def split_rows(rows: list[dict[str, Any]], test_size: float = 0.2) -> tuple[list
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Create model-ready train/test/prediction CSV files')
-    parser.add_argument('--input', default='tmp/yangming-aws-summit-hackathon/vt_fd_with_maintenance_features.csv', help='Path to the enriched voyage CSV')
-    parser.add_argument('--output-dir', default='tmp/yangming-aws-summit-hackathon', help='Directory for the output files')
-    parser.add_argument('--test-size', type=float, default=0.2, help='Fraction of rows per ship class to place into the test set')
+    parser.add_argument(
+        '--input',
+        default='tmp/yangming-aws-summit-hackathon/vt_fd_with_maintenance_features.csv',
+        help='Path to the enriched voyage CSV',
+    )
+    parser.add_argument(
+        '--output-dir', default='tmp/yangming-aws-summit-hackathon', help='Directory for the output files'
+    )
+    parser.add_argument(
+        '--test-size', type=float, default=0.2, help='Fraction of rows per ship class to place into the test set'
+    )
     args = parser.parse_args()
 
     input_path = Path(args.input)
@@ -178,7 +185,8 @@ def main() -> None:
 
     test_rows, train_rows = split_rows(training_rows, test_size=args.test_size)
     test_rows = [
-        row for row in test_rows
+        row
+        for row in test_rows
         if _to_float(row.get('HOURS_FULL_SPEED')) is not None and _to_float(row.get('HOURS_FULL_SPEED')) >= 22
     ]
 

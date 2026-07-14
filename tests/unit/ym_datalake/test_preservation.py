@@ -23,8 +23,8 @@ from pathlib import Path
 
 import pytest
 
-from table.schema import MAINTENANCE_EVENT_COLUMNS, NOON_REPORT_COLUMNS, VESSEL_MASTER_COLUMNS
 from ym_datalake.etl import source
+from ym_datalake.schema import MAINTENANCE_EVENT_COLUMNS, NOON_REPORT_COLUMNS, VESSEL_MASTER_COLUMNS
 
 DATASET = Path(__file__).resolve().parents[3] / 'dataset'
 
