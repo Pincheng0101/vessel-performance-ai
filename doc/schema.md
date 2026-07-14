@@ -198,9 +198,9 @@ The clean-hull curve `P = a·V^n·(Δ/Δ_ref)^⅔`, **fitted** from clean-window
 
 ### `uwi`
 
-The inspection projection: **real grades, estimated numbers**. The four numeric signals are synthesized, conditioned on the real grade and the real speed loss that day.
+The inspection projection: **real grades, estimated numbers**. The four numeric signals are synthesized as saturating **growth on the reset clock the row carries**, at a rate the real grade and the real speed loss that day condition.
 
-**Grain:** inspection (43 UWI atoms + 10 DD) · **Rows:** 53 · **Columns:** 13
+**Grain:** inspection (43 UWI atoms + 10 DD) · **Rows:** 53 · **Columns:** 17
 
 | # | column | type | provenance | unit / notes |
 |---:|---|---|---|---|
@@ -212,11 +212,17 @@ The inspection projection: **real grades, estimated numbers**. The four numeric 
 | 6 | `hull_fouling_coverage_pct` | double | estimated | % of hull area fouled |
 | 7 | `hull_fouling_type` | string | measured | comma list, verbatim from maintenance |
 | 8 | `propeller_condition` | string | measured | REAL Good/Fair/Poor scale (not Rubert A-F) |
-| 9 | `propeller_roughness_um` | double | estimated | conditioned on propeller_condition |
+| 9 | `propeller_roughness_um` | double | estimated | grown on `days_since_polish`; the grade sets the *rate* |
 | 10 | `hull_coating_condition` | string | measured | Good / Fair / Poor |
-| 11 | `coating_breakdown_pct` | double | estimated | conditioned on hull_coating_condition |
+| 11 | `coating_breakdown_pct` | double | estimated | grown on `days_since_dry_dock` |
 | 12 | `cavitation_found` | string | measured | Yes / No |
 | 13 | `recommended_action` | string | derived | none / polish / clean |
+| 14 | `days_since_polish` | int | measured | **strict** clock: last `PP`/`DD` *strictly before* the inspection |
+| 15 | `days_since_dry_dock` | int | measured | **strict** clock: last `DD` strictly before |
+| 16 | `polish_cycle_censored` | boolean | derived | no such reset precedes it → the clock is anchored at the data start and is a **lower bound** (13 rows) |
+| 17 | `dry_dock_cycle_censored` | boolean | derived | same, for the dock (28 rows; all 5 never-docked ships) |
+
+> ⚠ **The clocks are strict, and that is not a detail.** 31 of the 43 UWI atoms come from the source's composite `UWI+PP` rows, so they are co-located with their own polish. An inspection observes the state that *justified* the polish — the **pre**-polish state. An inclusive clock would read 0 on all 31 and assert that every polished propeller was already clean when inspected. The daily clocks in `fact_performance_daily` are inclusive; these are not.
 
 ### `fuel_price`
 
@@ -333,7 +339,7 @@ The four ISO 19030 period indicators, long format. `value` / `reference_value` m
 
 The raw `uwi` projection + the calendar + the real 14-day trailing speed loss measured at the inspection.
 
-**Grain:** inspection · **Rows:** 53 · **Columns:** 15
+**Grain:** inspection · **Rows:** 53 · **Columns:** 19
 
 | # | column | type | provenance | unit / notes |
 |---:|---|---|---|---|
@@ -352,6 +358,10 @@ The raw `uwi` projection + the calendar + the real 14-day trailing speed loss me
 | 13 | `cavitation_found` | string | measured | — |
 | 14 | `recommended_action` | string | derived | — |
 | 15 | `speed_loss_pct` | double | measured | the 14-day trailing ISO 19030 speed loss at inspection |
+| 16 | `days_since_polish` | int | measured | **strict** reset clock — see `uwi` |
+| 17 | `days_since_dry_dock` | int | measured | **strict** reset clock — see `uwi` |
+| 18 | `polish_cycle_censored` | boolean | derived | the clock is a lower bound |
+| 19 | `dry_dock_cycle_censored` | boolean | derived | the clock is a lower bound |
 
 ### `fact_maintenance_event`
 
@@ -558,47 +568,59 @@ The narration layer. Runs no new detection: it collapses anomaly days into episo
 
 ### `fact_recommendation`
 
-The closed-form optimal hull-cleaning interval, `T* = √(2K/β)`. One row per ship; 5 are `insufficient_history`.
+The closed-form optimal hull-cleaning interval, `T* = √(2K/β)`. One row per ship; **6** are `insufficient_history`.
 
-**Grain:** ship · **Rows:** 15 · **Columns:** 9
+**Grain:** ship · **Rows:** 15 · **Columns:** 13
 
 | # | column | type | provenance | unit / notes |
 |---:|---|---|---|---|
 | 1 | `ship_id` | string | derived | — |
 | 2 | `last_cleaning_day` | int | measured | latest UWC/DD reset |
-| 3 | `recommended_clean_day` | int | derived | last_cleaning_day + round(T*) |
+| 3 | `recommended_clean_day` | int | derived | last_cleaning_day + round(T*). **May be in the past** — 6 of the 9 modelled ships are |
 | 4 | `recommended_clean_date` | string | estimated | calendar |
-| 5 | `trigger_eta_day` | int | derived | day the open cycle reaches the 8% speed-loss trigger |
+| 5 | `trigger_eta_day` | int | derived | day the open cycle reaches the 8% speed-loss trigger. **Not capped** — a forecast of a physical event, consumed as one by `alerts.py` |
 | 6 | `t_star_days` | double | estimated (USD-derived) | T* = sqrt(2K/beta) |
-| 7 | `fouling_rate_pct_per_day` | double | measured | open-cycle speed-loss slope |
-| 8 | `net_saving_usd` | double | estimated (USD) | — |
-| 9 | `status` | string | derived | ok / insufficient_history |
+| 7 | `fouling_rate_pct_per_day` | double | measured | open-cycle speed-loss slope. Reported **even when the economics fail** — it is a measurement |
+| 8 | `cost_slope_usd_per_day2` | double | estimated (USD) | **β**, USD/day/day. The model's central quantity: `T*`, the priority, the batching break-even and both savings are functions of it |
+| 9 | `days_overdue` | int | derived | days already past `recommended_clean_day`; 0 if not overdue |
+| 10 | `net_saving_usd` | double | estimated (USD) | cleaning at `T*` vs running to the 8 % trigger — a **retrospective** counterfactual, priced over `saving_horizon_days` |
+| 11 | `saving_horizon_days` | double | derived | the span `net_saving_usd` is priced over. **Capped** at the forecast horizon: past it the trigger is extrapolation, not valuation |
+| 12 | `saving_if_cleaned_now_usd` | double | estimated (USD) | `β·u·365 − K`. The **prospective** number — what cleaning *today* is worth over the next year. **May be negative** |
+| 13 | `status` | string | derived | ok / insufficient_history |
 
 ### `fact_maintenance_recommendation`
 
-Every action a ship actually needs, batched into shared service windows. A ship with nothing due has no rows.
+Every action a ship actually needs, batched into shared service windows and **priced**. A ship with nothing due has no rows.
 
-**Grain:** ship × due action · **Rows:** 20 · **Columns:** 17
+**Grain:** ship × due action · **Rows:** 37 · **Columns:** 21
 
 | # | column | type | provenance | unit / notes |
 |---:|---|---|---|---|
 | 1 | `ship_id` | string | derived | — |
 | 2 | `action_type` | string | derived | hull_cleaning / propeller_polishing / propeller_repair / coating_renewal / engine_inspection |
-| 3 | `priority` | string | derived | high / medium / low |
-| 4 | `due_day` | int | derived | forecast threshold crossing, bounded to the priority window |
+| 3 | `priority` | string | derived | high / medium / low. Overdue is **always** high |
+| 4 | `due_day` | int | derived | forecast threshold crossing, **never before the last reported day** — an overdue action is due *today* |
 | 5 | `due_date` | string | estimated | calendar |
-| 6 | `rationale` | string | derived | — |
-| 7 | `source` | string | derived | uwi / anomaly / fouling_model / sfoc_trend / uwi+anomaly |
-| 8 | `degradation_rate` | double | derived | Theil-Sen slope of the action's signal (per day) |
-| 9 | `degradation_unit` | string | derived | %/day or um/day |
-| 10 | `current_value` | double | derived | — |
-| 11 | `threshold_value` | double | derived | 8 (hull) / 300, 430 (propeller um) / 45 (coating %) / 5 (engine %) |
-| 12 | `trigger_eta_day` | int | derived | — |
-| 13 | `t_star_days` | double | estimated (USD-derived); economic actions only | — |
-| 14 | `net_saving_usd` | double | estimated (USD); economic actions only | — |
-| 15 | `plan_day` | int | derived | the batched service window this action folds into |
-| 16 | `plan_date` | string | estimated | calendar |
-| 17 | `plan_service_type` | string | derived | dry_dock / in_water |
+| 6 | `days_overdue` | int | derived | > 0 only when the optimum/threshold has already passed |
+| 7 | `rationale` | string | derived | — |
+| 8 | `source` | string | derived | uwi / anomaly / fouling_model / sfoc_trend / uwi+anomaly |
+| 9 | `degradation_rate` | double | derived | slope of the action's signal, per day of **its own reset clock** — never against absolute day |
+| 10 | `degradation_unit` | string | derived | %/day or um/day |
+| 11 | `current_value` | double | derived | the fit evaluated at **today's** clock — *not* the last inspection's reading |
+| 12 | `threshold_value` | double | derived | 8 (hull) / 300, 430 (propeller um) / 45 (coating %) / 5 (engine %) |
+| 13 | `trigger_eta_day` | int | derived | **null for `propeller_repair`**: damage is observed, not forecast |
+| 14 | `t_star_days` | double | estimated (USD-derived); economic actions only | — |
+| 15 | `net_saving_usd` | double | estimated (USD); economic actions only | — |
+| 16 | `plan_day` | int | derived | the batched service window this action folds into |
+| 17 | `plan_date` | string | estimated | calendar |
+| 18 | `plan_service_type` | string | derived | dry_dock / in_water |
+| 19 | `window_id` | string | derived | `W-<ship>-<plan_day>-<service_type>` |
+| 20 | `action_cost_usd` | double | estimated (USD) | **marginal** — see the guard below. Safe to sum at any level |
+| 21 | `window_cost_usd` | double | estimated (USD) | the whole trip, **repeated on every row** of the window. Dedupe on `window_id` before summing |
+
+> ⚠ **The double-count guard.** `propeller_repair` and `coating_renewal` *both* require a dry dock; billing both would charge **$3.56M for one $1.78M trip**. So `action_cost_usd` charges each distinct event a window requires to **exactly one** action (the earliest due) and gives every other member `0.0`. A dry-dock window therefore charges `full_cost('DD')` once, and a hull cleaning folded into it is genuinely free — which is precisely why it folded.
+>
+> This makes `Σ net_saving_usd / Σ action_cost_usd` a legitimate ROI, with two naive sums. *Stated limit:* an in-water window sums its distinct event costs, which is an **upper bound** — the cost model has no notion of a diver mobilisation shared between a cleaning and a polish.
 
 ### `fact_speed_profile`
 

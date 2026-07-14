@@ -16,9 +16,9 @@ from __future__ import annotations
 from ym_datalake.etl import epoch, ports
 from ym_datalake.etl.curated.daily import FLEET_BY_HULL_CLASS, FLEET_NAME
 from ym_datalake.etl.curated.recommendation import (
-    DOWNTIME_USD_PER_HOUR,
     EVENT_COST_USD,
     EVENT_DOWNTIME_HOURS,
+    full_cost,
 )
 
 
@@ -128,8 +128,7 @@ def _payback_days(event_type: str, ship_id: str, day: int, daily_by_key: dict) -
     saving_per_day = sum(before) / len(before) - sum(after) / len(after)
     if saving_per_day <= 0:
         return None  # the event did not pay for itself; do not invent a payback
-    full_cost = EVENT_COST_USD[event_type] + EVENT_DOWNTIME_HOURS[event_type] * DOWNTIME_USD_PER_HOUR
-    return full_cost / saving_per_day
+    return full_cost(event_type) / saving_per_day
 
 
 def build_dim_port() -> list[dict]:

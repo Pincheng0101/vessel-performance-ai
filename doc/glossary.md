@@ -672,42 +672,104 @@ BIO_HSFO 720 USD/t，日對數報酬標準差 0.012，回歸係數 0.02，上下
 | `action_type` | 觸發條件 | 門檻 | `source` |
 |---|---|---|---|
 | `hull_cleaning` | 成本模型收斂（`fact_recommendation.status = 'ok'`） | 8.0 %/day | `fouling_model` |
-| `propeller_polishing` | 最新 UWI 的 `propeller_roughness_um ≥ 300`，或 Theil-Sen 外推 365 天內會越過 300 | 300 µm | `uwi` 或 `uwi+anomaly` |
-| `propeller_repair` | 同上，門檻 430 | 430 µm | `uwi` 或 `uwi+anomaly` |
-| `coating_renewal` | `coating_breakdown_pct ≥ 45`，或外推 365 天內越過 | 45 % | `uwi` |
+| `propeller_polishing` | **今日時鐘上的擬合值** `≥ 300`，或外推 365 天內會越過 300 | 300 µm | `uwi` 或 `uwi+anomaly` |
+| `propeller_repair` | **不做預測**：擬合值 `≥ 430`、等級 `Poor`、或 `cavitation_found` | 430 µm | `uwi` 或 `uwi+anomaly` |
+| `coating_renewal` | 今日時鐘上的擬合值 `≥ 45`，或外推 365 天內越過 | 45 % | `uwi` |
 | `engine_inspection` | SFOC 相對基線（序列前 1/3 的中位數）漂移 **≥ 5%** | 5 % | `sfoc_trend` |
 
-> ⚠️ **狀況等級 (Good/Fair/Poor) 不直接觸發任何行動。** 觸發全部走**合成的數值欄位**
-> （`propeller_roughness_um`、`coating_breakdown_pct`）。等級只是**間接**影響——它決定該數值是從哪
-> 個區間抽出來的（見〈UWI 數值訊號〉），並出現在 `rationale` 文字裡。
+> ⚠️ **`current_value` 是「今日時鐘上的擬合值」，不是最新一次檢查的讀數。** 43 個 UWI 原子中有 **31 個**
+> 來自來源的複合列 `UWI+PP`——它們記錄的是**拋光前**、正是「所以才要拋光」的那個狀態。把最新讀數當成
+> 「現況」，等於在報告一支早已被清理過的螺槳的粗糙度（S12 就因此背了一筆假的 `high` 行動）。最新檢查
+> 現在只剩下一個用途：`rationale` 文字裡引用的那個等級。
+>
+> ⚠️ **狀況等級 (Good/Fair/Poor) 只有 `propeller_repair` 直接讀它**（`Poor` 是損傷證據）。其餘行動走
+> **合成的數值欄位**；等級在那裡是**間接**影響——它決定該數值的**成長速率 (rate)**，而不是它的水準
+> (level)（見〈UWI 數值訊號〉）。
 >
 > `source = 'uwi+anomaly'` 的條件是：近 180 天內存在 ≥1 筆 `cause='propeller'` 的異常。
 >
-> 線上實況：20 列，含 `hull_cleaning` 10、`coating_renewal` 5、`engine_inspection` 3、
-> `propeller_polishing` 2、**`propeller_repair` 0**（型別存在但目前無船達標）。
+> 線上實況：**37 列**，含 `propeller_polishing` 15、`hull_cleaning` 9、`coating_renewal` 8、
+> `engine_inspection` 3、`propeller_repair` 2。
 
 ### 優先度 (Priority)
 
-由「到期日距最後一天的天數」決定（`recommendation.py:151`）：**≤30 天 → `high`；≤90 天 →
-`medium`；其餘 → `low`**。
+由「到期日距最後一天的天數」決定（`recommendation.py:265`）：**逾期 (overdue) → `high`；≤30 天 →
+`high`；≤90 天 → `medium`；其餘 → `low`**。
+
+### 逾期天數 (Days Overdue)
+
+`days_overdue`：已經超過最佳清洗日 `T*` 的天數。**逾期的行動一律「今天到期」**——過了 `T*` 之後每多
+一天就多燒 `β·u` 的油，沒有任何可以延後的對象，所以唯一站得住腳的到期日就是「最早能真正動工的那一
+天」。
+
+> 這裡曾有一個把整個待辦清單顛倒過來的缺陷 (defect)：舊版對逾期船舶改以「8 % 觸發預估日」當到期日，
+> 於是全隊逾期最久（558 天）、節省金額最大的 S1 被算成 1,124 天後才到期，落入 `low` 而沉到清單最底。
 
 ### 單項預測 (Per-action Forecast)
 
-每一行動取其劣化指標對時間的 **Theil-Sen 穩健斜率**外推，求越過門檻的日子 (`trigger_eta_day`)。
-斜率 ≤ 0（無惡化趨勢）或越界日超出 **365 天**視野者，該行動**直接不產生列**——所以
-「某船沒有某項建議」代表的是「不需要」，不是資料缺漏。
+三項行動取其劣化指標的**穩健斜率**外推，求越過門檻的日子 (`trigger_eta_day`)。斜率 ≤ 0（無惡化趨勢）
+或越界日超出 **365 天**視野者，該行動**直接不產生列**——所以「某船沒有某項建議」代表的是「不需要」，
+不是資料缺漏。
+
+**斜率一律在「時鐘空間 (clock space)」上擬合**——x 軸是 `days_since_polish` / `days_since_dry_dock`，
+不是絕對日期。螺槳不是從下水那天開始變粗糙的，而是從**上一次拋光 (polish)** 開始；對絕對日期擬合等於
+把一條直線硬穿過紀錄中的每一次重置 (reset)，擬合到的只是雜訊（舊版 15 艘中有 9 艘因此得到**負的**粗
+糙度斜率）。截距則**錨定 (anchored)** 在重置後的已知值（剛拋光的螺槳就是 ~150 µm）——那是物理，不是
+需要花一個資料點去估的參數。
+
+**`propeller_repair` 完全不做預測。** 拋光會重置時鐘，硬把粗糙度直線外推「穿過」拋光直到 430 µm，畫
+的是一條跨越重置的趨勢線，不是物理。它只在**今天為真的證據**上觸發：數值 (`current ≥ 430`)、真實損傷
+等級 `Poor`、或實測到的 `cavitation_found`。
 
 ### 維修規劃 / 服務窗口 (Maintenance Planner / Service Window)
 
-把各行動的到期日批次整併（`recommendation.py:330`），常數 **`BATCH_WINDOW_DAYS = 60`**：
+把各行動的到期日批次整併（`recommendation.py:577`）：
 
 1. 需進塢的行動（**`coating_renewal`、`propeller_repair`**）以其中**最早的到期日**為錨點，形成一個
    `dry_dock` 窗口。
-2. 水下行動（`hull_cleaning`、`propeller_polishing`、`engine_inspection`）若到期日在錨點 **±60 天**
-   內，就併入該 `dry_dock` 窗口（順道做，省一次調度）。
+2. 水下行動（`hull_cleaning`、`propeller_polishing`、`engine_inspection`）**在成本模型判定「併入比自己
+   跑一趟便宜」時**才併入該 `dry_dock` 窗口。
 3. 未併入者自行以最早到期日成一個 `in_water` 窗口。
 
-輸出 `plan_day` 與 `plan_service_type ∈ {dry_dock, in_water}`。
+輸出 `plan_day`、`plan_service_type ∈ {dry_dock, in_water}` 與 `window_id`。
+
+### 併窗損益兩平 (Batching Break-even)
+
+乾塢 (dry dock) 本來就會重置船體，所以「順道做」的邊際成本是零——但**等待**乾塢要燒油。兩邊都定價，
+以 `u` 為原本該動工的日子、`v` 為乾塢日（都以距上次清洗的週期時間計）：
+
+```
+A（自己跑一趟，之後乾塢順便重置）= K + α·(v−u) + β·(v−u)²/2
+B（延後到乾塢一起做）           =     α·(v−u) + β·(v²−u²)/2
+B − A                          = β·u·(v−u) − K        α 與二次項完全對消
+```
+
+> **併入的條件：`β·u·(v−u) < K`。** `β·u` 就是今天的超額燒油率，所以這條規則讀起來是：*等待期間多燒的
+> 油，比你因此省下的那一趟還便宜。*
+
+`K` 是**省下的那一趟**，不是「這個行動的成本」——`engine_inspection` 根本不需要出一趟（不進塢、不派潛
+水員），併入它省下 **$0**，因此永遠不值得為它延後。這是規則自然推出的結果，不需要特例。
+
+⚠ **`u = due_day − last_cleaning_day`，不是 `T*`。** 你不可能回到過去清洗，而全隊 9 艘可建模的船有 6 艘
+已經過了 `T*`；若以 `T*` 為錨，整個併窗視窗都落在過去，永遠併不進任何東西。
+
+**無法定價者不延後。** `propeller_polishing` 沒有「每微米多少美元」的係數，硬編一個就是憑空發明物理，
+所以它只能**提前**搭順風車、不得延後（`UNPRICED_SLIP_DAYS = 0`）。
+
+### 行動成本與重複計費防護 (action_cost_usd / window_cost_usd)
+
+`propeller_repair` 與 `coating_renewal` **都**需要乾塢；天真地相加會為**同一趟 $1.78M 的塢期收 $3.56M**。
+
+- **`action_cost_usd` 是邊際成本 (marginal)**：一個窗口所需的每一種事件只向**其中一個**行動收費（到期日
+  最早者），窗口內其他行動一律 `0.0`。乾塢窗口只收一次 `full_cost('DD')`，併進去的船體清洗是**真的免
+  費**——那正是它會被併進去的原因。**任何層級（列／窗口／船／全隊）直接加總都不會重複計費。**
+- **`window_cost_usd` / `window_id`**：整趟的成本，**重複寫在該窗口的每一列上**。加總前必須先用
+  `window_id` 去重。
+
+於是投資報酬率 (ROI) 就是兩個天真的加總：`Σ net_saving_usd / Σ action_cost_usd`。
+
+*已知限制*：水下窗口是把成員的不同事件成本相加，這是**上界 (upper bound)**——成本模型不知道「清洗與拋光
+共用同一次潛水員動員」這回事。
 
 ### 維修觸發門檻 (Maintenance Trigger Threshold, MT_TRIGGER_PCT)
 
@@ -746,13 +808,26 @@ BIO_HSFO 720 USD/t，日對數報酬標準差 0.012，回歸係數 0.02，上下
 
 | 欄位 | 合成方式 |
 |---|---|
-| `propeller_roughness_um` | 由 `propeller_condition` 決定抽樣區間：Good [150, 260)、Fair [260, 380)、Poor [380, 520)、未評 [200, 420)；再以速度損失把位置往區間高端推 |
-| `coating_breakdown_pct` | 由 `hull_coating_condition` 決定：Good [2, 18)、Fair [20, 44)、Poor [46, 85)、未評 [5, 60) |
+| `propeller_roughness_um` | 在 `days_since_polish` 上的**飽和成長**：`150 + 410·(1 − e^(−rate·clock/600))`。等級與速度損失決定 `rate`，不決定水準 |
+| `coating_breakdown_pct` | 在 `days_since_dry_dock` 上的飽和成長：`2 + 88·(1 − e^(−rate·clock/2600))` |
 | `hull_fouling_rating` | `速度損失 × 7 + 抖動(−6, +6)`，夾在 **0–100**。**與等級無關，純由速度損失驅動** |
 | `hull_fouling_coverage_pct` | `min(rating × 1.15, 100)`——**是 rating 的確定性函數**，不帶新資訊 |
 
-這些區間設計得很刻意：**`Poor` 的螺槳粗糙度必然 ≥300**（一定觸發拋光）、**`Poor` 的塗層崩解率必然
-≥45**（一定觸發塗層更新），而 `Good` 必然低於門檻。等級透過區間間接決定了行動。
+**等級設定的是「速率」，不是「水準」。** `propeller_condition` 是**損傷**等級——坑蝕的螺槳粗糙得**更
+快**——它不是「距上次拋光多久」的讀數。資料本身就說得很清楚：53 次檢查中來源評了 25 個 `Good`，而這些
+`Good` 的「距上次拋光天數」橫跨 **114 到 474 天**，與時鐘完全不相關。
+
+舊版用等級決定**抽樣區間**，於是把時鐘覆蓋成了雜訊；更糟的是，把每個 `Good` 夾進 [150, 260) 會讓隱含
+斜率上限只剩 ≤ 0.23 µm/day——**全隊沒有任何一艘船能走到 300 µm**，訊號直接消滅。
+
+速率是四個**各自以 1.0 為中心**的因子相乘：每船抽樣的離散度 × 等級係數（Good 0.85 / Fair 1.15 /
+Poor 1.45）×（1 + 0.60·(速度損失位置 − ½)）× 抖動。速度損失那一項是**居中的、不是單向抬升**：船慢就
+汙損得快 (×1.3)、船乾淨就慢 (×0.7)，而**當天沒有速度損失量測時為中性 (×1.0)**。
+
+⚠️ **時鐘是嚴格的 (strict)。** 檢查與它自己的拋光同一天時（43 個原子中有 31 個如此），時鐘要從**上一次**
+拋光起算，不是 0——否則 31 列全部歸零成 150 µm，等於宣稱「每一支被拋光的螺槳在檢查當下都已經是乾淨
+的」。`polish_cycle_censored` / `dry_dock_cycle_censored` 標記那些**前面根本沒有重置**的列，它們的時鐘
+只是真實週期年齡的**下界 (lower bound)**。
 
 > `hull_fouling_rating` 是 0–100 的尺度，但**它不是 NSTM 評級**，也沒有「≥60 就清潔」這條規則。
 > 它只是速度損失的一個線性重述。
@@ -830,17 +905,32 @@ recommended_clean_day = last_cleaning_day + round(T*)
 
 ### 資料不足 (status = 'insufficient_history')
 
-`fact_recommendation.status` 只有兩值。退化為 `insufficient_history` 的條件（線上 5/15 艘船）：
+`fact_recommendation.status` 只有兩值。退化為 `insufficient_history` 的條件（線上 **6/15** 艘船）：
 
 1. 開放週期的有效點 **< 30**，或
 2. Theil-Sen 擬合失敗，或 **成本斜率 β ≤ 0**（船體沒在惡化 → `√(2K/β)` 無定義）。
 
-**引用 `t_star_days` / `net_saving_usd` 前先檢查 `status`。**
+**引用 `t_star_days` / `net_saving_usd` 前先檢查 `status`。** 但 `fouling_rate_pct_per_day` 例外——它是
+**量測值**，即使成本模型垮掉仍然照報：成本斜率是平的，並不會讓這艘船的汙損速率變成未量測。
 
-### 淨節省 (Net Saving, net_saving_usd)
+### 淨節省 (Net Saving, net_saving_usd) 與其視野
 
 在 T\* 清潔（相對於拖到 8% 觸發門檻才清潔）省下的成本。**僅在 `trigger_eta` 存在且晚於 T\* 時計算**，
 否則 null。
+
+⚠️ **計價區間有上限**，並由 `saving_horizon_days` 揭露：`T_end = min(T_觸發, 今日汙損天數 + 365)`。未設
+上限時，這一欄會去定價一個遠在所有資料之外的反事實 (counterfactual)——S1 的 8% 觸發點落在週期第 **1,968
+天**，比它最後一天的資料還晚 **3.1 年**，而那段外推**就是**它 $3.75M 的頭條數字。誘因還是反的：船體越
+平滑 → 觸發越晚 → 「節省」越大。上限套用後 S1 變成 **$1,129,854**，全隊從 ~$13.7M 降到 **~$10.5M**。
+
+**但 `trigger_eta_day` 本身不設上限**——它預測的是一個物理事件，`alerts.py` 也是這樣消費它的；為了讓估值
+好看而截斷一個預測，只會讓那一欄說謊。
+
+### 現在就清洗的價值 (saving_if_cleaned_now_usd)
+
+`β·u·365 − K`。**前瞻性 (prospective)** 的那個數字，也是真正回答「這艘船現在該不該清？」的數字——
+`net_saving_usd` 是回顧性的，它拿來比較的那個觸發日，對一艘早已逾期的船而言是**沒有人打算走到**的日子。
+本欄**可以是負的**（船還在週期前段，今天清不划算），那正是誠實的答案。用它來排序逾期待辦清單。
 
 ### 傭租成本 (Charter Cost, charter_usd_per_day)
 

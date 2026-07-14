@@ -366,15 +366,24 @@ Clean sooner and you pay for the cleanings; clean later and you pay for the fuel
 fitted with **Theil-Sen** over the *open* cycle (everything since the last hull reset) —
 the only cycle whose fouling is still being paid for.
 
-`fact_recommendation` is one row per ship: **10 `ok`, 5 `insufficient_history`** (fewer than
-30 valid points in the open cycle). `fact_maintenance_recommendation` broadens this to five
-action types — `hull_cleaning` (10), `coating_renewal` (5), `engine_inspection` (3),
-`propeller_polishing` (2) — each with a Theil-Sen forecast crossing of its own threshold,
-then **batched into shared service windows**: a ship does not make five separate trips to
-have five things done.
+`fact_recommendation` is one row per ship: **9 `ok`, 6 `insufficient_history`** (fewer than
+30 valid points in the open cycle, or a non-positive `β`). `fact_maintenance_recommendation`
+broadens this to five action types — `propeller_polishing` (15), `hull_cleaning` (9),
+`coating_renewal` (8), `engine_inspection` (3), `propeller_repair` (2) — then **batched into
+shared service windows**: a ship does not make five separate trips to have five things done.
 
-> `T*`, `net_saving_usd` and the propeller/coating thresholds are all **estimated** —
-> `T*` is USD-derived, and the roughness it keys off is synthesized.
+Three of those are threshold-crossing forecasts, fitted **in clock space** (`days_since_polish` /
+`days_since_dry_dock`) and **anchored** on the value a reset leaves behind — never against the
+absolute day, which draws one line straight through every polish in the record. `propeller_repair`
+is not forecast at all: damage is observed, not extrapolated across a reset.
+
+The batching is a **derived break-even**, not a proximity window: an in-water job folds into a dry
+dock iff `β·u·(v−u) < K` — the fuel burned waiting is cheaper than the trip avoided. Each window is
+then priced so that `action_cost_usd` is **marginal** and never bills one dock twice, which makes
+`Σ net_saving_usd / Σ action_cost_usd` a legitimate ROI.
+
+> `T*`, `net_saving_usd`, `action_cost_usd` and the propeller/coating thresholds are all
+> **estimated** — `T*` is USD-derived, and the roughness it keys off is synthesized.
 
 Full derivation, cost constants and limits:
 [`doc/maintenance-optimization.md`](maintenance-optimization.md).
@@ -383,8 +392,14 @@ Full derivation, cost constants and limits:
 
 Ordinary least squares is the wrong tool here: one sensor spike drags the slope, and this
 data has plenty. Every forecast in the lake uses a **Theil-Sen** slope (the median of all
-pairwise slopes), which shrugs off up to ~29 % contaminated points. It is O(n²), which is
-fine — the longest series is one ship's ~1,800 days, and it runs once.
+pairwise slopes), which shrugs off up to ~29 % contaminated points.
+
+It is **O(n²)**, and it does *not* "run once": `crossing_day` re-fits internally, so a caller that
+wants both the slope and the day it crosses a threshold must fit **once** and reuse the fit
+(`crossing_at`). `anchored_slope` is the other half of the module — the slope of a line through a
+**known** origin, which needs one point where a free-intercept fit needs two, and which makes
+"the value is past its threshold" and "the crossing is in the past" the same statement instead of
+two fits that can disagree.
 
 ### `voyages.py` — the energy balance is exact
 

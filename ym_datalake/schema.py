@@ -172,9 +172,10 @@ REFERENCE_CURVE_COLUMNS = [
 # 5. uwi — the inspection projection: the 43 UWI atoms (12 standalone + 31 from
 # UWI+PP) plus the 10 DD rows (a dry-dock inspects). The grades are REAL (sparse:
 # coating 26/77, propeller 45/77, cavitation 36/77 source rows); the four numeric
-# signals are ESTIMATED — synthesized conditioned on the real grade AND the real
-# measured speed loss on the inspection day, so the rating<->speed-loss relationship
-# holds against real data rather than noise. Never quote them as fact.
+# signals are ESTIMATED — grown on the reset clock the row carries, at a rate the real
+# grade AND the real measured speed loss on the inspection day condition, so the
+# rating<->speed-loss relationship holds against real data rather than noise. Never
+# quote them as fact.
 UWI_COLUMNS = [
     ('inspection_id', 'string'),  # UWI-<ship>-<day>
     ('ship_id', 'string'),  # measured
@@ -184,11 +185,22 @@ UWI_COLUMNS = [
     ('hull_fouling_coverage_pct', 'double'),  # estimated: % of hull area fouled
     ('hull_fouling_type', 'string'),  # measured: comma list, verbatim from maintenance
     ('propeller_condition', 'string'),  # measured: REAL Good/Fair/Poor scale (not Rubert A-F)
-    ('propeller_roughness_um', 'double'),  # estimated: conditioned on propeller_condition
+    ('propeller_roughness_um', 'double'),  # estimated: grown on days_since_polish
     ('hull_coating_condition', 'string'),  # measured: Good / Fair / Poor
-    ('coating_breakdown_pct', 'double'),  # estimated: conditioned on hull_coating_condition
+    ('coating_breakdown_pct', 'double'),  # estimated: grown on days_since_dry_dock
     ('cavitation_found', 'string'),  # measured: Yes / No
     ('recommended_action', 'string'),  # none / polish / clean
+    # The clocks the two estimates grew on, landed beside the values they explain — so a
+    # consumer fitting a trend reads its x and its y off the same row. STRICT: a reset on
+    # the inspection day does not reset the clock, because 31 of the 43 UWI atoms are the
+    # pre-polish state that justified that very polish.
+    ('days_since_polish', 'int'),  # measured: days since the last PP/DD strictly before
+    ('days_since_dry_dock', 'int'),  # measured: days since the last DD strictly before
+    # True = no such reset precedes the inspection, so the clock is anchored at the data
+    # start and is a LOWER BOUND on the true cycle age. 13 inspections; all 5 never-docked
+    # ships. A consumer anchoring a growth law on a known origin must exclude these.
+    ('polish_cycle_censored', 'boolean'),
+    ('dry_dock_cycle_censored', 'boolean'),
 ]
 
 # 6. fuel_price — synthesized daily random walk on the SHARED RELATIVE-DAY axis
@@ -327,6 +339,10 @@ FACT_UWI_COLUMNS = [
     ('cavitation_found', 'string'),  # measured
     ('recommended_action', 'string'),
     ('speed_loss_pct', 'double'),  # measured: the 14-day trailing ISO 19030 speed loss at inspection
+    ('days_since_polish', 'int'),  # measured: strict reset clock — see UWI_COLUMNS
+    ('days_since_dry_dock', 'int'),  # measured: strict reset clock — see UWI_COLUMNS
+    ('polish_cycle_censored', 'boolean'),  # no PP/DD precedes: the clock is a lower bound
+    ('dry_dock_cycle_censored', 'boolean'),
 ]
 
 # 10. fact_maintenance_event — the 115 atoms + synthesized economics + the M3 effect
@@ -460,12 +476,21 @@ FACT_ALERT_COLUMNS = [
 FACT_RECOMMENDATION_COLUMNS = [
     ('ship_id', 'string'),
     ('last_cleaning_day', 'int'),  # measured: latest UWC/DD reset
-    ('recommended_clean_day', 'int'),  # last_cleaning_day + round(T*)
+    ('recommended_clean_day', 'int'),  # last_cleaning_day + round(T*). MAY BE IN THE PAST.
     ('recommended_clean_date', 'string'),  # estimated: calendar
-    ('trigger_eta_day', 'int'),  # day the open cycle reaches the 8% speed-loss trigger
+    ('trigger_eta_day', 'int'),  # day the open cycle reaches the 8% speed-loss trigger.
+    # NOT capped: a forecast of a physical event, and consumed as one by alerts.py.
     ('t_star_days', 'double'),  # estimated (USD-derived): T* = sqrt(2K/beta)
     ('fouling_rate_pct_per_day', 'double'),  # measured: open-cycle speed-loss slope
-    ('net_saving_usd', 'double'),  # estimated (USD)
+    ('cost_slope_usd_per_day2', 'double'),  # estimated (USD): beta — the model's central
+    # quantity. T*, the priority and the batching break-even are all functions of it.
+    ('days_overdue', 'int'),  # days the ship is already past recommended_clean_day (0 if not)
+    ('net_saving_usd', 'double'),  # estimated (USD): cleaning at T* vs running to the 8%
+    # trigger, priced over saving_horizon_days — a RETROSPECTIVE counterfactual.
+    ('saving_horizon_days', 'double'),  # the span net_saving_usd is priced over. Capped at
+    # the forecast horizon: past it the trigger is pure extrapolation, not a valuation.
+    ('saving_if_cleaned_now_usd', 'double'),  # estimated (USD): beta*u*365 - K. The
+    # PROSPECTIVE number — what cleaning today is worth over the next year. May be negative.
     ('status', 'string'),  # ok / insufficient_history
 ]
 
@@ -476,20 +501,30 @@ FACT_MAINTENANCE_RECOMMENDATION_COLUMNS = [
     ('action_type', 'string'),  # hull_cleaning / propeller_polishing / propeller_repair /
     # coating_renewal / engine_inspection
     ('priority', 'string'),  # high / medium / low
-    ('due_day', 'int'),  # forecast threshold crossing, bounded to the priority window
+    ('due_day', 'int'),  # forecast threshold crossing, never before the last reported day —
+    # an overdue action is due TODAY, and carries days_overdue > 0
     ('due_date', 'string'),  # estimated: calendar
+    ('days_overdue', 'int'),  # > 0 only when the optimum has already passed. Always 'high'.
     ('rationale', 'string'),
     ('source', 'string'),  # uwi / anomaly / fouling_model / sfoc_trend / uwi+anomaly
-    ('degradation_rate', 'double'),  # Theil-Sen slope of the action's signal (per day)
+    ('degradation_rate', 'double'),  # slope of the action's signal, per day of its OWN clock
     ('degradation_unit', 'string'),  # %/day or um/day
-    ('current_value', 'double'),
+    ('current_value', 'double'),  # the fit evaluated at today's clock (not the last reading)
     ('threshold_value', 'double'),  # 8 (hull) / 300, 430 (propeller um) / 45 (coating %) / 5 (engine %)
-    ('trigger_eta_day', 'int'),
+    ('trigger_eta_day', 'int'),  # null for propeller_repair: damage is not forecast
     ('t_star_days', 'double'),  # estimated (USD-derived); economic actions only
     ('net_saving_usd', 'double'),  # estimated (USD); economic actions only
     ('plan_day', 'int'),  # the batched service window this action folds into
     ('plan_date', 'string'),  # estimated: calendar
     ('plan_service_type', 'string'),  # dry_dock / in_water
+    ('window_id', 'string'),  # W-<ship>-<plan_day>-<service_type>
+    # THE DOUBLE-COUNT GUARD. propeller_repair and coating_renewal both require a dry dock;
+    # billing both would charge $3.56M for one $1.78M trip. action_cost_usd is MARGINAL —
+    # each distinct event a window needs is charged to exactly one action, and the rest are
+    # genuinely free — so it is the one safe to sum at row / window / ship / fleet level.
+    ('action_cost_usd', 'double'),  # estimated (USD)
+    ('window_cost_usd', 'double'),  # estimated (USD): the whole trip, REPEATED on every row
+    # of the window. Dedupe on window_id before summing this one.
 ]
 
 # 20. fact_speed_profile — 24 speed-grid points per ship. usd_per_nm is convex only

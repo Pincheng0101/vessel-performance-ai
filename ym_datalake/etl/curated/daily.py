@@ -47,19 +47,35 @@ FLEET_BY_HULL_CLASS = {'W1': 'FL-W1', 'W2': 'FL-W2'}
 FLEET_NAME = {'FL-W1': 'W1 Class', 'FL-W2': 'W2 Class'}
 
 
-def _days_since(days: list[int], resets: list[int], anchor: int) -> dict[int, int]:
-    """day -> days since the latest reset on/before it (first cycle anchored at data start)."""
-    ordered = sorted(resets)
-    out: dict[int, int] = {}
-    for day in days:
-        last = anchor
-        for reset in ordered:
-            if reset <= day:
-                last = max(last, reset)
-            else:
-                break
-        out[day] = max(0, day - last)
-    return out
+def _last_reset(day: int, resets: list[int], strict: bool) -> int | None:
+    prior = [r for r in resets if r < day] if strict else [r for r in resets if r <= day]
+    return max(prior) if prior else None
+
+
+def days_since_reset(days: list[int], resets: list[int], anchor: int, strict: bool = False) -> dict[int, int]:
+    """day -> days since the latest reset before it (first cycle anchored at data start).
+
+    ``strict`` excludes a reset landing *on* the day itself. The daily clocks are inclusive
+    (``strict=False``): a cleaning on day *d* leaves the ship clean on day *d*, so the clock
+    reads 0 there, which is what the noon report of that day describes.
+
+    An **inspection** co-located with its own intervention is the opposite case, and 31 of the
+    43 UWI atoms are exactly that (the source's composite ``UWI+PP`` rows). The inspection
+    observes the state that *justified* the polish — the **pre**-polish state — so it must read
+    the clock of the cycle that just ended, not 0. That is ``strict=True``, and reading it
+    inclusively would assert that every polished propeller was already clean when inspected.
+    """
+    return {day: max(0, day - (anchor if (last := _last_reset(day, resets, strict)) is None else last)) for day in days}
+
+
+def reset_censored(days: list[int], resets: list[int], strict: bool = False) -> dict[int, bool]:
+    """day -> True when no reset precedes it, so its clock is anchored at the data start.
+
+    A censored clock is a *lower bound* on the true age of the cycle: the ship was already
+    some unknown number of days into it when the record opens. Consumers that fit a growth
+    law against the clock need to know which points carry a real origin and which do not.
+    """
+    return {day: _last_reset(day, resets, strict) is None for day in days}
 
 
 def build(
@@ -99,13 +115,13 @@ def build(
         days = [r['noon_utc'] for r in rows]
         anchor = min(days)
         clocks = {
-            'days_since_cleaning': _days_since(
+            'days_since_cleaning': days_since_reset(
                 days, [e['event_day'] for e in ship_events if e['event_type'] in HULL_RESETS], anchor
             ),
-            'days_since_polish': _days_since(
+            'days_since_polish': days_since_reset(
                 days, [e['event_day'] for e in ship_events if e['event_type'] in POLISH_RESETS], anchor
             ),
-            'days_since_dry_dock': _days_since(
+            'days_since_dry_dock': days_since_reset(
                 days, [e['event_day'] for e in ship_events if e['event_type'] in DRY_DOCK_RESETS], anchor
             ),
         }
