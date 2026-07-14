@@ -15,7 +15,7 @@ dependencies = [
 package = false
 
 [tool.uv.workspace]
-members = ["lambda_function/athena_query", "lambda_function/async_query_api"]
+members = ["lambda_function/athena_query", "lambda_function/async_query_api", "agentcore"]
 
 [dependency-groups]
 dev = [

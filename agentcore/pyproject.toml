@@ -1,0 +1,13 @@
+[project]
+name = "ym-genbi-agent"
+version = "0.1.0"
+description = "YangMing vessel-performance GenBI agent on Bedrock AgentCore Runtime."
+requires-python = ">=3.13, <3.14"
+dependencies = [
+    "bedrock-agentcore>=1.18.0,<2.0.0",
+    "strands-agents>=1.47.0,<2.0.0",
+    "boto3>=1.43.0,<2.0.0",
+]
+
+[tool.uv]
+package = false
