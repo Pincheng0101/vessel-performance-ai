@@ -356,6 +356,7 @@ AGG_FLEET_DAILY_COLUMNS = [
     ('year', 'int'),  # estimated
     ('month', 'int'),  # estimated
     ('n_vessels', 'int'),
+    ('n_speed_loss_ships', 'int'),  # ships passing the ISO gate; < MIN_SPEED_LOSS_SHIPS => avg is null
     ('avg_speed_loss_pct', 'double'),  # mean of valid daily speed_loss_pct
     ('total_excess_cost_usd', 'double'),  # estimated (USD)
     ('cii_count_a', 'int'),  # ships at each cii_rating_imo (the regulatory grade) that day

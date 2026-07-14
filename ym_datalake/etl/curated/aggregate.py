@@ -18,6 +18,11 @@ from ym_datalake.etl.curated.daily import FLEET_BY_HULL_CLASS
 
 ROLLUP_FLEET_ID = 'ALL'
 
+# A mean is unbiased at any n, but its variance is not: a one-ship "fleet average" is that
+# ship's day. 169 days in the real lake have exactly one ISO-valid ship, and they are what
+# drive the trend to -11.4%. Below the floor the day has no fleet-level speed loss.
+MIN_SPEED_LOSS_SHIPS = 2
+
 
 def build(daily_rows: list[dict], anomalies: list[dict]) -> list[dict]:
     """One row per (fleet, day), plus the ALL rollup."""
@@ -49,7 +54,10 @@ def build(daily_rows: list[dict], anomalies: list[dict]) -> list[dict]:
                 'noon_utc': day,
                 **epoch.calendar(day),
                 'n_vessels': len({r['ship_id'] for r in rows}),
-                'avg_speed_loss_pct': sum(losses) / len(losses) if losses else None,
+                # One row per ship per day, so len(losses) IS the contributor count. n_vessels
+                # cannot stand in: it counts every ship that reported, valid or not.
+                'n_speed_loss_ships': len(losses),
+                'avg_speed_loss_pct': sum(losses) / len(losses) if len(losses) >= MIN_SPEED_LOSS_SHIPS else None,
                 'total_excess_cost_usd': sum(excess) if excess else None,
                 'cii_count_a': ratings['A'],
                 'cii_count_b': ratings['B'],
