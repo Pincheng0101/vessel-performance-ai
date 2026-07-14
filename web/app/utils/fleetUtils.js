@@ -74,6 +74,29 @@ class fleetUtils {
       .filter(rec => rec.savingUsd > 0)
       .sort((a, b) => b.savingUsd - a.savingUsd);
   }
+
+  /**
+   * Trailing mean over the last `window` *valued* rows — not the last `window` calendar days.
+   *
+   * agg_fleet_daily has no fleet speed loss on a day too few ships passed the ISO gate, so a
+   * calendar window would average those gaps as holes and thin the mean back out toward the
+   * single-day noise this is meant to damp. Counting points instead keeps every window full.
+   * The first rows average over fewer points, so the line starts and stays defined.
+   *
+   * @param {object[]} rows - day-ascending agg_fleet_daily rows
+   * @param {string} key - the numeric column to smooth
+   * @param {number} [window] - how many valued points the mean spans
+   * @returns {{ noon_utc: number, value: number }[]}
+   */
+  static rollingMean(rows, key, window = 30) {
+    const valued = (rows ?? []).filter(row => row[key] != null);
+    let sum = 0;
+    return valued.map((row, i) => {
+      sum += row[key];
+      if (i >= window) sum -= valued[i - window][key];
+      return { noon_utc: row.noon_utc, value: sum / Math.min(i + 1, window) };
+    });
+  }
 }
 
 export default fleetUtils;

@@ -139,3 +139,52 @@ describe('fleetUtils.savingsByShip', () => {
     expect(fleetUtils.savingsByShip(recs)).toEqual([]);
   });
 });
+
+describe('fleetUtils.rollingMean', () => {
+  const aggRow = (noonUtc, value) => ({ noon_utc: noonUtc, avg_speed_loss_pct: value });
+
+  test('averages each point over the trailing window', () => {
+    const rows = [aggRow(0, 2), aggRow(1, 4), aggRow(2, 6)];
+    expect(fleetUtils.rollingMean(rows, 'avg_speed_loss_pct', 2)).toEqual([
+      { noon_utc: 0, value: 2 },
+      { noon_utc: 1, value: 3 },
+      { noon_utc: 2, value: 5 },
+    ]);
+  });
+
+  test('spans the last 30 valued points by default, dropping the oldest', () => {
+    const rows = Array.from({ length: 31 }, (_, i) => aggRow(i, i));
+    const means = fleetUtils.rollingMean(rows, 'avg_speed_loss_pct');
+    expect(means.at(-2).value).toBe(14.5);
+    expect(means.at(-1).value).toBe(15.5);
+  });
+
+  test('skips the null days the ship floor leaves behind rather than averaging them as holes', () => {
+    const rows = [aggRow(0, 2), aggRow(1, null), aggRow(2, 4)];
+    expect(fleetUtils.rollingMean(rows, 'avg_speed_loss_pct', 2)).toEqual([
+      { noon_utc: 0, value: 2 },
+      { noon_utc: 2, value: 3 },
+    ]);
+  });
+
+  test('averages over the points that exist when they are fewer than the window', () => {
+    const rows = [aggRow(0, 2), aggRow(1, 4)];
+    expect(fleetUtils.rollingMean(rows, 'avg_speed_loss_pct', 30)).toEqual([
+      { noon_utc: 0, value: 2 },
+      { noon_utc: 1, value: 3 },
+    ]);
+  });
+
+  test('keeps a genuinely negative mean negative', () => {
+    const rows = [aggRow(0, -3), aggRow(1, -1)];
+    expect(fleetUtils.rollingMean(rows, 'avg_speed_loss_pct', 30).at(-1).value).toBe(-2);
+  });
+
+  test.each([
+    [[]],
+    [null],
+    [undefined],
+  ])('returns an empty series for %j rows', (rows) => {
+    expect(fleetUtils.rollingMean(rows, 'avg_speed_loss_pct')).toEqual([]);
+  });
+});

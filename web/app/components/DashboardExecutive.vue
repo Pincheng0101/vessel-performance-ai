@@ -36,9 +36,11 @@ const { roster, snapshot, monthly: fleetMonthly, latestDate } = fleet;
 const [{ data: overviewRows }, { data: recommendations }] = fetched;
 
 // Fleet speed-loss trend: avg_speed_loss_pct is the mean of that day's *valid* (ISO 19030-gated)
-// per-ship readings, so it already excludes weather-spoiled days — and being a mean, it is
-// unaffected by how many ships reported. noon_utc is a shared calendar index (day 0 = 2021-07-01
-// for every ship, 1:1 with report_date), so the axis is calendar-aligned.
+// per-ship readings, so it already excludes weather-spoiled days. A mean is unbiased at any n but
+// its variance is not, so the ETL nulls the day out below MIN_SPEED_LOSS_SHIPS (aggregate.py) —
+// a null here means too few ships cleared the gate to call it a fleet, not that nothing was
+// measured. n_speed_loss_ships is the day's contributor count. noon_utc is a shared calendar index
+// (day 0 = 2021-07-01 for every ship, 1:1 with report_date), so the axis is calendar-aligned.
 const speedLossDaily = computed(() => (overviewRows.value ?? []).filter(r => r.avg_speed_loss_pct != null));
 
 // Daily rows augmented with the two fleet-wide figures the raw row can't give:
@@ -158,22 +160,63 @@ const ciiTrendOption = computed(() => ({
   })),
 }));
 
-// Fleet speed-loss trend — daily fleet mean over the shared day index (see speedLossDaily above).
+// Fleet speed-loss trend — the 30-day mean is the line to read; a single day's fleet mean swings
+// on which handful of ships happened to clear the ISO gate. The raw daily series stays on the
+// chart underneath it (low opacity) so the smoothing hides no data: the dispersion, and the
+// negative days, are still there to see. Negative is real, not a bug — the reference curve is
+// fitted on a median intercept, so about half of a ship's genuinely clean days sit above it.
+// The window matches the 30d the KPI tiles compare against.
+const SPEED_LOSS_WINDOW = 30;
+const ROLLING_NAME = `${SPEED_LOSS_WINDOW}-day mean`;
+const RAW_NAME = 'Daily';
+const speedLossRolling = computed(
+  () => fleetUtils.rollingMean(speedLossDaily.value, 'avg_speed_loss_pct', SPEED_LOSS_WINDOW),
+);
+
 const speedLossTrendOption = computed(() => ({
-  grid: { left: 44, right: 16, top: 16, bottom: 28 },
-  tooltip: { trigger: 'axis', valueFormatter: v => (v == null ? '–' : `${(+v).toFixed(1)}%`) },
+  legend: { top: 0, right: 8, data: [ROLLING_NAME, RAW_NAME] },
+  grid: {
+    left: 44, right: 16, top: 32, bottom: 28,
+  },
+  tooltip: {
+    trigger: 'axis',
+    // Not valueFormatter: the raw series carries the day's contributor count alongside its value,
+    // which is the only thing that says how much of a fleet that point actually is.
+    formatter: (params) => {
+      const lines = params.map((p) => {
+        const ships = p.data?.ships;
+        const shipLabel = ships == null ? '' : ` · ${ships} ${ships === 1 ? 'ship' : 'ships'}`;
+        return `${p.marker}${p.seriesName} <b>${fmtPct(p.value[1])}</b>${shipLabel}`;
+      });
+      return [`Day ${params[0]?.axisValue}`, ...lines].join('<br/>');
+    },
+  },
   xAxis: { type: 'value', name: 'day' },
   yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
-  series: [{
-    name: 'Avg speed loss',
-    type: 'line',
-    smooth: true,
-    showSymbol: false,
-    lineStyle: { width: 1.5, color: SPEED_LOSS_COLOR },
-    itemStyle: { color: SPEED_LOSS_COLOR },
-    emphasis: { itemStyle: { color: SPEED_LOSS_COLOR } },
-    data: speedLossDaily.value.map(r => [r.noon_utc, r.avg_speed_loss_pct]),
-  }],
+  series: [
+    {
+      name: RAW_NAME,
+      type: 'line',
+      smooth: false,
+      showSymbol: false,
+      lineStyle: { width: 1, color: SPEED_LOSS_COLOR, opacity: 0.25 },
+      itemStyle: { color: SPEED_LOSS_COLOR, opacity: 0.25 },
+      data: speedLossDaily.value.map(r => ({
+        value: [r.noon_utc, r.avg_speed_loss_pct],
+        ships: r.n_speed_loss_ships,
+      })),
+    },
+    {
+      name: ROLLING_NAME,
+      type: 'line',
+      smooth: true,
+      showSymbol: false,
+      lineStyle: { width: 2, color: SPEED_LOSS_COLOR },
+      itemStyle: { color: SPEED_LOSS_COLOR },
+      emphasis: { itemStyle: { color: SPEED_LOSS_COLOR } },
+      data: speedLossRolling.value.map(r => [r.noon_utc, r.value]),
+    },
+  ],
 }));
 
 // Savings potential — Σ of the open cleaning recommendations, broken down by ship. There is no
