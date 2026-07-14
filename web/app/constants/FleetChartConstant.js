@@ -76,9 +76,24 @@ const ServiceTypeColor = Object.freeze({
   engine_inspection: CategoricalPalette[0],
 });
 
+// Two speed-loss lines, and they are NOT the same line — the dashboard used to draw only the
+// second and label it "threshold", which quietly hid the one the data actually computes.
+//
+// - SpeedLossIsoTrigger (8%) is the ISO 19030 **maintenance trigger** (MT). It is the number
+//   the lake itself evaluates: ym_datalake/etl/curated/indicators.py MT_TRIGGER_PCT, which
+//   emits an MT indicator row the day a hull cycle's 14-day trailing mean crosses it. Nothing
+//   enforces the two staying equal — keep them in sync by hand, or the chart draws a trigger
+//   the data never fires on.
+// - SpeedLossThreshold (10%) is this dashboard's **action** line: the speed loss at which a
+//   cleaning is recommended. It is an operator policy, not an ISO quantity.
+//
+// Two triggers is defensible. Two *undeclared* triggers is not — so both are rendered, each
+// labelled for what it is.
+const SpeedLossIsoTrigger = 8;
+const SpeedLossThreshold = 10;
+
 // Speed-loss color bands (mirror the deep-dive gauge: threshold 10%, amber from 6%).
 // Shaped as ECharts visualMap pieces so a map/scatter can both color and legend by them.
-const SpeedLossThreshold = 10;
 const SpeedLossBand = Object.freeze([
   { lt: 0, label: 'n/a', color: '#cbd5e1' },
   { gte: 0, lt: 6, label: '< 6%', color: SemanticRamp.good },
@@ -97,5 +112,6 @@ export {
   SeverityColor,
   SpeedLossBand,
   SpeedLossColor,
+  SpeedLossIsoTrigger,
   SpeedLossThreshold,
 };

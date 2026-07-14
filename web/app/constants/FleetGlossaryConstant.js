@@ -13,9 +13,10 @@ const Term = Object.freeze({
   savingsPotential: '依各船清潔／維修建議可節省的燃油成本總額（USD）。',
 
   // Performance
-  speedLoss: '相同主機功率下，實際船速較乾淨船體基準的下降百分比；主因船體／螺槳汙損。',
+  speedLoss: '相同主機功率下，實際船速較乾淨船體基準的下降百分比：(v_expected − STW) / v_expected × 100。正值＝速度損失＝性能衰退，這是 ISO 19030-2 帶號慣例的反號（該慣例以負值代表衰退），屬 ISO 19030-3 下的宣告性偏離。反映的是船體「與」螺槳的合併效應——ISO 19030 不提供兩者的拆分方法。',
   foulingRate: '速度損失每日增加的百分點（%/day），越高代表汙損越快。',
-  threshold: '觸發船體清潔建議的速度損失上限（%）。',
+  threshold: '本儀表板建議執行船體清潔的速度損失行動線（10%），屬營運政策，非 ISO 規定值。ISO 19030 的維修觸發（MT）為 8%，另以琥珀色虛線標示。',
+  isoTrigger: 'ISO 19030 維修觸發（Maintenance Trigger, MT）：14 日移動平均速度損失跨越 8% 的門檻，由資料湖逐個汙損週期計算（每個週期最多觸發一次）。ISO 明言四項指標中 MT 的不確定性最高，因其評估期最短。',
   triggerEta: '依現行趨勢，速度損失預計達到門檻的日期。',
   tStar: '使總成本（燃油＋清潔）最小的建議清潔天數。',
   speedPower: '實測船速對主機功率的關係，與乾淨船體基準比較以量化性能衰退。',
@@ -45,8 +46,8 @@ const Term = Object.freeze({
 
   // Vessel deep-dive
   alertsFeed: '此船的預警清單：每筆為一段連續異常（或生物附著趨勢）整合而成的事件，含起訖日期、嚴重度、成因與建議行動。',
-  vesselSpeedLossTrend: '此船每日速度損失的長期趨勢；含維修事件標記、10% 清潔門檻，以及依汙損速率外推至預測觸發日的趨勢線。',
-  causeDiagnostics: '整合滑失、SFOC 與 Admiralty efficiency index，判斷速度損失較可能來自船體髒污、螺旋槳／海流、主機效率或天氣／感測資料。',
+  vesselSpeedLossTrend: '此船每日速度損失的長期趨勢；含維修事件標記、ISO 19030 維修觸發線（8%）與本儀表板的清潔行動線（10%），以及依汙損速率外推至預測觸發日的趨勢線。趨勢線僅擬合於通過 ISO 篩選的實測值。灰點為未通過篩選的日子，滑鼠移入可查看被排除的原因。',
+  causeDiagnostics: '推論層（非 ISO 19030 輸出）。ISO 19030 量測的是船體「與」螺槳的合併效應，並未提供拆分兩者的方法；本面板在 ISO 之上疊加一層推論，依四個訊號——速度損失（船體＋螺槳合計）、實際滑失（螺旋槳）、SFOC（主機）與超額油耗——各自對基準的偏離與近 30 天異常數，推測衰退較可能的來源。每格附信心水準（高／中／低），依佐證訊號是否一致、樣本數與距上次重置天數而定。此結果不得作為 ISO 19030 的直接輸出對外引用。',
   maintenanceRec: '整合汙損模型、異常偵測與水下檢查所產生的建議維修行動；每項含優先度、建議到期日、預估淨節省與作業方式（水下／乾塢），依優先度與節省金額排序。',
   uwiInspection: '歷次水下檢查（在水檢查 UWI／乾塢 DD）結果：船體汙損等級（0–100）與覆蓋率、螺旋槳狀況（良好／尚可／不佳）與粗糙度、塗層劣化與狀況，以及建議動作。作為統計診斷與維修建議的實體佐證。',
   ciiTrend: '此船 CII AER 與 IMO 碳強度數值（gCO₂/dwt·nm）隨時間的變化；圖上的 A–E 標記各自對應所在那條線於該段期間的 CII 評級，圓點填色代表評級，外框顏色代表所屬線別（灰藍色 AER、紫色 IMO）。C 級以上為合規；連續三年 D 或單年 E 須提出改善計畫。',
@@ -55,7 +56,7 @@ const Term = Object.freeze({
 
   // Cost
   netSaving: '節省的燃油成本扣除清潔成本後的淨值（USD）。',
-  excessCost: '每日超額燃油成本＝相對乾淨船體、平穩海況多耗的燃油 × 油價，拆解為三個來源並加總：船體汙損（最大且可經由清潔改善）、天氣／海況（季節性、多不可控）、操作（航速／裝載等）。KPI 為近 30 天平均的每日成本（與營運總覽同口徑）；圖為各來源每日金額的 30 天移動平均堆疊。',
+  excessCost: '每日超額燃油成本＝相對乾淨船體、平穩海況多耗的燃油 × 油價，拆解為三個來源並加總：船體＋螺槳汙損（最大且可經由清潔／拋光改善；此項由速度損失導出，ISO 19030 不拆分船體與螺槳，故兩者合計）、天氣／海況（季節性、多不可控）、操作（航速／裝載等）。KPI 為近 30 天平均的每日成本（與營運總覽同口徑）；圖為各來源每日金額的 30 天移動平均堆疊。',
 
   // Maintenance
   serviceType: '維修窗口是否需進乾塢（含塗層更新或螺旋槳修理），其餘可於水下施作。',
@@ -87,8 +88,27 @@ const Term = Object.freeze({
   dailyCostBreakdown: '每日燃油成本（隨航速遞增）與每日租金成本（固定，隨速度變化僅影響其攤提的距離）隨航速變化的堆疊；兩者相加即為每日總成本。',
   fuelEmissionCurve: '每日燃油消耗量與 CO₂ 排放量隨航速變化的曲線；降速可同時降低油耗與排放。',
 
+  // Data coverage — ISO 19030 requires this to be a first-class displayed metric, not a footnote.
+  dataCoverage: '通過 ISO 19030 篩選、可用於計算速度損失的日數占此船總回報日數的比例。ISO 的篩選極為嚴格（實務上常剔除 80–95% 的原始資料，本資料湖全隊為 78%），覆蓋率低代表指標建立在很少的樣本上，須連同數值一併判讀。',
+
   // Fleet map
-  fleetMap: '全船隊最新一日的船位，虛線為兩港之間的規劃航線。點選任一船舶進入個船分析。',
+  fleetMap: '全船隊最新一日的船位，虛線為兩港之間的規劃航線。點選任一船舶進入個船分析。船位取自最新一日的回報；速度損失則取自最新一個「通過 ISO 19030 篩選」的日子——兩者通常不是同一天，故色點標示的是該船最近一次可信的船體狀態，滑鼠移入可查看該讀數的日期與距今天數。',
+});
+
+// fact_performance_daily.reject_reason → why the ISO 19030 gate dropped that day. The gate
+// drops ~78% of the fleet's days, and being able to say *which* gate dropped a given one is
+// the core value of an ISO 19030 dashboard (doc/iso-19030.md), not a footnote. Keys are the
+// values ym_datalake/etl/curated/filters.py emits — one per gate, in its evaluation order.
+const RejectReason = Object.freeze({
+  masked: '遮蔽資料：S21–S23 的預測窗口沒有主機資料可供篩選。',
+  missing_propulsion: '推進資料缺漏：功率、船速或排水量在清洗後不存在或非正值。',
+  displacement_backfilled: '排水量為吃水回填的推估值，非實測；推估值會使速度損失的散布加倍（9.76 pp vs 4.95 pp）。',
+  admiralty: '船速／功率組合不符物理：Admiralty 係數落在 300–1300 之外（單看各欄都合理，成對則不可能）。',
+  not_full_speed: '全速時數不足 22 小時，不構成穩態點。',
+  beaufort: '風力超過蒲福 4 級，或未記錄風級（未設限的天氣日不能稱為穩態）。',
+  low_speed: '船速低於設計船速的一半，基準曲線在此為外插。',
+  displacement_band: '排水量超出基準曲線的擬合區間（設計排水量的 0.5–1.2 倍）。',
+  shallow_water: '淺水效應：水深不足，阻力上升會偽裝成船體汙損。',
 });
 
 // Chart / section titles — centralized so labels stay consistent across the dashboard.
@@ -128,6 +148,7 @@ const Title = Object.freeze({
 });
 
 export {
+  RejectReason,
   Term,
   Title,
 };

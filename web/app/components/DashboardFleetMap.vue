@@ -98,12 +98,18 @@ const portDots = computed(() => Object.entries(PortConstant.Port).map(([locode, 
 })));
 
 // ship_id is the fleet's identity — there is no vessel name in the catalog.
+//
+// The dot's POSITION is the ship's latest report; its COLOR is the ship's latest ISO
+// 19030-*valid* speed loss, which is almost never the same day (the gate drops ~78% of days).
+// `speed_loss_day` is how old that reading is, and the tooltip says so — a gated number from
+// 40 days ago is the honest one to show, but only if it is labelled as being 40 days old.
 const vesselDots = computed(() => filteredPositions.value.map(r => ({
   name: r.ship_id,
   value: [r.longitude, r.latitude],
   ship: r.ship_id,
   itemStyle: { color: dotColor(r) },
   slPct: r.speed_loss_pct,
+  slAgeDays: r.speed_loss_day == null || r.noon_utc == null ? null : r.noon_utc - r.speed_loss_day,
   cii: r.cii_rating_imo,
   portFrom: r.port_from,
   portTo: r.port_to,
@@ -134,9 +140,13 @@ const mapOption = computed(() => {
       formatter: (p) => {
         if (p.seriesType === 'lines') return '';
         if (p.data?.ship) {
-          const sl = p.data.slPct == null ? '–' : `${(+p.data.slPct).toFixed(1)}%`;
+          const sl = p.data.slPct == null ? '無有效讀數' : `${(+p.data.slPct).toFixed(1)}%`;
+          // Always state the reading's age: this is a gated number from an earlier day, not today's.
+          const age = p.data.slPct == null
+            ? ''
+            : p.data.slAgeDays ? `（${p.data.slAgeDays} 天前的有效讀數）` : '（今日有效讀數）';
           const voyage = p.data.voyage ? ` · 航次 ${p.data.voyage}` : '';
-          return `<b>${p.data.name}</b><br/>${p.data.portFrom} → ${p.data.portTo}${voyage}<br/>速度損失 ${sl} · CII ${p.data.cii || '–'}`;
+          return `<b>${p.data.name}</b><br/>${p.data.portFrom} → ${p.data.portTo}${voyage}<br/>速度損失 ${sl}${age} · CII ${p.data.cii || '–'}`;
         }
         return p.data?.name || '';
       },

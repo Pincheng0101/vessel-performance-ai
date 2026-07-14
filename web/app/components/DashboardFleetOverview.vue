@@ -6,7 +6,8 @@ import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
 const server = useServer();
 const route = useRoute();
 const router = useRouter();
-const THRESHOLD = 10;
+// One source of truth for the action line — re-typing the literal here is how it drifts.
+const THRESHOLD = FleetChartConstant.SpeedLossThreshold;
 const SLOPE_EPS = 0.0015;
 
 const fmtPct = v => (v == null ? '–' : `${v.toFixed(1)}%`);

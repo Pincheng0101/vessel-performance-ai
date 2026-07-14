@@ -28,7 +28,16 @@ const shipId = defineModel('shipId', {
 const server = useServer();
 const { themeColors } = useCustomTheme();
 const T = FleetGlossaryConstant.Term;
+// Two different lines: the ISO 19030 maintenance trigger the ETL fires MT rows on (8%), and
+// this dashboard's own cleaning-action policy (10%). See FleetChartConstant.
+const ISO_TRIGGER = FleetChartConstant.SpeedLossIsoTrigger;
 const THRESHOLD = FleetChartConstant.SpeedLossThreshold;
+
+// fact_performance_daily.reject_reason → the gate, in words. Unknown reasons fall through as
+// themselves rather than being swallowed: a new gate in the ETL should show up, not vanish.
+const rejectReasonLabel = reason => (
+  reason == null ? '–' : FleetGlossaryConstant.RejectReason[reason] ?? reason
+);
 
 const fmtNum = (v, d = 1) => (v == null ? '–' : v.toFixed(d));
 const fmtUsd = v => (v == null ? '–' : `$${Math.round(v).toLocaleString()}`);
@@ -73,17 +82,33 @@ const latest = computed(() => {
 });
 
 // --- Header: vessel particulars (dim_vessel) + the ship's data coverage ---
+// ISO 19030 is explicit that data coverage is a FIRST-CLASS displayed metric, not a footnote:
+// its filtering commonly discards 80-95% of raw data, and without the coverage number the
+// indicators "look clean while actually resting on very few samples" (doc/iso-19030.md:54).
+// The header used to print only a day span, which says nothing about how many of those days
+// survived the gate.
+const coverage = computed(() => {
+  const rows = daily.value ?? [];
+  const valid = rows.filter(r => r.valid_flag).length;
+  return { valid, total: rows.length, pct: rows.length ? (valid / rows.length) * 100 : null };
+});
 const specs = computed(() => {
   const v = props.vessel;
   const rows = daily.value ?? [];
   const kind = v.role === 'predict' ? '預測船' : '訓練船';
   const range = rows.length ? `第 ${rows[0].noon_utc}–${rows.at(-1).noon_utc} 天` : '–';
+  const c = coverage.value;
   return [
     { label: 'Type', value: `${kind} · ${v.hull_class ?? '–'}` },
     { label: 'TEU', value: v.teu_nominal == null ? '–' : v.teu_nominal.toLocaleString() },
     { label: 'Design speed', value: v.design_speed_kn == null ? '–' : `${v.design_speed_kn.toFixed(1)} kn` },
     { label: 'Last dry-dock', value: v.last_dry_dock_day == null ? '無紀錄' : `第 ${v.last_dry_dock_day} 天` },
     { label: 'Data range', value: range },
+    {
+      label: 'ISO data coverage',
+      value: c.pct == null ? '–' : `${c.pct.toFixed(0)}% (${c.valid.toLocaleString()}/${c.total.toLocaleString()})`,
+      tooltip: T.dataCoverage,
+    },
   ];
 });
 
@@ -170,21 +195,39 @@ const fmtDate = (ts) => {
 // 2021-07-01 for every ship, 1:1 with report_date), so this axis is a day count, not a time axis.
 const speedLossTrendOption = computed(() => {
   const pts = (daily.value ?? [])
-    .map(d => ({ day: d.noon_utc, sl: d.speed_loss_pct, valid: d.valid_flag, daysSinceCleaning: d.days_since_cleaning }))
+    .map(d => ({
+      day: d.noon_utc,
+      sl: d.speed_loss_pct,
+      valid: d.valid_flag,
+      // Why the ISO gate dropped this day. The grey scatter used to be silent — a cloud of
+      // excluded points with no way to ask what excluded them.
+      reason: d.reject_reason,
+      daysSinceCleaning: d.days_since_cleaning,
+    }))
     .filter(d => d.day != null && d.sl != null)
     .sort((a, b) => a.day - b.day);
   if (!pts.length) return {};
 
   // Floor negative outliers at the 1st percentile so they don't stretch the axis; the upper
   // tail (high speed loss) is the signal we want visible, so it stays intact.
+  //
+  // The floor is for AXIS SCALING ONLY, so it is applied to a display copy. Flooring `pts` in
+  // place — as this used to — fed the clipped values straight into `valid` → `seg` → theilSen,
+  // so the trend line and the trigger-date prediction were fitted on data that had been
+  // truncated for cosmetic reasons. `plotSl` is what the chart draws; `sl` stays measured.
   const floor = quantileSorted(pts.map(d => d.sl).sort((a, b) => a - b), 0.01);
-  pts.forEach((d) => {
-    d.sl = Math.max(d.sl, floor);
-  });
+  const drawn = pts.map(d => ({ ...d, plotSl: Math.max(d.sl, floor) }));
 
-  const valid = pts.filter(d => d.valid);
-  const drawPts = valid.length ? valid : pts;
-  const maxSl = Math.max(...pts.map(d => d.sl));
+  const valid = drawn.filter(d => d.valid);
+  const drawPts = valid.length ? valid : drawn;
+  // Scale the axis on the points the chart is ABOUT — the ISO-valid series — not on the
+  // excluded ones. An excluded day can report a physically impossible speed loss (that is
+  // *why* it was excluded: S4 day 131 claims 17.7 kn on 2,103 kW), and letting those set the
+  // bound stretched the axis to ~100 % and squashed the 8 % and 10 % rules into the same pixel
+  // row, illegible on top of each other. Excluded points are clamped to the bound rather than
+  // dropped, so they stay visible and hoverable at the edge without dictating the scale — the
+  // mirror image of what the 1st-percentile floor already does at the bottom.
+  const maxSl = Math.max(...drawPts.map(d => d.plotSl));
 
   const r = rec.value;
   const triggerDay = r.trigger_eta_day ?? null;
@@ -193,7 +236,8 @@ const speedLossTrendOption = computed(() => {
   const lastCleanDay = lastRow?.daysSinceCleaning == null ? null : lastRow.day - lastRow.daysSinceCleaning;
 
   // Theil-Sen fit over the segment since the last cleaning, plus a dashed extrapolation to
-  // the predicted trigger day using the engineered fouling rate.
+  // the predicted trigger day using the engineered fouling rate. Fitted on the MEASURED `sl`,
+  // never the floored `plotSl` — a slope is a claim about the hull, not about the axis.
   const seg = (lastCleanDay == null ? valid : valid.filter(d => d.day >= lastCleanDay));
   const fit = theilSen(seg.map(d => ({ x: d.day, y: d.sl })));
   const fitSeries = [];
@@ -281,14 +325,21 @@ const speedLossTrendOption = computed(() => {
         symbol: 'circle',
         lineStyle: { color: FleetChartConstant.SpeedLossColor, width: 1.5 },
         itemStyle: { color: FleetChartConstant.SpeedLossColor },
-        data: drawPts.map(d => [d.day, d.sl]),
+        data: drawPts.map(d => [d.day, d.plotSl]),
         markLine: {
           symbol: 'none', silent: true,
-          // Guide lines carry no label (their meaning is the top marker); only the threshold
-          // rule is labeled. markLine defaults label.show to true, so disable it at series level.
+          // Guide lines carry no label (their meaning is the top marker); the two rules are
+          // labeled. markLine defaults label.show to true, so disable it at series level.
           label: { show: false },
           data: [
-            { yAxis: THRESHOLD, lineStyle: { color: FleetChartConstant.SemanticRamp.critical, type: 'dashed', width: 1 }, label: { show: true, formatter: `threshold ${THRESHOLD}%`, position: 'insideStartTop', fontSize: 10, color: FleetChartConstant.SemanticRamp.critical } },
+            // TWO lines, each named for what it is. The 8% is the ISO 19030 maintenance
+            // trigger the lake itself fires on (indicators.MT_TRIGGER_PCT); the 10% is this
+            // dashboard's own cleaning-action policy. Only the 10% used to be drawn, labeled
+            // the bare word "threshold" — which read as though ISO had set it.
+            // Hangs BELOW its line ('insideStartBottom'), unlike the 10% rule above it: only
+            // 2 percentage points separate the two, so two top-anchored labels overlap.
+            { yAxis: ISO_TRIGGER, lineStyle: { color: FleetChartConstant.SemanticRamp.warning, type: 'dashed', width: 1 }, label: { show: true, formatter: `ISO 19030 維修觸發 ${ISO_TRIGGER}%`, position: 'insideStartBottom', fontSize: 10, color: FleetChartConstant.SemanticRamp.warning } },
+            { yAxis: THRESHOLD, lineStyle: { color: FleetChartConstant.SemanticRamp.critical, type: 'dashed', width: 1 }, label: { show: true, formatter: `清潔行動線 ${THRESHOLD}%`, position: 'insideStartTop', fontSize: 10, color: FleetChartConstant.SemanticRamp.critical } },
             ...guides,
           ],
         },
@@ -301,12 +352,23 @@ const speedLossTrendOption = computed(() => {
         name: '速度損失', type: 'scatter', symbolSize: 22, z: 3,
         itemStyle: { color: FleetChartConstant.SpeedLossColor, opacity: 0.01 },
         emphasis: { disabled: true },
-        data: drawPts.map(d => [d.day, d.sl]),
+        data: drawPts.map(d => [d.day, d.plotSl]),
       },
       {
-        name: '排除資料', type: 'scatter', symbolSize: 3, silent: true,
+        // Not silent any more: 78% of days fail the ISO gate, and the user is entitled to ask
+        // *which* gate dropped any one of them. That drill-down is the point of the standard
+        // (doc/iso-19030.md:110-116), and this scatter is where it surfaces.
+        // symbolSize 5, not 3: at 3px the dots are effectively impossible to hover, which would
+        // make the rejection reason below unreachable — a drill-down nobody can open is not one.
+        name: '排除資料', type: 'scatter', symbolSize: 5,
         itemStyle: { color: '#cbd5e1' },
-        data: pts.filter(d => !d.valid).map(d => [d.day, d.sl]),
+        emphasis: { scale: 2 },
+        // Clamped to the axis so an impossible reading stays visible at the edge instead of
+        // stretching the scale; the tooltip always reports the value the row actually carries.
+        data: drawn.filter(d => !d.valid).map(d => ({
+          value: [d.day, clamp(d.plotSl, yMin, yMax)],
+          tip: `第 ${d.day} 天 · 速度損失 ${d.sl.toFixed(1)}%<br/><b>未通過 ISO 19030 篩選</b><br/>原因：${rejectReasonLabel(d.reason)}`,
+        })),
       },
       ...fitSeries,
       // One shape (▼) for all top markers; color carries the meaning (slate = performed, red = predicted).
@@ -323,7 +385,9 @@ const speedLossTrendOption = computed(() => {
 // per-day figure (fleet_overview.total_excess_cost_usd); fouling is the largest and the only one a
 // cleaning can reset, so it is the controllable lever.
 const COST_PARTS = [
-  { key: 'f', col: 'excess_cost_fouling_usd', title: '船體汙損', color: FleetChartConstant.CauseColor.hull_biofouling },
+  // "船體＋螺槳汙損", not "船體汙損": this channel is excess_cost_usd, which is derived from
+  // speed_loss_pct — the COMBINED hull-and-propeller effect. ISO 19030 does not split them.
+  { key: 'f', col: 'excess_cost_fouling_usd', title: '船體＋螺槳汙損', color: FleetChartConstant.CauseColor.hull_biofouling },
   { key: 'w', col: 'excess_cost_weather_usd', title: '天氣／海況', color: FleetChartConstant.CauseColor.weather },
   // Light warm neutral (not slate) so this reads as a plain "other" bucket. Lighter again
   // than the weather blue below it — the lightness step is what separates the bands, so it
@@ -1024,6 +1088,34 @@ const recentAnomalyCount = (metric) => {
 // them to put four different units (% speed loss, % of SFOC baseline, % slip, % excess FOC) on
 // one comparable scale.
 const DIAGNOSTIC_HIGH = { speedLoss: THRESHOLD, slip: 15, sfoc: 5, excessFoc: 8 };
+
+// --- Confidence: what each tile's inference actually rests on ---
+//
+// ISO 19030 measures the COMBINED hull-plus-propeller change and offers no method to separate
+// the two. Attribution is therefore an inference layer on top of ISO, and the standard's own
+// guidance is that it must carry a confidence level and never be presented as a direct ISO
+// output — "this matters a great deal once the output reaches owners/charterers and enters
+// contractual dispute" (doc/iso-19030.md:83-89).
+//
+// `corroborator` names the one OTHER signal that is physically independent of this one.
+// excess_foc is nobody's corroborator on purpose: it is DERIVED from speed_loss
+// (physics.excess_foc_mt computes it *from* the speed loss), so excess_foc agreeing with
+// speed_loss is speed loss agreeing with itself. For the same reason it can never itself
+// reach high confidence.
+const DIAGNOSTIC_EVIDENCE = {
+  speed_loss: { corroborator: 'slip', reset: 'days_since_cleaning' },
+  slip: { corroborator: 'speed_loss', reset: 'days_since_polish' },
+  sfoc: { corroborator: null, reset: null },
+  excess_foc: { corroborator: null, reset: 'days_since_cleaning', derived: true },
+};
+const CONFIDENCE_MIN_POINTS = 10;
+const CONFIDENCE_HIGH_POINTS = 30;
+// A reading taken days after a hull clean / propeller polish has almost no history behind it,
+// so it cannot support a claim about degradation yet — however clean the arithmetic looks.
+const CONFIDENCE_MIN_DAYS_SINCE_RESET = 14;
+const CONFIDENCE_LABEL = { high: '信心高', medium: '信心中', low: '信心低' };
+const CONFIDENCE_COLOR = { high: 'success', medium: 'warning', low: 'error' };
+
 const causeDiagnostics = computed(() => {
   const stats = diagnosticStats.value;
   const slipDelta = stats.slip.latestIndex == null ? null : stats.slip.latestIndex - 100;
@@ -1051,10 +1143,43 @@ const causeDiagnostics = computed(() => {
     (excessDelta != null && excessDelta >= 3) || excessAnomalies >= 1,
   );
 
+  const levelByKey = { speed_loss: hullLevel, slip: propellerLevel, sfoc: engineLevel, excess_foc: excessLevel };
+  const nByKey = {
+    speed_loss: stats.speedLoss.points.length,
+    slip: stats.slip.points.length,
+    sfoc: stats.sfoc.points.length,
+    excess_foc: stats.excessFoc.points.length,
+  };
+  const confidenceOf = (key) => {
+    const { corroborator, derived, reset } = DIAGNOSTIC_EVIDENCE[key];
+    const n = nByKey[key];
+    const daysSinceReset = reset == null ? null : latest.value?.[reset] ?? null;
+
+    // Too few measured days, or too soon after the reset this signal is measured against.
+    if (n < CONFIDENCE_MIN_POINTS) return { level: 'low', basis: `僅 ${n} 個有效樣本` };
+    if (daysSinceReset != null && daysSinceReset < CONFIDENCE_MIN_DAYS_SINCE_RESET) {
+      return { level: 'low', basis: `距上次重置僅 ${daysSinceReset} 天，尚無足夠歷史` };
+    }
+    // A signal derived from another cannot corroborate it, so it never reaches high confidence.
+    if (derived) return { level: 'medium', basis: `${n} 個樣本 · 由速度損失導出，非獨立訊號` };
+
+    const agrees = corroborator != null && levelByKey[corroborator] !== 'low';
+    if (n >= CONFIDENCE_HIGH_POINTS && agrees) {
+      return { level: 'high', basis: `${n} 個樣本 · 獨立訊號（${metricTitle(corroborator)}）一致` };
+    }
+    return {
+      level: 'medium',
+      basis: agrees ? `${n} 個樣本` : `${n} 個樣本 · 無獨立訊號佐證`,
+    };
+  };
+
   return [
     {
       key: 'speed_loss',
-      title: '船體／速度損失',
+      // NOT "hull". speed_loss_pct is the COMBINED hull-plus-propeller effect — ISO 19030
+      // provides no method to split them, so a tile calling it the hull is a claim the
+      // standard explicitly declines to make.
+      title: '船體＋螺槳／速度損失',
       icon: metricIcon('speed_loss'),
       level: hullLevel,
       score: Math.max(slLatest.value ?? 0, speedLossAnomalies * 4),
@@ -1100,11 +1225,18 @@ const causeDiagnostics = computed(() => {
       detail: `目前 ${fmtMetricRaw('excess_foc', stats.excessFoc.latestValue)} · 近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${excessAnomalies} 件異常`,
       summary: `超額油耗 ${fmtIndexDelta(stats.excessFoc.latestIndex)}，近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${excessAnomalies} 件異常`,
     },
-  ].map(item => ({
-    ...item,
-    color: diagnosticColor(item.level),
-    status: diagnosticStatus(item.level),
-  }));
+  ].map((item) => {
+    const confidence = confidenceOf(item.key);
+    return {
+      ...item,
+      color: diagnosticColor(item.level),
+      status: diagnosticStatus(item.level),
+      confidence: confidence.level,
+      confidenceLabel: CONFIDENCE_LABEL[confidence.level],
+      confidenceColor: CONFIDENCE_COLOR[confidence.level],
+      confidenceBasis: confidence.basis,
+    };
+  });
 });
 // Severity first, then how far past its own "high" bar the metric sits. The raw scores are not
 // comparable across metrics — a 5.5% speed loss (low) and a +5.2% SFOC (high) are different
@@ -1289,11 +1421,15 @@ watch(alertPageCount, (n) => {
             <span class="text-caption text-medium-emphasis">vs prev 30d</span>
           </div>
         </DashboardKpiCard>
+        <!-- cii_rating_imo, NOT cii_rating_aer: the tooltip promises the regulatory grade
+             (scored against the year's reduced required line) and every other CII surface in
+             the dashboard uses it. aer scores against the un-reduced 2019 base line, which
+             flatters the ship — S1 on 2026-06-30 is an 'A' by aer and a 'B' by imo. -->
         <DashboardKpiCard
           label="CII"
           :tooltip="T.cii"
-          :value="latest?.cii_rating_aer || '–'"
-          :value-color="latest?.cii_rating_aer ? ciiColor(latest.cii_rating_aer) : ''"
+          :value="latest?.cii_rating_imo || '–'"
+          :value-color="latest?.cii_rating_imo ? ciiColor(latest.cii_rating_imo) : ''"
         >
           <div class="text-caption text-medium-emphasis mt-1">
             {{ `AER ${fmtNum(latest?.cii_aer, 2)}` }}
@@ -1462,6 +1598,26 @@ watch(alertPageCount, (n) => {
     >
       <UsageResultCard>
         <div class="diagnostic-panel">
+          <!-- ISO 19030 measures the COMBINED hull+propeller change and provides no method to
+               separate them. Everything below is an inference layer on top of ISO, and the
+               standard is explicit that it must be labelled as one, carry a confidence level,
+               and never be quoted as a direct ISO output — it lands in contractual disputes
+               between owners and charterers (doc/iso-19030.md:83-89). Hence the banner, the
+               dashed border, and the per-tile confidence chips. -->
+          <div class="inference-banner pa-3 d-flex flex-wrap align-center ga-2">
+            <v-chip
+              size="x-small"
+              variant="flat"
+              color="secondary"
+              class="flex-shrink-0"
+            >
+              推論層
+            </v-chip>
+            <div class="text-caption text-medium-emphasis flex-grow-1">
+              ISO 19030 量測的是船體與螺槳的<strong>合併</strong>效應，本身不提供拆分兩者的方法。以下為在 ISO 之上疊加的推論，非 ISO 19030 的直接輸出，每格附信心水準。
+            </div>
+          </div>
+
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
             <v-icon
               v-if="dominantDiagnostic"
@@ -1516,6 +1672,17 @@ watch(alertPageCount, (n) => {
               </div>
               <div class="diagnostic-detail text-caption text-medium-emphasis mt-2">
                 {{ item.detail }}
+              </div>
+              <div class="d-flex align-center ga-2 mt-2">
+                <v-chip
+                  size="x-small"
+                  variant="tonal"
+                  :color="item.confidenceColor"
+                  class="flex-shrink-0"
+                >
+                  {{ item.confidenceLabel }}
+                </v-chip>
+                <span class="text-caption text-medium-emphasis text-truncate">{{ item.confidenceBasis }}</span>
               </div>
             </div>
           </div>
@@ -1756,6 +1923,14 @@ watch(alertPageCount, (n) => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+// Dashed border, not the solid one every other card uses: this panel is an inference layer,
+// not a measurement, and it has to be visually distinct from the ISO speed-loss chart above it.
+.inference-banner {
+  border: 1px dashed rgba(var(--v-theme-inputBorder));
+  border-radius: 4px;
+  background-color: rgba(var(--v-theme-backgroundScale1));
 }
 
 .diagnostic-lead {
