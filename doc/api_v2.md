@@ -57,8 +57,9 @@ same calendar date.
 Every v2 type serves **real data** — either raw measurements or values derived
 from them. Nothing in v2 is synthetic.
 
-**Raw CSV (measurements, 1:1 from `data/*.csv`)** — served as loaded, no
-modeling; only `HIDDEN`/`PREDICT` → null + marker columns:
+#### Raw CSV (measurements, 1:1 from `data/*.csv`)
+
+Served as loaded, no modeling; only `HIDDEN`/`PREDICT` → null + marker columns:
 
 | query_type | Backing table | Source file |
 |---|---|---|
@@ -69,10 +70,11 @@ modeling; only `HIDDEN`/`PREDICT` → null + marker columns:
 | `vessel_maintenance_effect` | `maintenance` | maintenance.csv |
 | `predict_targets` | `vt_fd` | vt_fd.csv (PREDICT cells) |
 
-**Derived (computed from the raw measurements by `compute-real`)** — model
-estimates, not measurements: deterministic math over the real rows (baseline
-power-curve fit, robust-z statistics, trigger/ETA heuristics), zero randomness,
-zero invented data points. Thresholds are constants in
+#### Derived (computed from the raw measurements by `compute-real`)
+
+Model estimates, not measurements: deterministic math over the real rows
+(baseline power-curve fit, robust-z statistics, trigger/ETA heuristics), zero
+randomness, zero invented data points. Thresholds are constants in
 `ym_datalake/etl/real_compute.py`. Empty until `compute-real --upload` has run:
 
 | query_type | Backing table | Derivation |
@@ -82,7 +84,9 @@ zero invented data points. Thresholds are constants in
 | `vessel_alerts` / `fleet_alerts` | `fact_ship_alert` | anomaly runs grouped into episodes |
 | `vessel_maintenance_recommendation` / `fleet_maintenance_recommendation` | `fact_ship_maintenance_recommendation` | trigger/ETA + drift heuristics |
 
-**Synthetic — NOT migrated to v2.** The v1 catalog (18 types, `doc/api.md` §4)
+#### Synthetic — NOT migrated to v2
+
+The v1 catalog (18 types, `doc/api.md` §4)
 was built on the generated synthetic lake (`ym_datalake/synthetic_data/`);
 those Glue tables are unregistered, so v1 always fails. Six v1 concepts were
 re-implemented above on real data under the same names. The rest have **no v2
