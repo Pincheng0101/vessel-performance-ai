@@ -22,11 +22,12 @@ npm run test:unit -- --run
 npm run generate                   # static build → .output/public
 ```
 
-- Dashboard is **fixture-backed** (`app/services/server/datalake.js` → `public/demo/{v1,v2}`). Only
-  the GenBI copilot chat is live; it needs the six `AGENTCORE_*` vars in `web/.env` (`.env.example`).
-- `npm run capture` regenerates `public/demo/v2` (`YM_API_BASE_URL`/`YM_API_KEY` via
-  `web/.env.capture`). **Broken:** still targets the removed `/v2/queries` prefix; API now serves
-  `/queries`.
+- Dashboard is **fixture-backed** (`app/services/server/datalake.js` → `public/demo/*.json`, keyed by
+  `public/demo/index.json`). Only the GenBI copilot chat is live; it needs the six `AGENTCORE_*` vars
+  in `web/.env` (`.env.example`).
+- `npm run capture` regenerates `public/demo` off the deployed query API (`YM_API_BASE_URL`/`YM_API_KEY`
+  via `web/.env.capture`). Changing a query's column list (`lambda_function/async_query_api/queries.py`)
+  means deploying the API *before* re-capturing, or the fixture comes back without the new column.
 - `web/CLAUDE.md` + `web/.claude/rules/` are authoritative for anything under `web/` — follow them.
 
 # Documentation
