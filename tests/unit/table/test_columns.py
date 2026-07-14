@@ -12,8 +12,6 @@ COLUMN_LISTS = {name: getattr(table, name) for name in dir(table) if name.endswi
 def test_package_exports_column_lists() -> None:
     assert 'VT_FD_COLUMNS' in COLUMN_LISTS
     assert 'MAINTENANCE_COLUMNS' in COLUMN_LISTS
-    assert 'NOON_REPORT_COLUMNS' in COLUMN_LISTS
-    assert 'FACT_PERFORMANCE_DAILY_COLUMNS' in COLUMN_LISTS
 
 
 @pytest.mark.parametrize('list_name', sorted(COLUMN_LISTS))

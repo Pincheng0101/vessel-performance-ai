@@ -1,11 +1,11 @@
-"""VT_FD_COLUMNS / MAINTENANCE_COLUMNS must mirror the real CSVs in data/."""
+"""VT_FD_COLUMNS / MAINTENANCE_COLUMNS must mirror the real CSVs in dataset/."""
 
 import csv
 from pathlib import Path
 
 from table.real_data import MAINTENANCE_COLUMNS, SHIP_IDS, VT_FD_COLUMNS
 
-DATA_DIR = Path(__file__).resolve().parents[3] / 'data'
+DATASET_DIR = Path(__file__).resolve().parents[3] / 'dataset'
 
 # vt_fd.csv header -> vt_fd column. 'De-identification Name' becomes the
 # ship_id partition key (not a body column); the rest are lowercased 1:1.
@@ -57,7 +57,7 @@ MARKER_COLUMNS = {'masked_flag', 'predict_fuel_type'}
 
 
 def _header(csv_name: str) -> list[str]:
-    with (DATA_DIR / csv_name).open() as f:
+    with (DATASET_DIR / csv_name).open() as f:
         return next(csv.reader(f))
 
 
@@ -86,6 +86,6 @@ def test_maintenance_columns_match_csv_header() -> None:
 
 def test_ship_ids_match_data() -> None:
     for csv_name, col in (('vt_fd.csv', 'De-identification Name'), ('maintenance.csv', 'ship_id')):
-        with (DATA_DIR / csv_name).open() as f:
+        with (DATASET_DIR / csv_name).open() as f:
             assert {row[col] for row in csv.DictReader(f)} == set(SHIP_IDS)
     assert len(SHIP_IDS) == 15

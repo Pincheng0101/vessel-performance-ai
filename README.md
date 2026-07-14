@@ -38,7 +38,7 @@ Region is **`us-west-2`**; the CDK stack is **`YmHackathonAthenaToolStack`**.
 - [Develop & test](#develop--test)
 - [1. Deploy (CDK)](#1-deploy-cdk)
 - [2. Generate synthetic data (M1)](#2-generate-synthetic-data-m1)
-- [3. Compute curated tables (M2 + M3)](#3-compute-curated-tables-m2--m3)
+- [3. ETL the real dataset](#3-etl-the-real-dataset)
 - [4. Query / verify Athena](#4-query--verify-athena)
 - [5. Async query API (M5)](#5-async-query-api-m5)
 - [6. Dashboard (M6)](#6-dashboard-m6)
@@ -75,9 +75,11 @@ BUCKET=$(AWS_PROFILE=ym-hackathon aws cloudformation describe-stacks --stack-nam
 AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.synthetic_data generate \
   --out ./tmp --seed 42 --validate --upload --bucket "$BUCKET"
 
-# 3. Compute curated tables (M2+M3) + upload curated/ → s3://$BUCKET/curated/
-AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl compute \
-  --in ./tmp --out ./tmp --validate --upload --bucket "$BUCKET"
+# 3. Load the real dataset → raw/, compute curated fact_ship_* → curated/, upload both
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl load-real \
+  --data ./dataset --out ./tmp --upload --bucket "$BUCKET"
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl compute-real \
+  --data ./dataset --out ./tmp --upload --bucket "$BUCKET"
 
 # 4. Data is now queryable (partition projection — no crawler / MSCK). See §4–§5.
 
@@ -100,12 +102,11 @@ ym_datalake/synthetic_data/             M1 generator (numpy, local-only)
   __main__.py                           CLI: generate / validate
   fleet.py curves.py physics.py ...     fleet specs, speed-power curves, forward physics model
   uploader.py                           put raw/ tree to S3 (I/O layer; test mock boundary)
-ym_datalake/etl/                        M2/M3 ETL: raw zone → curated tables (numpy/scikit-learn, local-only)
-  __main__.py                           CLI: compute / validate (C13 + C14)
-  corrections.py filters.py indicators.py cii.py periods.py   M2: ISO 15016/19030 + derived indicators
-  anomaly.py trends.py recommendation.py                      M3: anomaly detect + cause, fouling trend, cleaning rec.
-  compute.py writer.py uploader.py      orchestrator (M2 + M3 _apply_m3), curated JSONL writer, put curated/ tree to S3
-  validate.py                           C13 closed-loop + C14 statistical-insight checks
+ym_datalake/etl/                        ETL for the real dataset: dataset/ → raw zone → curated tables (local-only)
+  __main__.py                           CLI: load-real / compute-real
+  real_data.py                          load vt_fd.csv / maintenance.csv / vessel.jsonl → raw JSONL
+  real_compute.py                       curated fact_ship_* (daily, anomaly, alert, maintenance recommendation)
+  jsonl.py uploader.py                  JSONL writer, put raw/ + curated/ trees to S3
 ym_datalake/ml/                         M7 ML pipeline: curated → forecasts (xgboost/sklearn, local-only)
   __main__.py                           CLI: train / backtest / infer / validate (C21–C23)
   dataset.py features.py               data I/O boundary + causal multi-horizon features
@@ -220,52 +221,34 @@ AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.synthetic_data generate \
 directories land exactly on the prefixes the Glue table projects — no crawler /
 `MSCK` needed.
 
-## 3. Compute curated tables (M2 + M3)
+## 3. ETL the real dataset
 
-A single `compute` pass reads the raw zone (never the ground truth) and writes the
-curated JSONL tree under `./tmp/curated/` (see
-[`doc/curated-dataset.md`](doc/curated-dataset.md) and
-[`doc/insights.md`](doc/insights.md) for the field design):
+`ym_datalake.etl` has two subcommands, both reading the source files under `./dataset`
+(`vt_fd.csv`, `maintenance.csv`, `vessel.jsonl`):
 
-- **M2** — applies ISO 15016/19030 + derived indicators to produce
-  `fact_performance_daily` (and the dims / indicator / passthrough tables, plus the
-  `fact_voyage` voyage roll-up + the `dim_port` port dimension + the Phase-2
-  `fact_speed_profile` optimizer profile). It recovers the
-  injected speed loss — the **C13** closed-loop check compares the recovered
-  `speed_loss_pct` against the ground truth, **C18** asserts the voyage roll-up
-  conserves fuel exactly (`Σ fact_voyage.total_foc_mt == Σ noon_report.total_foc_mt`
-  per vessel), and **C19** asserts the optimizer's economical speed
-  (`recommended_speed_kn`) equals the `usd_per_nm` argmin and is strictly interior to
-  the speed grid — the usd/nm curve is convex (an interior minimum) thanks to the
-  per-day charter time cost, a static per-vessel `charter_usd_per_day` particular on
-  `VesselSpec` (`fleet.py`), deliberately NOT surfaced on `dim_vessel`.
-- **M3** (`_apply_m3`) — the statistical layer runs over the M2 output: a piecewise
-  Theil-Sen fouling-rate trend (`trends.py`), point-anomaly detection + rule-based
-  cause/severity (`anomaly.py`, rolling-z / EWMA / IsolationForest), and per-vessel
-  maintenance-effect + optimal-cleaning recommendation (`recommendation.py`). It
-  emits `fact_anomaly` / `fact_recommendation` and fills the columns M2 left null
-  (`anomaly_flag`/`anomaly_cause`/`anomaly_severity` on the daily table,
-  `me_recovery_pct`/`payback_days` on `fact_maintenance_event`, `n_alerts` on
-  `agg_fleet_daily`). The **C14** check scores recovered anomalies/causes/severities
-  against the injected labels and sanity-checks the recommendations.
+- **`load-real`** — parses the three source files and writes the partitioned raw JSONL
+  tree under `./tmp/raw/{vt_fd,maintenance,vessel}/`.
+- **`compute-real`** — derives the curated tables from the same sources and writes them
+  under `./tmp/curated/fact_ship_{daily,anomaly,alert,maintenance_recommendation}/`.
 
 ```bash
-# compute curated tables (M2 + M3), then run C13 (closed-loop) + C14 (insight) + C18 (voyage balance) + C19 (economical speed)
-uv run python -m ym_datalake.etl compute --in ./tmp --out ./tmp --validate
+# raw zone (./tmp/raw/) from ./dataset
+uv run python -m ym_datalake.etl load-real --data ./dataset --out ./tmp
 
-# re-run only C13 against an existing curated tree
-uv run python -m ym_datalake.etl validate --dir ./tmp
+# curated fact_ship_* tables (./tmp/curated/)
+uv run python -m ym_datalake.etl compute-real --data ./dataset --out ./tmp
 
-# compute-and-upload to s3://<bucket>/curated/... (keys mirror the local layout)
-AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl compute \
-  --in ./tmp --out ./tmp --upload --bucket <DataLakeBucketName>
+# same, uploading to s3://<bucket>/... (keys mirror the local layout)
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl load-real \
+  --data ./dataset --out ./tmp --upload --bucket <DataLakeBucketName>
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl compute-real \
+  --data ./dataset --out ./tmp --upload --bucket <DataLakeBucketName>
 ```
 
-`compute` flags: `--in` (input dir holding `raw/`; `--validate` also reads `truth/`
-here — default `./tmp`), `--out` (curated dir, default `./tmp`), `--validate` (runs
-C13, C14, C18 **and** C19), `--upload`, `--bucket` (required with `--upload`), `--region`
-(default `us-west-2`). The standalone `validate` subcommand re-runs **C13 only**
-(C14 / C18 / C19 need the in-memory M2/M3 tables).
+Flags (both commands): `--data` (source dir, default `./dataset`), `--out` (output dir,
+default `./tmp`), `--upload`, `--bucket` (falls back to `app.datalake.bucket_name` from
+`conf/<env>.conf`), `--env` (default `dev`), `--region` (default `us-west-2`). Upload is
+an allowlist of the real-data prefixes, so a shared `--out` never sweeps up other trees.
 
 ## 4. Query / verify Athena
 

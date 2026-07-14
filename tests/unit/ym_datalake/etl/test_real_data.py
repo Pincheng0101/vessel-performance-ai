@@ -8,9 +8,6 @@ import pytest
 from table.real_data import MAINTENANCE_COLUMNS, SHIP_IDS, VESSEL_COLUMNS
 from ym_datalake.etl.real_data import load_maintenance, load_vessel, load_vt_fd, write_real_data
 
-DATA_DIR = Path(__file__).resolve().parents[4] / 'data'
-# The committed source files live in dataset/ (DATA_DIR above is the empty, gitignored
-# working dir the CSV-reading tests still point at).
 DATASET_DIR = Path(__file__).resolve().parents[4] / 'dataset'
 
 VT_FD_HEADER = (
@@ -67,7 +64,7 @@ def test_load_vt_fd_markers(tmp_path):
 
 
 def test_load_real_csvs_end_to_end():
-    vt_rows = load_vt_fd(DATA_DIR / 'vt_fd.csv')
+    vt_rows = load_vt_fd(DATASET_DIR / 'vt_fd.csv')
     assert len(vt_rows) == 21282
     assert {r['ship_id'] for r in vt_rows} >= {'S1', 'S12', 'S21', 'S23'}
     predicts = [r['predict_fuel_type'] for r in vt_rows if r['predict_fuel_type']]
@@ -75,7 +72,7 @@ def test_load_real_csvs_end_to_end():
     assert predicts.count('ME_FULLSPEED_CONSUMP_HSHFO') == 91
     assert predicts.count('ME_FULLSPEED_CONSUMP_VLSFO') == 11
 
-    mnt_rows = load_maintenance(DATA_DIR / 'maintenance.csv')
+    mnt_rows = load_maintenance(DATASET_DIR / 'maintenance.csv')
     assert len(mnt_rows) == 77
     assert all(set(r) == {k for k, _ in MAINTENANCE_COLUMNS} for r in mnt_rows)
 
