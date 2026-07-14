@@ -329,3 +329,117 @@ class TestRender:
     def test_extra_param_rejected(self):
         with pytest.raises(BadRequestError):
             render('vessel_recommendation', {'imo_number': '9700006', 'evil': "'; DROP TABLE x --"})
+
+
+class TestRealDataRender:
+    """v2 real-dataset catalog over vt_fd / maintenance (old type names, ship_id + day axis)."""
+
+    @staticmethod
+    def _render(query_type, params):
+        from queries import QUERY_TYPES_V2
+
+        return render(query_type, params, QUERY_TYPES_V2)
+
+    def test_fleet_vessels_roster(self):
+        sql, binds = self._render('fleet_vessels', {})
+        assert 'FROM vt_fd' in sql
+        assert 'GROUP BY ship_id' in sql
+        for col in ('n_rows', 'first_day', 'last_day', 'n_predict', 'n_masked'):
+            assert col in sql
+        assert sql.rstrip().endswith('ORDER BY ship_id')
+        assert binds == []
+
+    def test_vessel_metrics_day_range(self):
+        sql, binds = self._render('vessel_metrics', {'ship_id': 'S21', 'start_day': 100, 'end_day': 200})
+        assert 'FROM vt_fd WHERE ship_id = ?' in sql
+        assert 'AND noon_utc BETWEEN CAST(? AS integer) AND CAST(? AS integer)' in sql
+        for col in (
+            'speed_through_water',
+            'me_avg_rpm',
+            'horse_power',
+            'me_fullspeed_consump_hshfo',
+            'me_fullspeed_consump_bio_hsfo',
+            'hours_full_speed',
+            'masked_flag',
+            'predict_fuel_type',
+        ):
+            assert col in sql
+        assert sql.rstrip().endswith('ORDER BY noon_utc')
+        assert binds == ['S21', '100', '200']
+
+    def test_vessel_metrics_ship_only(self):
+        sql, binds = self._render('vessel_metrics', {'ship_id': 'S1'})
+        assert 'BETWEEN' not in sql
+        assert binds == ['S1']
+
+    def test_vessel_metrics_start_only(self):
+        sql, binds = self._render('vessel_metrics', {'ship_id': 'S1', 'start_day': 50})
+        assert 'AND noon_utc >= CAST(? AS integer)' in sql
+        assert binds == ['S1', '50']
+
+    def test_vessel_metrics_bad_ship_raises(self):
+        for bad in ('S0', 'S13', 'S24', '9700006', 's1'):
+            with pytest.raises(BadRequestError):
+                self._render('vessel_metrics', {'ship_id': bad})
+
+    def test_vessel_metrics_negative_day_raises(self):
+        with pytest.raises(BadRequestError):
+            self._render('vessel_metrics', {'ship_id': 'S1', 'start_day': -1})
+
+    def test_vessel_maintenance_effect(self):
+        sql, binds = self._render('vessel_maintenance_effect', {'ship_id': 'S3'})
+        assert 'FROM maintenance WHERE ship_id = ?' in sql
+        for col in ('event_day', 'event_type', 'propeller_condition', 'hull_fouling_type', 'cavitation_found'):
+            assert col in sql
+        assert sql.rstrip().endswith('ORDER BY event_day')
+        assert binds == ['S3']
+
+    def test_predict_targets_all_ships(self):
+        sql, binds = self._render('predict_targets', {})
+        assert 'FROM vt_fd WHERE predict_fuel_type IS NOT NULL' in sql
+        assert sql.rstrip().endswith('ORDER BY ship_id, noon_utc')
+        assert binds == []
+
+    def test_predict_targets_one_ship(self):
+        sql, binds = self._render('predict_targets', {'ship_id': 'S22'})
+        assert 'predict_fuel_type IS NOT NULL AND ship_id = ?' in sql
+        assert binds == ['S22']
+
+    def test_vessel_speed_power(self):
+        sql, binds = self._render('vessel_speed_power', {'ship_id': 'S9'})
+        assert 'FROM vt_fd WHERE ship_id = ?' in sql
+        assert 'horse_power IS NOT NULL' in sql
+        assert 'speed_through_water IS NOT NULL' in sql
+        assert binds == ['S9']
+
+    def test_fleet_overview_day_aggregate(self):
+        sql, binds = self._render('fleet_overview', {'start_day': 0, 'end_day': 30})
+        assert 'FROM vt_fd' in sql
+        assert 'GROUP BY noon_utc' in sql
+        assert 'WHERE noon_utc BETWEEN CAST(? AS integer) AND CAST(? AS integer)' in sql
+        assert sql.rstrip().endswith('ORDER BY noon_utc')
+        assert binds == ['0', '30']
+
+    def test_v2_registry_names(self):
+        from queries import QUERY_TYPES, QUERY_TYPES_V2
+
+        assert set(QUERY_TYPES_V2) == {
+            'fleet_overview',
+            'fleet_vessels',
+            'vessel_metrics',
+            'vessel_speed_power',
+            'vessel_maintenance_effect',
+            'predict_targets',
+        }
+        # v1 registry carries only the 18 legacy synthetic types.
+        assert len(QUERY_TYPES) == 18
+        assert 'predict_targets' not in QUERY_TYPES
+
+    def test_v2_unknown_type_lists_v2_names(self):
+        with pytest.raises(BadRequestError):
+            self._render('ship_daily', {'ship_id': 'S1'})
+
+    def test_v1_render_does_not_know_v2_semantics(self):
+        # Same name, different registry: v1 fleet_overview rejects day params.
+        with pytest.raises(BadRequestError):
+            render('fleet_overview', {'start_day': 0})

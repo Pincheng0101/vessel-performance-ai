@@ -49,6 +49,26 @@ def get_results(
     return handlers.results(query_id, page_token)
 
 
+# v2 — real-dataset catalog (vt_fd / maintenance). Same submit → poll → results
+# lifecycle; only the query_type registry differs. status/results are shared.
+@app.post('/v2/queries', status_code=202, summary='Submit a query (real dataset)', tags=['queries-v2'])
+def submit_query_v2(body: Annotated[handlers.SubmitBodyV2, Body()]) -> handlers.SubmitResponse:
+    return handlers.submit_v2(body)
+
+
+@app.get('/v2/queries/<query_id>', summary='Get query status', tags=['queries-v2'])
+def get_status_v2(query_id: str) -> handlers.StatusResponse:
+    return handlers.status(query_id)
+
+
+@app.get('/v2/queries/<query_id>/results', summary='Fetch query results', tags=['queries-v2'])
+def get_results_v2(
+    query_id: str,
+    page_token: Annotated[str | None, Query(description='Token from a previous page.')] = None,
+) -> handlers.ResultsResponse:
+    return handlers.results(query_id, page_token)
+
+
 @app.get('/openapi.json', summary='OpenAPI schema', tags=['docs'])
 def openapi_schema() -> dict:
     import json

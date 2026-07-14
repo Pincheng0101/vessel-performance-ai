@@ -90,3 +90,31 @@ class TestRouter:
         assert any('imo_number' in json.dumps(s) for s in spec['components']['schemas'].values())
         # The server prefix carries the stage so Swagger "Try it out" targets /prod/v1/*.
         assert spec['servers'] == [{'url': '/prod'}]
+        # v2 (real dataset): own path, own 6-variant union, ship_id params documented.
+        assert '/v2/queries' in spec['paths']
+        v2_schema = spec['paths']['/v2/queries']['post']['requestBody']['content']['application/json']['schema']
+        assert v2_schema['discriminator']['propertyName'] == 'query_type'
+        assert len(v2_schema['oneOf']) == 6
+        assert any('ship_id' in json.dumps(s) for s in spec['components']['schemas'].values())
+
+    @patch('handlers.submit_v2')
+    def test_post_v2_queries_dispatches(self, submit_mock):
+        submit_mock.return_value = {'query_id': 'q_2', 'status': 'PENDING'}
+        event = _proxy_event('POST', '/v2/queries', {'query_type': 'vessel_metrics', 'params': {'ship_id': 'S21'}})
+        resp = lambda_handler(event, None)
+        assert resp['statusCode'] == 202
+        (body_arg,) = submit_mock.call_args.args
+        assert body_arg.query_type == 'vessel_metrics'
+        assert body_arg.params.ship_id == 'S21'
+
+    def test_post_v2_rejects_v1_only_type(self):
+        # vessel_track exists only in the v1 catalog; the v2 union rejects it pre-dispatch.
+        resp = lambda_handler(_proxy_event('POST', '/v2/queries', {'query_type': 'vessel_track'}), None)
+        assert resp['statusCode'] == 422
+
+    @patch('handlers.status')
+    def test_get_v2_status_dispatches(self, status_mock):
+        status_mock.return_value = {'query_id': 'q_2', 'status': 'RUNNING'}
+        resp = lambda_handler(_proxy_event('GET', '/v2/queries/q_2'), None)
+        assert resp['statusCode'] == 200
+        status_mock.assert_called_once_with('q_2')

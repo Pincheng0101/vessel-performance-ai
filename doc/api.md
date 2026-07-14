@@ -130,6 +130,11 @@ fixed parameter model and returns the
 columns below (all cells are strings — see §5.3). Column *meanings* are in the
 linked `doc/table-schema.md` sections.
 
+> **Legacy status:** the synthetic tables backing these 18 types are no longer
+> registered in the Glue catalog, so every v1 query currently ends `FAILED`.
+> The real hackathon dataset is served at **`/v2/queries`** — see
+> `doc/api_v2.md`. The v1 catalog is kept for a possible curated-layer revival.
+
 **Parameter rules** (validated server-side; violations → **400**):
 
 | Param | Type | Pattern | Notes |

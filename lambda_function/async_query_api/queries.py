@@ -17,6 +17,8 @@ _DATE_PATTERN = r'^\d{4}-\d{2}-\d{2}$'
 # Fleet grouping id: the synthetic all-fleet rollup 'ALL' or a 'FL-XX' sub-fleet.
 _FLEET_PATTERN = r'^(ALL|FL-[A-Z]{2,})$'
 _SEVERITY_PATTERN = r'^(low|medium|high)$'
+# Real-dataset ship id: S1-S12 (training) or S21-S23 (prediction).
+_SHIP_PATTERN = r'^S([1-9]|1[0-2]|2[1-3])$'
 
 
 class _DateRangeParams(BaseModel):
@@ -271,6 +273,121 @@ def _vessel_uwi(p: _ImoParams) -> tuple[str, list[str]]:
     )
 
 
+# --- Real-dataset query types (vt_fd / maintenance; ship_id + relative-day axis) ---
+
+
+class _ShipParams(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    ship_id: str = Field(pattern=_SHIP_PATTERN)
+
+
+class _ShipDayRangeParams(_ShipParams):
+    start_day: int | None = Field(default=None, ge=0)
+    end_day: int | None = Field(default=None, ge=0)
+
+
+class _OptionalShipParams(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    ship_id: str | None = Field(default=None, pattern=_SHIP_PATTERN)
+
+
+class _DayRangeParams(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    start_day: int | None = Field(default=None, ge=0)
+    end_day: int | None = Field(default=None, ge=0)
+
+
+def _day_range(column: str, start: int | None, end: int | None, *, keyword: str) -> tuple[str, list[str]]:
+    """Optional relative-day range clause. Binds render as string literals, so the
+    integer column comparison needs an explicit CAST on each placeholder."""
+    if start is not None and end is not None:
+        return f' {keyword} {column} BETWEEN CAST(? AS integer) AND CAST(? AS integer)', [str(start), str(end)]
+    if start is not None:
+        return f' {keyword} {column} >= CAST(? AS integer)', [str(start)]
+    if end is not None:
+        return f' {keyword} {column} <= CAST(? AS integer)', [str(end)]
+    return '', []
+
+
+# Daily signal set for one ship: navigation, drafts/loading, weather, engine, fuels, markers.
+_SHIP_DAILY_COLUMNS = (
+    'noon_utc, voyage, avg_speed, speed_through_water, me_avg_rpm, propeller_speed, '
+    'fore_draft, after_draft, mid_draft, displacement, cargo_on_board, '
+    'wind_scale, wind_speed, sea_height, swell_height, sea_water_temp, water_depth, '
+    'total_distance, sea_speed_distance, hours_full_speed, hours_total, '
+    'horse_power, load_pct, sfoc, me_slip, total_consump, me_consumption, '
+    'me_fullspeed_consump_hshfo, me_fullspeed_consump_ulsfo, me_fullspeed_consump_vlsfo, '
+    'me_fullspeed_consump_lsmgo, me_fullspeed_consump_bio_hsfo, masked_flag, predict_fuel_type'
+)
+
+
+def _ship_list(p: _NoParams) -> tuple[str, list[str]]:
+    # Roster: per-ship coverage + placeholder counts (S21-S23 carry the PREDICT cells).
+    return (
+        'SELECT ship_id, count(*) AS n_rows, min(noon_utc) AS first_day, max(noon_utc) AS last_day, '
+        'count(predict_fuel_type) AS n_predict, '
+        'sum(CASE WHEN masked_flag THEN 1 ELSE 0 END) AS n_masked '
+        'FROM vt_fd GROUP BY ship_id ORDER BY ship_id',
+        [],
+    )
+
+
+def _ship_daily(p: _ShipDayRangeParams) -> tuple[str, list[str]]:
+    sql = f'SELECT {_SHIP_DAILY_COLUMNS} FROM vt_fd WHERE ship_id = ?'
+    clause, binds = _day_range('noon_utc', p.start_day, p.end_day, keyword='AND')
+    return sql + clause + ' ORDER BY noon_utc', [p.ship_id, *binds]
+
+
+def _ship_maintenance(p: _ShipParams) -> tuple[str, list[str]]:
+    return (
+        'SELECT event_day, event_type, propeller_condition, hull_fouling_type, '
+        'hull_coating_condition, cavitation_found, draft_fwd_m, draft_aft_m '
+        'FROM maintenance WHERE ship_id = ? ORDER BY event_day',
+        [p.ship_id],
+    )
+
+
+def _predict_targets(p: _OptionalShipParams) -> tuple[str, list[str]]:
+    # The PREDICT cells (102 total) + context columns for the prediction workflow.
+    sql = (
+        'SELECT ship_id, noon_utc, predict_fuel_type, hours_full_speed, wind_scale, '
+        'avg_speed, speed_through_water, me_avg_rpm '
+        'FROM vt_fd WHERE predict_fuel_type IS NOT NULL'
+    )
+    binds: list[str] = []
+    if p.ship_id is not None:
+        sql += ' AND ship_id = ?'
+        binds.append(p.ship_id)
+    return sql + ' ORDER BY ship_id, noon_utc', binds
+
+
+def _ship_speed_power(p: _ShipParams) -> tuple[str, list[str]]:
+    # STW-vs-power scatter points for performance-curve fitting; client filters further
+    # (e.g. hours_full_speed >= 22, wind_scale <= 4) as the ISO-style steady-state gate.
+    return (
+        'SELECT noon_utc, speed_through_water, horse_power, me_avg_rpm, displacement, '
+        'wind_scale, hours_full_speed '
+        'FROM vt_fd WHERE ship_id = ? AND horse_power IS NOT NULL AND speed_through_water IS NOT NULL '
+        'ORDER BY noon_utc',
+        [p.ship_id],
+    )
+
+
+def _fleet_daily(p: _DayRangeParams) -> tuple[str, list[str]]:
+    # Cross-ship per-day aggregate. noon_utc is per-ship relative (day 0 = that ship's
+    # earliest record), so this is an approximate overview, not a calendar alignment.
+    sql = (
+        'SELECT noon_utc, count(*) AS n_ships, avg(avg_speed) AS avg_sog, '
+        'avg(speed_through_water) AS avg_stw, sum(total_consump) AS total_consump_mt, '
+        'avg(wind_scale) AS avg_wind_scale FROM vt_fd'
+    )
+    clause, binds = _day_range('noon_utc', p.start_day, p.end_day, keyword='WHERE')
+    return sql + clause + ' GROUP BY noon_utc ORDER BY noon_utc', binds
+
+
 # query_type → (pydantic param model, SQL builder).
 QUERY_TYPES = {
     'fleet_overview': (_FleetOverviewParams, _fleet_overview),
@@ -293,15 +410,31 @@ QUERY_TYPES = {
     'fleet_positions': (_NoParams, _fleet_positions),
 }
 
+# v2 (/v2/queries): real-dataset types over vt_fd / maintenance. Reuses the v1
+# type names where a counterpart exists (the version path is the namespace) so
+# Dashboard code keeps its query_type strings; params differ (ship_id + relative
+# days instead of imo_number + dates).
+QUERY_TYPES_V2 = {
+    'fleet_overview': (_DayRangeParams, _fleet_daily),
+    'fleet_vessels': (_NoParams, _ship_list),
+    'vessel_metrics': (_ShipDayRangeParams, _ship_daily),
+    'vessel_speed_power': (_ShipParams, _ship_speed_power),
+    'vessel_maintenance_effect': (_ShipParams, _ship_maintenance),
+    'predict_targets': (_OptionalShipParams, _predict_targets),
+}
 
-def render(query_type: str, params: dict) -> tuple[str, list[str]]:
+
+def render(query_type: str, params: dict, types: dict | None = None) -> tuple[str, list[str]]:
     """Validate ``params`` and return ``(sql, bind_values)`` for ``query_type``.
 
-    Raises BadRequestError for an unknown type or invalid params (→ HTTP 400).
+    ``types`` selects the registry (default v1 ``QUERY_TYPES``; pass
+    ``QUERY_TYPES_V2`` for the real-dataset catalog). Raises BadRequestError for
+    an unknown type or invalid params (→ HTTP 400).
     """
-    entry = QUERY_TYPES.get(query_type)
+    registry = QUERY_TYPES if types is None else types
+    entry = registry.get(query_type)
     if entry is None:
-        raise BadRequestError(f'Unknown query_type {query_type!r}. Allowed: {sorted(QUERY_TYPES)}')
+        raise BadRequestError(f'Unknown query_type {query_type!r}. Allowed: {sorted(registry)}')
     model_cls, builder = entry
     try:
         validated = model_cls.model_validate(params or {})

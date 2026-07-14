@@ -308,11 +308,14 @@ class AthenaToolStack(Stack):
             ),
         )
         integration = aws_apigateway.LambdaIntegration(async_fn, proxy=True)
-        queries_resource = api.root.add_resource('v1').add_resource('queries')
-        queries_resource.add_method('POST', integration, api_key_required=True)
-        query_id_resource = queries_resource.add_resource('{query_id}')
-        query_id_resource.add_method('GET', integration, api_key_required=True)
-        query_id_resource.add_resource('results').add_method('GET', integration, api_key_required=True)
+        # /v1 (legacy synthetic catalog) and /v2 (real-dataset catalog) share the
+        # Lambda and lifecycle; only the query_type registry differs per version.
+        for version in ('v1', 'v2'):
+            queries_resource = api.root.add_resource(version).add_resource('queries')
+            queries_resource.add_method('POST', integration, api_key_required=True)
+            query_id_resource = queries_resource.add_resource('{query_id}')
+            query_id_resource.add_method('GET', integration, api_key_required=True)
+            query_id_resource.add_resource('results').add_method('GET', integration, api_key_required=True)
 
         # Public docs — Swagger UI + OpenAPI schema served by the Lambda. No API key so a
         # browser can open them directly; the /v1 routes above stay key-protected.

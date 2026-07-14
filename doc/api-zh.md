@@ -128,6 +128,11 @@ curl -s "$BASE/v1/queries/q_8f3a1c.../results?page_token=eyJvZmZzZXQiOjEwMDB9" \
 模型，回傳下列欄位（所有值皆為字串 —
 見 §5.3）。欄位*意義*見所連結的 `doc/table-schema.md` 章節。
 
+> **舊版 (legacy) 狀態：** 這 18 種型別背後的合成 (synthetic) 資料表已不再註冊於
+> Glue 目錄，故 v1 查詢目前一律以 `FAILED` 結束。真實黑客松資料集 (hackathon
+> dataset) 由 **`/v2/queries`** 提供 — 見 `doc/api_v2.md`。v1 目錄保留以備
+> curated 層重建。
+
 **參數規則**（伺服器端驗證；違反 → **400**）：
 
 | 參數 | 型別 | 樣式 (pattern) | 說明 |

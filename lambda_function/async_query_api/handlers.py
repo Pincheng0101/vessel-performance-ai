@@ -25,16 +25,17 @@ _STATE_MAP = {
 }
 
 
-def _submit_variant(query_type: str, params_model: type[BaseModel]) -> type[BaseModel]:
+def _submit_variant(query_type: str, params_model: type[BaseModel], *, prefix: str = 'Submit') -> type[BaseModel]:
     """Build one request-body variant: a fixed query_type + its typed params model.
 
     params is optional when the model has no required fields (so callers can omit it
-    for the no-parameter query types) and required otherwise.
+    for the no-parameter query types) and required otherwise. ``prefix`` keeps the
+    generated model names unique across the v1/v2 unions (shared OpenAPI components).
     """
     required = any(f.is_required() for f in params_model.model_fields.values())
     params_field = (params_model, ... if required else Field(default_factory=params_model))
     return create_model(
-        f'Submit_{query_type}',
+        f'{prefix}_{query_type}',
         __config__=ConfigDict(extra='forbid', title=f'{query_type} query'),
         query_type=(Literal[query_type], ...),
         params=params_field,
@@ -45,6 +46,11 @@ def _submit_variant(query_type: str, params_model: type[BaseModel]) -> type[Base
 # params schema for the selected type. Built from the registry so it never drifts.
 _SUBMIT_VARIANTS = tuple(_submit_variant(name, model) for name, (model, _builder) in queries.QUERY_TYPES.items())
 SubmitBody = Annotated[Union[_SUBMIT_VARIANTS], Field(discriminator='query_type')]
+
+_SUBMIT_VARIANTS_V2 = tuple(
+    _submit_variant(name, model, prefix='SubmitV2') for name, (model, _builder) in queries.QUERY_TYPES_V2.items()
+)
+SubmitBodyV2 = Annotated[Union[_SUBMIT_VARIANTS_V2], Field(discriminator='query_type')]
 
 
 class SubmitResponse(BaseModel):
@@ -73,7 +79,16 @@ class ResultsResponse(BaseModel):
 
 def submit(req: SubmitBody) -> dict:
     """POST /v1/queries — start the query, register it, return the query_id (202)."""
-    sql, binds = queries.render(req.query_type, req.params.model_dump())
+    return _submit(req, types=None)
+
+
+def submit_v2(req: SubmitBodyV2) -> dict:
+    """POST /v2/queries — same lifecycle, rendered against the real-dataset catalog."""
+    return _submit(req, types=queries.QUERY_TYPES_V2)
+
+
+def _submit(req, types: dict | None) -> dict:
+    sql, binds = queries.render(req.query_type, req.params.model_dump(), types)
     exec_id = config.start_query(sql, binds)
     query_id = 'q_' + uuid.uuid4().hex
     config.put_registry(query_id, exec_id, req.query_type)
