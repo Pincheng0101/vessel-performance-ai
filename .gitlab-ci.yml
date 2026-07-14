@@ -1,0 +1,49 @@
+# GitLab CI/CD — auto-deploy the CDK stacks to AWS on every push to `main`.
+#
+# Credentials come from CI/CD variables (Settings ▸ CI/CD ▸ Variables), NOT this
+# file — never commit AWS keys. Set these three as *Protected* (and Masked if
+# GitLab accepts them):
+#   AWS_ACCESS_KEY_ID
+#   AWS_SECRET_ACCESS_KEY
+#   AWS_SESSION_TOKEN        # hackathon temp creds → EXPIRES; refresh when the
+#                            # pipeline fails with ExpiredToken.
+#
+# The AWS account must already be CDK-bootstrapped (done once out-of-band).
+
+stages:
+  - deploy
+
+deploy:
+  stage: deploy
+  image: node:20-bookworm
+  # Docker-in-Docker: CDK bundles the Lambdas by running a container.
+  services:
+    - name: docker:27-dind
+      command: ['--tls=false']
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ''
+    AWS_DEFAULT_REGION: us-west-2
+    CDK_DEFAULT_REGION: us-west-2
+    UV_NO_SYNC: '1' # `uv run` (cdk.json app cmd) must not re-sync/pull dev deps
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  before_script:
+    # Tolerate a lowercase `aws_session_token` variable — the AWS SDK only reads
+    # the uppercase name, so normalize it here.
+    - export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-$aws_session_token}"
+    # uv + Python 3.13 (project pins >=3.13,<3.14)
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    - export PATH="$HOME/.local/bin:$PATH"
+    - uv python install 3.13
+    # Docker CLI (talks to the dind daemon) + arm64 emulation for the Lambda build
+    - apt-get update && apt-get install -y --no-install-recommends docker.io
+    - until docker info >/dev/null 2>&1; do sleep 1; done
+    - docker run --privileged --rm tonistiigi/binfmt --install arm64
+    # Project deps: CDK CLI (pinned in package.json) + runtime libs only (no dev)
+    - npm ci
+    - uv sync --no-dev
+    # Fail fast & readably if the (temp) credentials have expired
+    - uv run --with boto3 --no-project python -c "import boto3; print(boto3.client('sts').get_caller_identity()['Account'])" || (echo 'AWS credentials invalid/expired — refresh the CI/CD variables' && exit 1)
+  script:
+    - ./node_modules/.bin/cdk deploy --all -c env=dev --require-approval never
