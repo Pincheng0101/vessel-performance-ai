@@ -1,5 +1,5 @@
-# GitLab CI/CD — deploy the CDK stacks to AWS. Push to `main` creates the
-# pipeline; the deploy job is *manual* (click ▶️ in GitLab to run it).
+# GitLab CI/CD — two deploy jobs. `deploy-cdk` (infra) is *manual* (click ▶️
+# in GitLab); `deploy-web` (frontend) runs automatically when web/ changes.
 #
 # Credentials come from CI/CD variables (Settings ▸ CI/CD ▸ Variables), NOT this
 # file — never commit AWS keys. Set these three as *Protected* (and Masked if
@@ -14,7 +14,8 @@
 stages:
   - deploy
 
-deploy:
+# Infrastructure (CDK stacks: data lake + agent runtime + UI hosting).
+deploy-cdk:
   stage: deploy
   image: node:24-bookworm
   # Docker-in-Docker: CDK bundles the Lambdas by running a container.
