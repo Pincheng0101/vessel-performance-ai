@@ -1,0 +1,60 @@
+{
+  "test_action": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Catch": [],
+    "Retry": [],
+    "Comment": "test_comment",
+    "InputPath": "$",
+    "ResultSelector": {
+      "external_memory_id.$": "$.Payload.external_memory_id",
+      "response.$": "$.Payload.state_memory.response"
+    },
+    "ResultPath": "$.undefinedResult",
+    "OutputPath": "$",
+    "Parameters": {
+      "FunctionName": "LFEActionFunction",
+      "Payload": {
+        "action_type": "opensearch_action",
+        "body": {
+          "query": {
+            "match_all": {}
+          },
+          "size": 100
+        },
+        "connector_id": "connector-e181da9bcb35ed7b",
+        "default_output": {
+          "action_type": "opensearch_action",
+          "errors": [],
+          "response": {
+            "test": "test_default_output"
+          }
+        },
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "params": {
+          "_source": "title"
+        },
+        "is_cache_connection": false,
+        "timeout": 25,
+        "url_path": "/knowledge_base-eb272c6dc78785e0/_doc/e2e_testing_knowledge_base_for_opensearch_action",
+        "use_external_memory_output": true,
+        "state_memory_output_selector": {
+          "response": "$.response"
+        },
+        "streaming_config": {
+          "before_action": {
+            "name": "test_action_Start",
+            "output_selector": null
+          },
+          "after_action": {
+            "name": "test_action_End",
+            "output_selector": null
+          }
+        }
+      }
+    }
+  }
+}

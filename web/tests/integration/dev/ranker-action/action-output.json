@@ -1,0 +1,21 @@
+{
+  "errors": null,
+  "action_type": "ranker_action",
+  "docs": [
+    {
+      "dish": "Tofu Salad Bowl",
+      "ingredients": "tofu, lettuce, sesame dressing, cucumber, healthy",
+      "_ranking_score": 0.06666666666666667
+    },
+    {
+      "dish": "Beef Noodle Soup",
+      "ingredients": "beef, noodle, soy sauce, bok choy",
+      "_ranking_score": 0
+    },
+    {
+      "dish": "Taiwanese Fried Chicken",
+      "ingredients": "chicken, flour, pepper, garlic, crispy",
+      "_ranking_score": 0
+    }
+  ]
+}

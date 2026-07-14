@@ -1,0 +1,7 @@
+{
+  "errors": null,
+  "action_type": "mcp_action",
+  "response": {
+    "output": "Hello, Tester"
+  }
+}

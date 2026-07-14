@@ -1,0 +1,48 @@
+{
+  "test_action": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Catch": [],
+    "Retry": [],
+    "Comment": "test_comment",
+    "InputPath": "$",
+    "ResultSelector": {
+      "external_memory_id.$": "$.Payload.external_memory_id",
+      "read_url_output.$": "$.Payload.state_memory.read_url_output"
+    },
+    "ResultPath": "$.undefinedResult",
+    "OutputPath": "$",
+    "Parameters": {
+      "FunctionName": "LFEActionFunction",
+      "Payload": {
+        "action_type": "read_url_action",
+        "url": "https://headquarter.ai",
+        "format": "markdown",
+        "connector_id": null,
+        "headers": {
+          "Accept": "application/json"
+        },
+        "default_output": {
+          "action_type": "read_url_action",
+          "errors": [],
+          "read_url_output": "test_default_output"
+        },
+        "limit": 1024,
+        "use_external_memory_output": true,
+        "state_memory_output_selector": {
+          "read_url_output": "$.read_url_output"
+        },
+        "streaming_config": {
+          "before_action": {
+            "name": "test_action_Start",
+            "output_selector": null
+          },
+          "after_action": {
+            "name": "test_action_End",
+            "output_selector": null
+          }
+        }
+      }
+    }
+  }
+}

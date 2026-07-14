@@ -1,0 +1,17 @@
+{
+  "errors": null,
+  "action_type": "mysql_action",
+  "num_affected_rows": 2,
+  "rows": [
+    {
+      "email": "alice@example.com",
+      "id": 1,
+      "name": "Alice"
+    },
+    {
+      "email": "bob@example.com",
+      "id": 2,
+      "name": "Bob"
+    }
+  ]
+}

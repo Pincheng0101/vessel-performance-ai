@@ -1,0 +1,119 @@
+# ym-datalake-ui
+
+Hackathon UI for the YM fleet-performance data-lake.
+
+- **Base architecture:** ported (frozen) from `langforge-enterprise-ui` @ `db7476f5c`.
+  This repo does **not** track langforge upstream — the structure is pinned at that commit.
+- **Concept / content reference:** the `ym-datalake-poc` dashboard (a living reference; re-ported as it evolves).
+
+---
+
+## Demo data (fixtures)
+
+The dashboard runs on **static fixtures** in `public/demo/` — a captured snapshot of the
+PoC async-query API. The demo is therefore **fully offline**: page loads read only
+same-origin JSON, never the live API. `app/services/server/datalake.js` (registered on
+`useServer()`) reads `public/demo/index.json` (cache-key → filename) and lazily fetches
+each fixture.
+
+### Updating the snapshot
+
+```bash
+npm run capture
+```
+
+This re-hits the live API and **overwrites** `public/demo/*.json` + `index.json`
+(`scripts/capture-fixtures.mjs`). It needs two env vars, read from a **git-ignored**
+`.env.capture` at the repo root:
+
+```
+YM_API_BASE_URL=<PoC AsyncQueryApiUrl>
+YM_API_KEY=<PoC api key>
+```
+
+Both values live in the PoC's `web/config.js` (POC-only key). `.env.capture` is ignored by
+git — create it locally on each machine. You can also override inline:
+`YM_API_KEY=… npm run capture`.
+
+Notes:
+- **New/renamed query types or params** in the PoC: edit the query list in
+  `scripts/capture-fixtures.mjs`, then re-run. Param shapes must match how the app calls
+  `query()` (e.g. `fleet_overview` uses `{}` for the all-fleet rollup) so cache keys align.
+- After updating: `npm run dev` picks up new fixtures on refresh; for a deploy run
+  `npm run build`; commit `public/demo/` to version the snapshot.
+
+## Nuxt Minimal Starter
+
+Look at the [Nuxt 3 documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+
+## Setup
+
+Make sure to install the dependencies:
+
+```bash
+# npm
+npm install
+
+# pnpm
+pnpm install
+
+# yarn
+yarn install
+
+# bun
+bun install
+```
+
+## Development Server
+
+Start the development server on `http://localhost:3000`:
+
+```bash
+# npm
+npm run dev
+
+# pnpm
+pnpm run dev
+
+# yarn
+yarn dev
+
+# bun
+bun run dev
+```
+
+## Production
+
+Build the application for production:
+
+```bash
+# npm
+npm run build
+
+# pnpm
+pnpm run build
+
+# yarn
+yarn build
+
+# bun
+bun run build
+```
+
+Locally preview production build:
+
+```bash
+# npm
+npm run preview
+
+# pnpm
+pnpm run preview
+
+# yarn
+yarn preview
+
+# bun
+bun run preview
+```
+
+Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.

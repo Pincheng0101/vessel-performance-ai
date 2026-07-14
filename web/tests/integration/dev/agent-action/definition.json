@@ -1,0 +1,48 @@
+{
+  "test_action": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Catch": [],
+    "Retry": [],
+    "Comment": "test_comment",
+    "InputPath": "$",
+    "ResultSelector": {
+      "message.$": "$.Payload.message",
+      "response.$": "$.Payload.response"
+    },
+    "ResultPath": "$.undefinedResult",
+    "OutputPath": "$",
+    "Parameters": {
+      "FunctionName": "LFEActionFunction",
+      "Payload": {
+        "action_type": "agent_action",
+        "agent_id": "agent-9ae6cb92b0613ba6",
+        "default_output": null,
+        "llm_id": null,
+        "max_iterations": 5,
+        "output_schema": {
+          "type": "object",
+          "properties": {
+            "highest_vitamin_c_fruit": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "highest_vitamin_c_fruit"
+          ]
+        },
+        "prompt": "Which {{ item }} is the richest in vitamin C? Answer with only one {{ item }} english name in lowercase.",
+        "prompt_variables": {
+          "item": "fruit"
+        },
+        "session_id": null,
+        "storage_id": "storage-b0a3d296a794b083",
+        "state_memory_output_selector": null,
+        "streaming_config": null,
+        "structured_llm_id": "llm-abcbe5504730f792",
+        "use_external_memory_output": false,
+        "ws_idle_timeout": 30
+      }
+    }
+  }
+}
