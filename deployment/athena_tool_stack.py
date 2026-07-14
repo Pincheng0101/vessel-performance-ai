@@ -18,7 +18,15 @@ from aws_cdk import (
 from constructs import Construct
 from pyhocon import ConfigTree
 
-from table.real_data import MAINTENANCE_COLUMNS, SHIP_IDS, VT_FD_COLUMNS
+from table.real_data import (
+    FACT_SHIP_ALERT_COLUMNS,
+    FACT_SHIP_ANOMALY_COLUMNS,
+    FACT_SHIP_DAILY_COLUMNS,
+    FACT_SHIP_MAINTENANCE_RECOMMENDATION_COLUMNS,
+    MAINTENANCE_COLUMNS,
+    SHIP_IDS,
+    VT_FD_COLUMNS,
+)
 
 SSM_PREFIX = '/ym-hackathon'
 
@@ -199,11 +207,24 @@ class AthenaToolStack(Stack):
             fn.node.add_dependency(glue_db)
 
             raw = f's3://{data_bucket.bucket_name}/raw'
+            curated = f's3://{data_bucket.bucket_name}/curated'
             bucket_name = data_bucket.bucket_name
             tables = [
                 # Raw zone — real hackathon dataset (data/*.csv, landed as JSONL).
                 self._vt_fd_table(database, bucket_name),
                 self._glue_table(database, 'maintenance', MAINTENANCE_COLUMNS, f'{raw}/maintenance/'),
+                # Curated zone — ym_datalake.etl.real_compute output.
+                self._curated_by_ship_table(database, 'fact_ship_daily', FACT_SHIP_DAILY_COLUMNS, bucket_name),
+                self._glue_table(
+                    database, 'fact_ship_anomaly', FACT_SHIP_ANOMALY_COLUMNS, f'{curated}/fact_ship_anomaly/'
+                ),
+                self._glue_table(database, 'fact_ship_alert', FACT_SHIP_ALERT_COLUMNS, f'{curated}/fact_ship_alert/'),
+                self._glue_table(
+                    database,
+                    'fact_ship_maintenance_recommendation',
+                    FACT_SHIP_MAINTENANCE_RECOMMENDATION_COLUMNS,
+                    f'{curated}/fact_ship_maintenance_recommendation/',
+                ),
             ]
             for table in tables:
                 table.add_dependency(glue_db)
@@ -422,6 +443,26 @@ class AthenaToolStack(Stack):
                     ),
                 ),
             ),
+        )
+
+    def _curated_by_ship_table(
+        self, database: str, name: str, columns: list[tuple[str, str]], bucket_name: str
+    ) -> aws_glue.CfnTable:
+        """Curated real-data fact table partitioned by ship_id via partition projection."""
+        location = f's3://{bucket_name}/curated/{name}/'
+        projection = {
+            'projection.enabled': 'true',
+            'projection.ship_id.type': 'enum',
+            'projection.ship_id.values': ','.join(SHIP_IDS),
+            'storage.location.template': f's3://{bucket_name}/curated/{name}/ship_id=${{ship_id}}',
+        }
+        return self._glue_table(
+            database,
+            name,
+            columns,
+            location,
+            partition_keys=[('ship_id', 'string')],
+            extra_parameters=projection,
         )
 
     def _vt_fd_table(self, database: str, bucket_name: str) -> aws_glue.CfnTable:

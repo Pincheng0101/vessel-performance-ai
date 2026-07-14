@@ -27,8 +27,17 @@ from `doc/synthetic-dataset.md` (raw), `doc/curated-dataset.md` (M2),
 Source: `data/vt_fd.csv` (15 ships × 5 yr noon reports) and
 `data/maintenance.csv` (77 maintenance/inspection events). Schemas:
 `table/real_data.py`. Storage is JSONL like the rest of the lake; the loader
-(not yet written) converts `HIDDEN`/`PREDICT` placeholder cells to null and
-sets the marker columns.
+(`python -m ym_datalake.etl load-real`) converts `HIDDEN`/`PREDICT`
+placeholder cells to null and sets the marker columns.
+
+Four **curated** tables are computed from them by
+`python -m ym_datalake.etl compute-real` (`ym_datalake/etl/real_compute.py`):
+`fact_ship_daily` (ship_id-projected; fitted expected speed, speed loss,
+maintenance clocks, validity gate), `fact_ship_anomaly` (robust-z outliers),
+`fact_ship_alert` (anomaly episodes), and
+`fact_ship_maintenance_recommendation` (trigger/ETA heuristics). Locations:
+`s3://<DataLakeBucket>/curated/<table>/…`; columns in `table/real_data.py`;
+semantics in `doc/api_v2.md` §3.7–§3.12.
 
 ### `vt_fd`
 

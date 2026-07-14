@@ -37,10 +37,30 @@ def upload_real_data(bucket: str, out_dir: str | Path = './tmp') -> list[str]:
     Only the two real-data prefixes are walked, so a shared ``out_dir`` never
     re-uploads synthetic raw tables.
     """
+    table_dirs = [Path(out_dir) / 'raw' / 'vt_fd', Path(out_dir) / 'raw' / 'maintenance']
+    return _upload_dirs(bucket, out_dir, table_dirs, hint='run load-real first')
+
+
+# Curated tables produced by ym_datalake.etl.real_compute.
+_REAL_CURATED_TABLES = (
+    'fact_ship_daily',
+    'fact_ship_anomaly',
+    'fact_ship_alert',
+    'fact_ship_maintenance_recommendation',
+)
+
+
+def upload_real_curated(bucket: str, out_dir: str | Path = './tmp') -> list[str]:
+    """Put the curated real-dataset tables (``curated/fact_ship_*/**``) to S3; return keys."""
+    table_dirs = [Path(out_dir) / 'curated' / name for name in _REAL_CURATED_TABLES]
+    return _upload_dirs(bucket, out_dir, table_dirs, hint='run compute-real first')
+
+
+def _upload_dirs(bucket: str, out_dir: str | Path, table_dirs: list[Path], *, hint: str) -> list[str]:
     root = Path(out_dir)
-    table_dirs = [root / 'raw' / 'vt_fd', root / 'raw' / 'maintenance']
     if not any(d.is_dir() for d in table_dirs):
-        raise FileNotFoundError(f'no raw/vt_fd or raw/maintenance directory under {out_dir!r} — run load-real first')
+        names = ', '.join(d.relative_to(root).as_posix() for d in table_dirs)
+        raise FileNotFoundError(f'none of [{names}] exist under {out_dir!r} — {hint}')
 
     keys: list[str] = []
     for table_dir in table_dirs:

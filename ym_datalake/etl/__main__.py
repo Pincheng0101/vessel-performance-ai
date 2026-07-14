@@ -116,6 +116,33 @@ def _cmd_load_real(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_compute_real(args: argparse.Namespace) -> int:
+    from ym_datalake.etl.real_compute import compute_all, write_curated
+    from ym_datalake.etl.real_data import load_maintenance, load_vt_fd
+
+    tables = compute_all(load_vt_fd(f'{args.data_dir}/vt_fd.csv'), load_maintenance(f'{args.data_dir}/maintenance.csv'))
+    counts = write_curated(tables, args.out)
+    print(f'Curated (real) → {args.out}/curated')
+    for name, n in counts.items():
+        print(f'  {name:<42} {n:>8} rows')
+
+    if args.upload:
+        bucket = _resolve_bucket(args)
+        if not bucket:
+            print(
+                f'error: --upload requires --bucket or app.datalake.bucket_name in conf/{args.env}.conf',
+                file=sys.stderr,
+            )
+            return 2
+        os.environ.setdefault('AWS_DEFAULT_REGION', args.region)
+        from ym_datalake.etl import uploader  # lazy: only when uploading
+
+        keys = uploader.upload_real_curated(bucket, args.out)
+        print(f'\nUploaded {len(keys)} objects to s3://{bucket}/curated/ (region {args.region})')
+
+    return 0
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     results = check_c13_from_disk(args.dir)
     print(f'Validating {args.dir}/curated against ground truth (C13):')
@@ -144,6 +171,17 @@ def build_parser() -> argparse.ArgumentParser:
     real.add_argument('--env', default='dev', help='conf env used to resolve the bucket (default: dev)')
     real.add_argument('--region', default=_DEFAULT_REGION, help=f'AWS region (default: {_DEFAULT_REGION})')
     real.set_defaults(func=_cmd_load_real)
+
+    creal = sub.add_parser(
+        'compute-real', help='compute curated tables (speed loss/anomalies/alerts/recos) from the real CSVs'
+    )
+    creal.add_argument('--data', dest='data_dir', default='./data', help='directory with the CSVs (default: ./data)')
+    creal.add_argument('--out', default='./tmp', help='output directory (default: ./tmp)')
+    creal.add_argument('--upload', action='store_true', help='upload curated/fact_ship_* to S3')
+    creal.add_argument('--bucket', help='target S3 bucket (default: app.datalake.bucket_name from conf/<env>.conf)')
+    creal.add_argument('--env', default='dev', help='conf env used to resolve the bucket (default: dev)')
+    creal.add_argument('--region', default=_DEFAULT_REGION, help=f'AWS region (default: {_DEFAULT_REGION})')
+    creal.set_defaults(func=_cmd_compute_real)
 
     val = sub.add_parser('validate', help='validate a previously written curated tree (C13)')
     val.add_argument('--dir', default='./tmp', help='directory holding curated/ and truth/ (default: ./tmp)')

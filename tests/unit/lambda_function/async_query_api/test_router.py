@@ -94,7 +94,7 @@ class TestRouter:
         assert '/v2/queries' in spec['paths']
         v2_schema = spec['paths']['/v2/queries']['post']['requestBody']['content']['application/json']['schema']
         assert v2_schema['discriminator']['propertyName'] == 'query_type'
-        assert len(v2_schema['oneOf']) == 6
+        assert len(v2_schema['oneOf']) == 12
         assert any('ship_id' in json.dumps(s) for s in spec['components']['schemas'].values())
 
     @patch('handlers.submit_v2')

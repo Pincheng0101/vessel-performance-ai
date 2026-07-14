@@ -57,6 +57,66 @@ VT_FD_COLUMNS = [
     ('predict_fuel_type', 'string'),  # fuel column marked PREDICT, else null
 ]
 
+# --- Curated zone (ym_datalake.etl.real_compute output) ---------------------
+
+# fact_ship_daily body columns — ship_id is the partition key (projection), so
+# it is omitted here. Grain: one row per ship per vt_fd row, with the fitted
+# expected speed / ISO-style speed loss and maintenance clocks.
+FACT_SHIP_DAILY_COLUMNS = [
+    ('noon_utc', 'int'),
+    ('speed_through_water', 'double'),
+    ('avg_speed', 'double'),
+    ('me_avg_rpm', 'double'),
+    ('horse_power', 'double'),
+    ('sfoc', 'double'),
+    ('me_slip', 'double'),
+    ('total_consump', 'double'),
+    ('me_consumption', 'double'),
+    ('hours_full_speed', 'double'),
+    ('wind_scale', 'double'),
+    ('v_expected_kn', 'double'),  # clean-hull expected speed at measured power
+    ('speed_loss_pct', 'double'),  # (v_expected - STW) / v_expected * 100
+    ('days_since_cleaning', 'int'),  # resets on UWC / UWC+PP / DD
+    ('days_since_polish', 'int'),  # resets on PP / UWI+PP / UWC+PP / DD
+    ('valid_flag', 'boolean'),  # steady-state gate (hours, wind, bounds, unmasked)
+    ('masked_flag', 'boolean'),
+]
+
+FACT_SHIP_ANOMALY_COLUMNS = [
+    ('ship_id', 'string'),
+    ('noon_utc', 'int'),
+    ('metric', 'string'),  # speed_loss_pct / sfoc / me_slip / total_consump
+    ('value', 'double'),
+    ('z_score', 'double'),  # robust z (median/MAD, floored scale)
+    ('severity', 'string'),  # low / medium / high
+]
+
+FACT_SHIP_ALERT_COLUMNS = [
+    ('alert_id', 'string'),  # AL-<ship>-<metric>-<opened_day>
+    ('ship_id', 'string'),
+    ('metric', 'string'),
+    ('opened_day', 'int'),
+    ('last_seen_day', 'int'),
+    ('n_days', 'int'),
+    ('peak_value', 'double'),
+    ('peak_z', 'double'),
+    ('severity', 'string'),
+    ('status', 'string'),  # open / closed
+    ('message', 'string'),
+]
+
+FACT_SHIP_MAINTENANCE_RECOMMENDATION_COLUMNS = [
+    ('ship_id', 'string'),
+    ('action_type', 'string'),  # hull_cleaning / propeller_polishing / engine_inspection
+    ('priority', 'string'),  # high / medium / low
+    ('due_day', 'int'),  # relative day, same axis as noon_utc
+    ('current_value', 'double'),
+    ('threshold_value', 'double'),
+    ('rate_per_day', 'double'),
+    ('trigger_eta_day', 'int'),
+    ('rationale', 'string'),
+]
+
 # maintenance columns — flat table, ship_id stays a body column (77 rows).
 MAINTENANCE_COLUMNS = [
     ('ship_id', 'string'),

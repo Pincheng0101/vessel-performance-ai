@@ -376,6 +376,70 @@ def _ship_speed_power(p: _ShipParams) -> tuple[str, list[str]]:
     )
 
 
+class _AlertFilterParams(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
+    severity: str | None = Field(default=None, pattern=_SEVERITY_PATTERN)
+
+
+_SHIP_ALERT_COLUMNS = (
+    'alert_id, metric, opened_day, last_seen_day, n_days, peak_value, peak_z, severity, status, message'
+)
+_SHIP_RECO_COLUMNS = (
+    'action_type, priority, due_day, current_value, threshold_value, rate_per_day, trigger_eta_day, rationale'
+)
+_RECO_PRIORITY_ORDER = "CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END"
+
+
+def _ship_speed_loss(p: _ShipDayRangeParams) -> tuple[str, list[str]]:
+    # ISO-style speed-loss trend from the curated daily table (compute-real output).
+    sql = (
+        'SELECT noon_utc, speed_loss_pct, v_expected_kn, days_since_cleaning, days_since_polish, valid_flag '
+        'FROM fact_ship_daily WHERE ship_id = ?'
+    )
+    clause, binds = _day_range('noon_utc', p.start_day, p.end_day, keyword='AND')
+    return sql + clause + ' ORDER BY noon_utc', [p.ship_id, *binds]
+
+
+def _ship_anomalies(p: _ShipParams) -> tuple[str, list[str]]:
+    return (
+        'SELECT noon_utc, metric, value, z_score, severity FROM fact_ship_anomaly WHERE ship_id = ? ORDER BY noon_utc',
+        [p.ship_id],
+    )
+
+
+def _ship_alerts(p: _ShipParams) -> tuple[str, list[str]]:
+    return (
+        f'SELECT {_SHIP_ALERT_COLUMNS} FROM fact_ship_alert WHERE ship_id = ? ORDER BY last_seen_day DESC',
+        [p.ship_id],
+    )
+
+
+def _fleet_ship_alerts(p: _AlertFilterParams) -> tuple[str, list[str]]:
+    sql = f"SELECT ship_id, {_SHIP_ALERT_COLUMNS} FROM fact_ship_alert WHERE status = 'open'"
+    binds: list[str] = []
+    if p.severity is not None:
+        sql += ' AND severity = ?'
+        binds.append(p.severity)
+    return sql + ' ORDER BY last_seen_day DESC', binds
+
+
+def _ship_maintenance_recommendation(p: _ShipParams) -> tuple[str, list[str]]:
+    return (
+        f'SELECT {_SHIP_RECO_COLUMNS} FROM fact_ship_maintenance_recommendation '
+        f'WHERE ship_id = ? ORDER BY {_RECO_PRIORITY_ORDER}, action_type',
+        [p.ship_id],
+    )
+
+
+def _fleet_ship_maintenance_recommendation(p: _NoParams) -> tuple[str, list[str]]:
+    return (
+        f'SELECT ship_id, {_SHIP_RECO_COLUMNS} FROM fact_ship_maintenance_recommendation '
+        f'ORDER BY due_day, {_RECO_PRIORITY_ORDER}, action_type',
+        [],
+    )
+
+
 def _fleet_daily(p: _DayRangeParams) -> tuple[str, list[str]]:
     # Cross-ship per-day aggregate. noon_utc is per-ship relative (day 0 = that ship's
     # earliest record), so this is an approximate overview, not a calendar alignment.
@@ -421,6 +485,13 @@ QUERY_TYPES_V2 = {
     'vessel_speed_power': (_ShipParams, _ship_speed_power),
     'vessel_maintenance_effect': (_ShipParams, _ship_maintenance),
     'predict_targets': (_OptionalShipParams, _predict_targets),
+    # Curated types — need `python -m ym_datalake.etl compute-real --upload` to have run.
+    'vessel_speed_loss': (_ShipDayRangeParams, _ship_speed_loss),
+    'vessel_anomalies': (_ShipParams, _ship_anomalies),
+    'vessel_alerts': (_ShipParams, _ship_alerts),
+    'fleet_alerts': (_AlertFilterParams, _fleet_ship_alerts),
+    'vessel_maintenance_recommendation': (_ShipParams, _ship_maintenance_recommendation),
+    'fleet_maintenance_recommendation': (_NoParams, _fleet_ship_maintenance_recommendation),
 }
 
 

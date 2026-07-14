@@ -423,7 +423,7 @@ class TestRealDataRender:
     def test_v2_registry_names(self):
         from queries import QUERY_TYPES, QUERY_TYPES_V2
 
-        assert set(QUERY_TYPES_V2) == {
+        assert set(QUERY_TYPES_V2) >= {
             'fleet_overview',
             'fleet_vessels',
             'vessel_metrics',
@@ -443,3 +443,76 @@ class TestRealDataRender:
         # Same name, different registry: v1 fleet_overview rejects day params.
         with pytest.raises(BadRequestError):
             render('fleet_overview', {'start_day': 0})
+
+
+class TestCuratedRealDataRender:
+    """v2 curated types over the compute-real output tables."""
+
+    @staticmethod
+    def _render(query_type, params):
+        from queries import QUERY_TYPES_V2
+
+        return render(query_type, params, QUERY_TYPES_V2)
+
+    def test_vessel_speed_loss(self):
+        sql, binds = self._render('vessel_speed_loss', {'ship_id': 'S6', 'start_day': 0, 'end_day': 365})
+        assert 'FROM fact_ship_daily WHERE ship_id = ?' in sql
+        assert 'AND noon_utc BETWEEN CAST(? AS integer) AND CAST(? AS integer)' in sql
+        for col in ('speed_loss_pct', 'v_expected_kn', 'days_since_cleaning', 'days_since_polish', 'valid_flag'):
+            assert col in sql
+        assert sql.rstrip().endswith('ORDER BY noon_utc')
+        assert binds == ['S6', '0', '365']
+
+    def test_vessel_anomalies(self):
+        sql, binds = self._render('vessel_anomalies', {'ship_id': 'S2'})
+        assert 'FROM fact_ship_anomaly WHERE ship_id = ?' in sql
+        for col in ('metric', 'value', 'z_score', 'severity'):
+            assert col in sql
+        assert binds == ['S2']
+
+    def test_vessel_alerts(self):
+        sql, binds = self._render('vessel_alerts', {'ship_id': 'S2'})
+        assert 'FROM fact_ship_alert WHERE ship_id = ?' in sql
+        assert sql.rstrip().endswith('ORDER BY last_seen_day DESC')
+        assert binds == ['S2']
+
+    def test_fleet_alerts_open_only(self):
+        sql, binds = self._render('fleet_alerts', {})
+        assert "WHERE status = 'open'" in sql
+        assert 'ship_id' in sql
+        assert binds == []
+
+    def test_fleet_alerts_severity_filter(self):
+        sql, binds = self._render('fleet_alerts', {'severity': 'high'})
+        assert 'AND severity = ?' in sql
+        assert binds == ['high']
+
+    def test_fleet_alerts_bad_severity_raises(self):
+        with pytest.raises(BadRequestError):
+            self._render('fleet_alerts', {'severity': 'critical'})
+
+    def test_vessel_maintenance_recommendation(self):
+        sql, binds = self._render('vessel_maintenance_recommendation', {'ship_id': 'S12'})
+        assert 'FROM fact_ship_maintenance_recommendation' in sql
+        assert 'WHERE ship_id = ?' in sql
+        assert "CASE priority WHEN 'high' THEN 0" in sql
+        assert binds == ['S12']
+
+    def test_fleet_maintenance_recommendation(self):
+        sql, binds = self._render('fleet_maintenance_recommendation', {})
+        assert 'SELECT ship_id' in sql
+        assert 'ORDER BY due_day' in sql
+        assert binds == []
+
+    def test_v2_registry_now_twelve(self):
+        from queries import QUERY_TYPES_V2
+
+        assert len(QUERY_TYPES_V2) == 12
+        assert {
+            'vessel_speed_loss',
+            'vessel_anomalies',
+            'vessel_alerts',
+            'fleet_alerts',
+            'vessel_maintenance_recommendation',
+            'fleet_maintenance_recommendation',
+        } <= set(QUERY_TYPES_V2)

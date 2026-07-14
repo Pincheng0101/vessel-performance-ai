@@ -63,3 +63,26 @@ def test_upload_real_data_missing_dir_raises(s3_mock, tmp_path):
     with pytest.raises(FileNotFoundError):
         uploader.upload_real_data('my-bucket', tmp_path)
     s3_mock.put_object.assert_not_called()
+
+
+@patch('ym_datalake.etl.uploader.s3')
+def test_upload_real_curated_puts_only_fact_ship_tables(s3_mock, tmp_path):
+    _write(tmp_path / 'curated' / 'fact_ship_daily' / 'ship_id=S1' / 'data.jsonl')
+    _write(tmp_path / 'curated' / 'fact_ship_alert' / 'fact_ship_alert.jsonl')
+    _write(tmp_path / 'curated' / 'dim_vessel' / 'dim_vessel.jsonl')  # skipped (synthetic)
+    _write(tmp_path / 'raw' / 'vt_fd' / 'ship_id=S1' / 'data.jsonl')  # skipped (raw)
+
+    keys = uploader.upload_real_curated('my-bucket', tmp_path)
+
+    assert set(keys) == {
+        'curated/fact_ship_daily/ship_id=S1/data.jsonl',
+        'curated/fact_ship_alert/fact_ship_alert.jsonl',
+    }
+    assert s3_mock.put_object.call_count == 2
+
+
+@patch('ym_datalake.etl.uploader.s3')
+def test_upload_real_curated_missing_dir_raises(s3_mock, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        uploader.upload_real_curated('my-bucket', tmp_path)
+    s3_mock.put_object.assert_not_called()
