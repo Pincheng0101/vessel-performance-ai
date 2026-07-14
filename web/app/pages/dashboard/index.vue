@@ -27,11 +27,11 @@ const getVesselTabTo = (tab) => {
 const sections = computed(() => [
   { value: 'executive', title: '營運總覽', icon: 'mdi-chart-box-outline' },
   { value: 'fleet', title: '船隊總覽', icon: 'mdi-ferry' },
-  { value: 'map', title: '船隊地圖', icon: 'mdi-map-outline' },
+  { value: 'vessel', title: '個船分析', icon: 'mdi-chart-line', to: getVesselTabTo('vessel') },
   { value: 'alerts', title: '異常預警', icon: 'mdi-alert-outline' },
   { value: 'planner', title: '維修規劃', icon: 'mdi-calendar-clock' },
-  { value: 'vessel', title: '個船分析', icon: 'mdi-chart-line', to: getVesselTabTo('vessel') },
   { value: 'optimizer', title: '航速優化', icon: 'mdi-speedometer', to: getVesselTabTo('optimizer') },
+  { value: 'map', title: '船隊地圖', icon: 'mdi-map-outline' },
 ]);
 
 const builtSections = ['executive', 'fleet', 'map', 'alerts', 'planner', 'vessel', 'optimizer'];
