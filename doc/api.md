@@ -37,7 +37,7 @@ The base URL already ends in `/prod/`, so a full endpoint is
 the live values from the stack outputs:
 
 ```bash
-AWS_PROFILE=rdc-sso aws cloudformation describe-stacks \
+AWS_PROFILE=ym-hackathon aws cloudformation describe-stacks \
   --stack-name YmHackathonAthenaToolStack \
   --query "Stacks[0].Outputs[?OutputKey=='AsyncQueryApiUrl' || OutputKey=='AsyncQueryApiKeyId']"
 ```
@@ -48,7 +48,7 @@ Every route requires the `x-api-key` header. The key **id** is the
 `AsyncQueryApiKeyId` output; fetch its secret **value** with:
 
 ```bash
-AWS_PROFILE=rdc-sso aws apigateway get-api-key \
+AWS_PROFILE=ym-hackathon aws apigateway get-api-key \
   --api-key <AsyncQueryApiKeyId> --include-value --query value --output text
 ```
 

@@ -52,7 +52,7 @@ Region is **`us-west-2`**; the CDK stack is **`YmHackathonAthenaToolStack`**.
 | Python 3.13 + [`uv`](https://docs.astral.sh/uv/) | generate / ETL / tests / CDK app | `>=3.13,<3.14` |
 | Node.js + `npx` | CDK CLI | `npx aws-cdk@latest` pins CLI ≥ 2.1129.0 (cloud-assembly schema ≥ 54) |
 | Docker | Lambda bundling at `cdk deploy` | must be running |
-| AWS credentials | deploy + upload + query | examples use `AWS_PROFILE=rdc-sso`; account must be CDK-bootstrapped |
+| AWS credentials | deploy + upload + query | examples use `AWS_PROFILE=ym-hackathon`; account must be CDK-bootstrapped |
 
 Generating and computing the dataset need **none** of the AWS tooling — only
 `uv`. AWS is required only to deploy, upload, and query.
@@ -67,16 +67,16 @@ uv sync                                                        # install deps
 
 # 1. Deploy — note the CfnOutputs (bucket name, API url/key ids)
 bash scripts/export-requirements.sh
-AWS_PROFILE=rdc-sso npx aws-cdk@latest deploy -c env=dev
-BUCKET=$(AWS_PROFILE=rdc-sso aws cloudformation describe-stacks --stack-name YmHackathonAthenaToolStack \
+AWS_PROFILE=ym-hackathon npx aws-cdk@latest deploy -c env=dev
+BUCKET=$(AWS_PROFILE=ym-hackathon aws cloudformation describe-stacks --stack-name YmHackathonAthenaToolStack \
   --query "Stacks[0].Outputs[?OutputKey=='DataLakeBucketName'].OutputValue" --output text)
 
 # 2. Generate raw data (M1) + upload raw/ → s3://$BUCKET/raw/
-AWS_PROFILE=rdc-sso uv run python -m ym_datalake.synthetic_data generate \
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.synthetic_data generate \
   --out ./tmp --seed 42 --validate --upload --bucket "$BUCKET"
 
 # 3. Compute curated tables (M2+M3) + upload curated/ → s3://$BUCKET/curated/
-AWS_PROFILE=rdc-sso uv run python -m ym_datalake.etl compute \
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl compute \
   --in ./tmp --out ./tmp --validate --upload --bucket "$BUCKET"
 
 # 4. Data is now queryable (partition projection — no crawler / MSCK). See §4–§5.
@@ -158,8 +158,8 @@ The CDK CLI must be recent enough for the `aws-cdk-lib` in `pyproject.toml`
 
 ```bash
 bash scripts/export-requirements.sh                      # pin lambda runtime deps
-AWS_PROFILE=rdc-sso npx aws-cdk@latest synth  -c env=dev  # inspect the template
-AWS_PROFILE=rdc-sso npx aws-cdk@latest deploy -c env=dev  # note the CfnOutputs
+AWS_PROFILE=ym-hackathon npx aws-cdk@latest synth  -c env=dev  # inspect the template
+AWS_PROFILE=ym-hackathon npx aws-cdk@latest deploy -c env=dev  # note the CfnOutputs
 ```
 
 The stack (`deployment/athena_tool_stack.py`) provisions:
@@ -211,7 +211,7 @@ uv run python -m ym_datalake.synthetic_data validate --dir ./tmp
 Uploading requires the deployed data-lake bucket, so **deploy first** ([§1](#1-deploy-cdk)):
 
 ```bash
-AWS_PROFILE=rdc-sso uv run python -m ym_datalake.synthetic_data generate \
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.synthetic_data generate \
   --out ./tmp --seed 42 --upload --bucket <DataLakeBucketName>
 ```
 
@@ -257,7 +257,7 @@ uv run python -m ym_datalake.etl compute --in ./tmp --out ./tmp --validate
 uv run python -m ym_datalake.etl validate --dir ./tmp
 
 # compute-and-upload to s3://<bucket>/curated/... (keys mirror the local layout)
-AWS_PROFILE=rdc-sso uv run python -m ym_datalake.etl compute \
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl compute \
   --in ./tmp --out ./tmp --upload --bucket <DataLakeBucketName>
 ```
 
@@ -367,11 +367,11 @@ with a 24h TTL that auto-cleans old records.
 Deploy ([§1](#1-deploy-cdk)), upload M1/M2/M3 data, then grab the URL + key from the outputs:
 
 ```bash
-URL=$(AWS_PROFILE=rdc-sso aws cloudformation describe-stacks --stack-name YmHackathonAthenaToolStack \
+URL=$(AWS_PROFILE=ym-hackathon aws cloudformation describe-stacks --stack-name YmHackathonAthenaToolStack \
   --query "Stacks[0].Outputs[?OutputKey=='AsyncQueryApiUrl'].OutputValue" --output text)
-KEY_ID=$(AWS_PROFILE=rdc-sso aws cloudformation describe-stacks --stack-name YmHackathonAthenaToolStack \
+KEY_ID=$(AWS_PROFILE=ym-hackathon aws cloudformation describe-stacks --stack-name YmHackathonAthenaToolStack \
   --query "Stacks[0].Outputs[?OutputKey=='AsyncQueryApiKeyId'].OutputValue" --output text)
-KEY=$(AWS_PROFILE=rdc-sso aws apigateway get-api-key --api-key "$KEY_ID" \
+KEY=$(AWS_PROFILE=ym-hackathon aws apigateway get-api-key --api-key "$KEY_ID" \
   --include-value --query value --output text)
 
 # 1. submit → {query_id, status:"PENDING"}
@@ -407,7 +407,7 @@ queries succeed but return no rows). It is marked `e2e` and **auto-skips** when 
 stack or credentials are unavailable, so a plain `pytest` stays green offline.
 
 ```bash
-AWS_PROFILE=rdc-sso uv run pytest -s -m e2e tests/e2e/
+AWS_PROFILE=ym-hackathon uv run pytest -s -m e2e tests/e2e/
 ```
 
 Overridable via env: `E2E_STACK_NAME` (default `YmHackathonAthenaToolStack`) and the standard
@@ -497,7 +497,7 @@ macOS needs the OpenMP runtime once: `brew install libomp` (xgboost).
 uv run python -m ym_datalake.ml train --in ./tmp --models ./tmp/models --seed 42
 
 # batch pre-inference → ./tmp/ml/*.jsonl, validate C21–C23, upload to s3://<bucket>/ml/
-AWS_PROFILE=rdc-sso uv run python -m ym_datalake.ml infer \
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.ml infer \
   --in ./tmp --models ./tmp/models --out ./tmp --validate --upload --bucket "$BUCKET"
 ```
 

@@ -37,7 +37,7 @@ DynamoDB 往返，絕不在 Lambda 內輪詢。
 輸出取得實際值：
 
 ```bash
-AWS_PROFILE=rdc-sso aws cloudformation describe-stacks \
+AWS_PROFILE=ym-hackathon aws cloudformation describe-stacks \
   --stack-name YmHackathonAthenaToolStack \
   --query "Stacks[0].Outputs[?OutputKey=='AsyncQueryApiUrl' || OutputKey=='AsyncQueryApiKeyId']"
 ```
@@ -48,7 +48,7 @@ AWS_PROFILE=rdc-sso aws cloudformation describe-stacks \
 輸出；以下列指令取得其祕密 **值 (value)**：
 
 ```bash
-AWS_PROFILE=rdc-sso aws apigateway get-api-key \
+AWS_PROFILE=ym-hackathon aws apigateway get-api-key \
   --api-key <AsyncQueryApiKeyId> --include-value --query value --output text
 ```
 

@@ -12,5 +12,5 @@ ruff check --fix . && ruff format .
 
 # AWS
 - CDK: `npx aws-cdk@latest`
-- AWS CLI: `AWS_PROFILE=rdc-sso aws`
+- AWS CLI: `AWS_PROFILE=ym-hackathon aws`
 

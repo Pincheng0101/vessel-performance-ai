@@ -7,7 +7,7 @@ and a deployed ``YmHackathonAthenaToolStack`` whose data lake has been populated
 The whole suite is marked ``e2e`` and **auto-skips** when the stack, its M5 outputs, or
 AWS credentials are unavailable — so a bare ``pytest`` stays green without AWS. Run it:
 
-    AWS_PROFILE=rdc-sso pytest -s -m e2e tests/e2e/
+    AWS_PROFILE=ym-hackathon pytest -s -m e2e tests/e2e/
 
 Overridable via env: ``E2E_STACK_NAME`` (default ``YmHackathonAthenaToolStack``) and the standard
 AWS region vars (default ``us-west-2``).

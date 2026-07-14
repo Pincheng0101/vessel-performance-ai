@@ -125,7 +125,7 @@ uv run python -m ym_datalake.ml train --in ./tmp --models ./tmp/models --seed 42
 uv run python -m ym_datalake.ml backtest --in ./tmp
 
 # 批次推論：每船未來 90 天 → ./tmp/ml/*.jsonl（+C21–C23 驗證 +上傳）
-AWS_PROFILE=rdc-sso uv run python -m ym_datalake.ml infer \
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.ml infer \
   --in ./tmp --models ./tmp/models --out ./tmp --validate --upload --bucket "$BUCKET"
 
 # 針對已寫出的 ml/ tree 重跑 C22/C23（--models 加跑 C21）
