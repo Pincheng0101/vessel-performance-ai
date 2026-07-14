@@ -1,0 +1,45 @@
+{
+  "test_action": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Catch": [],
+    "Retry": [],
+    "Comment": "test_comment",
+    "InputPath": "$",
+    "ResultSelector": {
+      "external_memory_id.$": "$.Payload.external_memory_id",
+      "text.$": "$.Payload.state_memory.text"
+    },
+    "ResultPath": "$.undefinedResult",
+    "OutputPath": "$",
+    "Parameters": {
+      "FunctionName": "LFEActionFunction",
+      "Payload": {
+        "action_type": "text_action",
+        "default_output": {
+          "action_type": "text_action",
+          "errors": [],
+          "text": "test_default_output"
+        },
+        "template": "test_template",
+        "use_external_memory_output": true,
+        "state_memory_output_selector": {
+          "text": "$.text"
+        },
+        "streaming_config": {
+          "before_action": {
+            "name": "test_action_Start",
+            "output_selector": null
+          },
+          "after_action": {
+            "name": "test_action_End",
+            "output_selector": null
+          }
+        },
+        "variables": {
+          "test": "test_variable"
+        }
+      }
+    }
+  }
+}

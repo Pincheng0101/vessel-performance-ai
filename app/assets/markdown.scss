@@ -1,0 +1,274 @@
+$page-width: 794px; // A4 width in pixels at 96 DPI
+$page-height: 1123px; // A4 height in pixels at 96 DPI
+$header-footer-height: 60px;
+$page-padding-x: 36px;
+$page-padding-y: 36px;
+$header-footer-side-padding: 16px;
+$content-width: $page-width - ($page-padding-x * 2);
+$content-top: $header-footer-height + $header-footer-side-padding;
+$content-height: $page-height - ($page-padding-y * 2) - ($header-footer-height * 2);
+$logo-image-width: 28px;
+$logo-image-margin: 8px;
+$header-text-position-left: $header-footer-side-padding + $logo-image-width + $logo-image-margin;
+$header-text-height: 24px;
+$header-text-ellipsis-width: 24px;
+
+.markdown {
+  &.pdf-container {
+    width: $page-width !important;
+  }
+  .page-break {
+    page-break-before: always;
+    break-before: page;
+  }
+  .pdf-page {
+    width: $page-width;
+    height: $page-height;
+    position: relative;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+  .pdf-header,
+  .pdf-footer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: $header-footer-height;
+    display: flex;
+    padding: 0 $header-footer-side-padding;
+    align-items: center;
+    justify-content: start;
+  }
+  .pdf-header {
+    top: 0;
+    background-color: rgba(var(--v-theme-backgroundScale1));
+    .title {
+      position: absolute;
+      left: $header-text-position-left;
+      top: 0;
+      height: $header-text-height;
+      width: calc(100% - $header-text-position-left - $header-footer-side-padding - $header-text-ellipsis-width);
+      overflow: hidden;
+      word-break: break-all;
+    }
+    .ellipsis {
+      position: absolute;
+      right: $header-footer-side-padding;
+      top: 0;
+      width: $header-text-ellipsis-width;
+    }
+  }
+  .pdf-footer {
+    bottom: 0;
+    p {
+      position: absolute;
+      left: $header-text-position-left;
+      top: 0;
+    }
+  }
+  .pdf-content {
+    width: $content-width;
+    height: $content-height;
+    position: absolute;
+    top: $content-top;
+    left: $page-padding-x;
+  }
+  p {
+    color: inherit;
+    code {
+      background-color: rgba(var(--v-theme-backgroundScale3));
+      border-radius: 4px;
+      font-family: inherit;
+      margin: 0 2px;
+      padding: 2px 4px;
+      word-break: break-all;
+    }
+  }
+  code {
+    font-size: 1rem;
+  }
+  &.inline {
+    p, ol, ul {
+      all: revert;
+    }
+    p {
+      margin: 0 !important;
+      code {
+        font-size: inherit;
+      }
+    }
+  }
+  p, ol, ul {
+    all: revert;
+    font-size: 1rem;
+  }
+  a {
+    text-decoration: none;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    margin-top: 16px;
+    .anchor {
+      align-items: center;
+      color: rgba(var(--v-theme-primary));
+      display: flex;
+      margin-left: -20px;
+      scroll-margin-top: 100px;
+      i {
+        font-size: 16px;
+        margin-left: 2px;
+        margin-right: 2px;
+        visibility: hidden;
+      }
+      &:hover {
+        i {
+          visibility: visible;
+        }
+      }
+    }
+    &:hover {
+      .anchor {
+        i {
+          visibility: visible;
+        }
+      }
+    }
+  }
+  h1 {
+    min-height: 40px;
+  }
+  ol, ul {
+    padding-inline-start: 2rem;
+    li {
+      margin-bottom: 4px;
+      margin-top: 4px;
+      img {
+        max-width: 160px;
+      }
+    }
+  }
+  h1 {
+    border-bottom: 1px solid rgba(var(--v-theme-backgroundScale3));
+    padding-bottom: 0.25rem;
+  }
+  @for $i from 1 through 6 {
+    h#{$i} {
+      font-size: 1.5rem - 0.125rem * ($i - 1);
+    }
+  }
+  table {
+    $border-radius: 4px;
+    $border-style: 1px solid rgba(var(--v-theme-inputBorder));
+    background-color: rgba(var(--v-theme-backgroundScale2));
+    border-collapse: separate;
+    border-radius: $border-radius;
+    border-spacing: 0;
+    margin-bottom: 16px;
+    margin-top: 16px;
+    width: 100%;
+    tr {
+      th, td {
+        border-right: $border-style;
+        min-width: 240px;
+        max-width: 300px;
+      }
+      th {
+        padding: 8px 16px;
+        background-color: rgba(var(--v-theme-background));
+      }
+      td {
+        border-bottom: $border-style;
+        vertical-align: top;
+        white-space: normal;
+        word-break: break-word;
+        .content {
+          max-height: 300px;
+          overflow: auto;
+          padding: 8px 16px;
+        }
+        &:has(pre) {
+          width: 25%;
+          .content {
+            padding: 0;
+          }
+          span {
+            width: 100%;
+          }
+          pre {
+            border: 0;
+            height: 300px;
+            margin: 0;
+            max-height: none;
+            min-height: 300px;
+            padding: 0;
+            resize: vertical;
+            width: 100%;
+            background-color: rgba(var(--v-theme-backgroundScale2)) !important;
+            code {
+              background-color: rgba(var(--v-theme-backgroundScale2)) !important;
+              height: 100%;
+              padding: 8px 16px !important;
+            }
+          }
+        }
+        img {
+          width: 100%;
+        }
+      }
+      th:first-child, td:first-child {
+        border-left: $border-style;
+      }
+      &:first-child {
+        th, td {
+          border-top: $border-style;
+        }
+        th:first-child {
+          border-top-left-radius: $border-radius;
+        }
+        th:last-child {
+          border-top-right-radius: $border-radius;
+        }
+      }
+      &:last-child {
+        td:first-child {
+          border-bottom-left-radius: $border-radius;
+        }
+        td:last-child {
+          border-bottom-right-radius: $border-radius;
+        }
+      }
+    }
+    &.frontmatter {
+      thead {
+        display: none;
+      }
+      tr td:first-child {
+        background-color: rgba(var(--v-theme-background));
+        font-weight: 500;
+        min-width: 0;
+        width: 1%;
+        white-space: nowrap;
+        .content {
+          justify-content: flex-start;
+        }
+      }
+    }
+  }
+  pre {
+    background-color: rgba(var(--v-theme-backgroundScale1));
+    border-radius: 4px;
+    border: 1px solid rgba(var(--v-theme-backgroundScale4));
+    font-weight: 400;
+    margin-bottom: 16px;
+    margin-top: 16px;
+    max-height: 50dvh;
+    overflow: auto;
+    padding: 16px;
+  }
+  img {
+    border-radius: 4px;
+  }
+}

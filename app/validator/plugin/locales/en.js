@@ -1,0 +1,17 @@
+export default {
+  endDateAfterStartDate: () => 'End date must be on or after the start date.',
+  fallbackLlmHasJsonSchema: field => `The ${field} field requires the selected model to define a JSON Schema.`,
+  jsonPath: field => `The ${field} field must match the AWS Step Functions JSONPath expression, and the name must not start with a number.`,
+  jsonPathBinding: field => `The ${field} field must match valid AWS Step Functions JSONPath bindings, and neither key nor value can start with a number.`,
+  lambdaArn: field => `The ${field} field must be a valid AWS Lambda function ARN.`,
+  notReservedFieldName: field => `The ${field} field must not use a reserved name (e.g. Python keywords like "from", "class", or model attributes like "schema", "model_dump").`,
+  notStartsWithUnderscore: field => `The ${field} field must not start with an underscore.`,
+  notStartsWithUppercase: field => `The ${field} field must not start with an uppercase letter.`,
+  noWhitespace: field => `The ${field} field must not contain spaces.`,
+  startDateBeforeEndDate: () => 'Start date must be on or before the end date.',
+  stringContainsAnyLowercase: field => `The ${field} field must contain at least one lowercase letter (a-z).`,
+  stringContainsAnyNumber: field => `The ${field} field must contain at least one number (0-9).`,
+  stringContainsAnySymbol: field => `The ${field} field must contain at least one of the specified symbols: ^ $ * . [ ] { } ( ) ? " ! @ # % & / \\ , > < ' : ; | _ ~ \` = + -`,
+  stringContainsAnyUppercase: field => `The ${field} field must contain at least one uppercase letter (A-Z).`,
+  workflowAslValidator: field => `The ${field} field must match valid AWS Step Functions ASL definitions.`,
+};

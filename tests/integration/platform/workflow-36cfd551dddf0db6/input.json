@@ -1,0 +1,24 @@
+{
+  "url": "https://www.hasa.com.tw/webls-zh-tw/COBRA(29ER)-2016.html",
+  "styling": [
+    {
+      "style": "formal",
+      "temperature": 0.3
+    },
+    {
+      "style": "search engine optimized",
+      "temperature": 0.3
+    },
+    {
+      "style": "formal, eye-catching, no symbols",
+      "temperature": 0.3
+    }
+  ],
+  "description": "",
+  "language_name": "Traditional Chinese",
+  "name_max_length": 100,
+  "num_of_keywords": 10,
+  "keyword_max_length": 100,
+  "description_max_length": 256,
+  "custom_fields": []
+}

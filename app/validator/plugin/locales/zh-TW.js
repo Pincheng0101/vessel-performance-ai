@@ -1,0 +1,17 @@
+export default {
+  endDateAfterStartDate: () => '結束日期必須晚於或等於開始日期',
+  fallbackLlmHasJsonSchema: () => `此欄位所選用的備用大型語言模型必須定義 JSON Schema`,
+  jsonPath: () => '此欄位必須符合有效的 AWS Step Functions JSONPath 表達式，且欄位名稱不能以數字開頭',
+  jsonPathBinding: () => `此欄位必須符合有效的 AWS Step Functions JSONPath 綁定格式，且鍵與值不能以數字開頭`,
+  lambdaArn: () => `此欄位必須是有效的 AWS Lambda 函式 ARN`,
+  notReservedFieldName: () => `此欄位不得使用保留名稱（例如 Python 關鍵字 "from"、"class"，或模型屬性 "schema"、"model_dump"）`,
+  notStartsWithUnderscore: () => `此欄位不得以底線開頭`,
+  notStartsWithUppercase: () => `此欄位不得以大寫字母開頭`,
+  noWhitespace: () => `此欄位不得含有空格`,
+  startDateBeforeEndDate: () => '開始日期必須早於或等於結束日期',
+  stringContainsAnyLowercase: () => `此欄位必須包含至少一個小寫字母 (a-z)`,
+  stringContainsAnyNumber: () => `此欄位必須包含至少一個數字 (0-9)`,
+  stringContainsAnySymbol: () => `此欄位必須包含至少一個指定符號： ^ $ * . [ ] { } ( ) ? " ! @ # % & / \\ , > < ' : ; | _ ~ \` = + -`,
+  stringContainsAnyUppercase: () => `此欄位必須包含至少一個大寫字母 (A-Z)`,
+  workflowAslValidator: () => `此欄位必須符合有效的 AWS Step Functions ASL 定義`,
+};

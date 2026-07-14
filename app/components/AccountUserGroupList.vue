@@ -1,0 +1,208 @@
+<script setup>
+import { AccountConstant, ListConstant } from '~/constants';
+
+const snackbarStore = useSnackbarStore();
+const route = useRoute();
+const server = useServer();
+const { category, page, perPage, sortField, sortOrder, filters, filterLogic, query, nextTokenMap, initUrlParams, updateFiltersByCategory, goToPreviousPage } = usePagination({
+  type: AccountConstant.Base.GROUP.value,
+  filterField: AccountConstant.Base.GROUP.favoriteFilterField,
+});
+
+const props = defineProps({
+  isAdmin: {
+    type: Boolean,
+    default: false,
+  },
+});
+
+const dialogRef = ref(null);
+
+const state = reactive({
+  groups: [],
+  isLoading: false,
+});
+
+const fetchGroups = async (pageValue = ListConstant.DefaultParams.PAGE) => {
+  state.isLoading = true;
+  state.groups = [];
+  updateFiltersByCategory();
+  const nextToken = pageValue === 1 ? null : nextTokenMap.value[pageValue - 1];
+  const { data, error } = await server.group[props.isAdmin ? 'adminList' : 'listGroupsForUser']({
+    ...(props.isAdmin ? { userName: route.params.id } : {}),
+    nextToken,
+    limit: perPage.value,
+    sortField: sortField.value,
+    sortOrder: sortOrder.value,
+    filters: filters.value,
+    filterLogic: filterLogic.value,
+    query: query.value,
+  }, {
+    lazy: false,
+  });
+  if (error.value) {
+    state.isLoading = false;
+    return;
+  }
+  nextTokenMap.value[pageValue] = data.value.nextToken;
+  state.groups = data.value.data;
+  page.value = pageValue;
+  state.isLoading = false;
+  // Navigate to the previous page if the current page has no items
+  if (state.groups.length === 0 && pageValue > 1) {
+    goToPreviousPage();
+    fetchGroups(page.value);
+  }
+};
+
+initUrlParams();
+fetchGroups(page.value);
+
+const addGroupToUser = async ({ groupName }) => {
+  const { error } = await server.group.adminAddUsers({ groupName, userNames: [route.params.id] });
+  if (error.value) {
+    return;
+  }
+  snackbarStore.setActionSuccess('__actionAdd');
+  fetchGroups(page.value);
+};
+
+const removeUserFromGroup = async ({ groupName }) => {
+  const { error } = await server.group.adminRemoveUsers({ groupName, userNames: [route.params.id] });
+  if (error.value) {
+    return;
+  }
+  snackbarStore.setActionSuccess('__actionLeave');
+  fetchGroups(page.value);
+};
+
+const handlePageChange = (pageValue, pageToken) => {
+  if (pageToken) {
+    nextTokenMap.value[pageValue - 1] = pageToken;
+  }
+  fetchGroups(pageValue);
+};
+
+const handlePerPageChange = (value) => {
+  perPage.value = value;
+  fetchGroups();
+};
+
+const handleSortByChange = ({ key, order }) => {
+  sortField.value = key;
+  sortOrder.value = order;
+  fetchGroups();
+};
+
+const handleQueryChange = (value) => {
+  query.value = value;
+  fetchGroups();
+};
+
+const handleFiltersChange = (filtersValue, queryValue) => {
+  filters.value = filtersValue;
+  query.value = queryValue;
+  fetchGroups();
+};
+
+const handleCategoryChange = (value) => {
+  category.value = value;
+  query.value = ListConstant.DefaultParams.QUERY;
+  updateFiltersByCategory({ reset: value === ListConstant.Category.ALL.value });
+  fetchGroups();
+};
+</script>
+
+<template>
+  <AppTable
+    :title="$t('__fieldGroup', 2)"
+    :icon="AccountConstant.Base.GROUP.icon"
+    :headers="[
+      { title: $t('__fieldName'), key: 'name', link: item => ({ href: props.isAdmin ? `/groups/${item.id}` : `/user/groups/${item.id}` }) },
+      { title: $t('__fieldDescription'), key: 'description' },
+      { title: $t('__fieldRoleArn'), key: 'roleArn' },
+      { title: $t('__fieldPrecedence'), key: 'precedence' },
+      { title: $t('__fieldLastUpdated'), key: 'updatedTs', isTimestamp: true, sortable: true },
+    ]"
+    :items="state.isLoading ? [] : state.groups"
+    :loading="state.isLoading"
+    :has-next-page="!!nextTokenMap[page]"
+    :category="category"
+    :page="page"
+    :sort-field="sortField"
+    :sort-order="sortOrder"
+    :per-page="perPage"
+    :query="query"
+    :next-token-map="nextTokenMap"
+    :filters="filters"
+    :filter-logic="filterLogic"
+    :filter-options="[
+      { title: $t('__fieldName'), field: 'group_name' },
+      { title: $t('__fieldDescription'), field: 'description' },
+      { title: $t('__fieldRoleArn'), field: 'role_arn' },
+      { title: $t('__fieldPrecedence'), field: 'precedence' },
+    ]"
+    :on-page-change="handlePageChange"
+    :on-per-page-change="handlePerPageChange"
+    :on-sort-by-change="handleSortByChange"
+    :on-query-change="handleQueryChange"
+    :on-filters-change="handleFiltersChange"
+    :on-category-change="handleCategoryChange"
+    enable-add-to-favorite
+  >
+    <template #header-actions>
+      <AppIconButton
+        icon="mdi-refresh"
+        variant="text"
+        :tooltip="$t('__actionRefresh')"
+        @click="fetchGroups(page)"
+      />
+      <template v-if="props.isAdmin">
+        <AppDialog
+          ref="dialogRef"
+          :on-submit="addGroupToUser"
+        >
+          <template #activator="{ onOpen }">
+            <AppIconButton
+              icon="mdi-plus"
+              class="primary-gradient"
+              :tooltip="$t('__titleModifyItem', { action: $t('__actionAdd'), item: $t('__fieldGroup') })"
+              @click="onOpen"
+            />
+          </template>
+          <template #body="{ onSubmit, onCancel }">
+            <AccountUserGroupAddForm
+              :on-submit="onSubmit"
+              :on-discard="onCancel"
+            />
+          </template>
+        </AppDialog>
+      </template>
+    </template>
+    <template
+      v-if="props.isAdmin"
+      #row-menu="{ item, isHovering }"
+    >
+      <ResourceActionMenu
+        :item="item"
+        :persistent="isHovering"
+        :item-label="$t('__fieldGroup')"
+        :delete-action-label="$t('__actionLeave')"
+        delete-instruction-keypath="__instructionLeaveGroup"
+        :on-delete="(item) => removeUserFromGroup({ groupName: item.name })"
+      />
+    </template>
+    <template
+      v-if="props.isAdmin && filters === ListConstant.DefaultParams.FILTERS"
+      #no-data
+    >
+      <ResourceInitCard
+        :action-label="$t('__actionAdd')"
+        :icon="AccountConstant.Base.GROUP.icon"
+        :instruction="$t('__instructionAccountAddUserToGroup')"
+        :title="$t('__titleNoGroupsJoined')"
+        :on-click="dialogRef.open"
+      />
+    </template>
+  </AppTable>
+</template>

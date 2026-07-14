@@ -1,0 +1,123 @@
+{
+  "test_action": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Catch": [],
+    "Retry": [],
+    "Comment": "test_comment",
+    "InputPath": "$",
+    "ResultSelector": {
+      "external_memory_id.$": "$.Payload.external_memory_id",
+      "response.$": "$.Payload.state_memory.response"
+    },
+    "ResultPath": "$.undefinedResult",
+    "OutputPath": "$",
+    "Parameters": {
+      "FunctionName": "LFEActionFunction",
+      "Payload": {
+        "action_type": "structured_llm_action",
+        "default_output": {
+          "action_type": "structured_llm_action",
+          "errors": [],
+          "request": {},
+          "response": {
+            "answer": "test_answer"
+          },
+          "source_llm_id": ""
+        },
+        "llm": {
+          "llm_id": "llm-abcbe5504730f792",
+          "llm_type": "bedrock.anthropic",
+          "max_tokens": 1024,
+          "system_prompt": "Answer in one sentence.",
+          "temperature": null,
+          "performance_config_latency": "standard",
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "content_block_name": "test_content_block",
+                  "content_block_type": "text",
+                  "text": "Can you cook with taro? Just answer yes or no."
+                }
+              ]
+            }
+          ],
+          "guardrail_id": "w9lo2iq8i3br",
+          "guardrail_version": "3",
+          "json_schema": {
+            "type": "object",
+            "properties": {
+              "answer": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "answer"
+            ]
+          },
+          "enable_thinking": false,
+          "include_thinking": false,
+          "thinking_budget_tokens": null,
+          "top_k": 250,
+          "top_p": 0.999
+        },
+        "fallback_llms": [
+          {
+            "guardrail_version": "DRAFT",
+            "llm_id": "llm-b921c7d0d47d61e8",
+            "llm_type": "openai",
+            "max_tokens": null,
+            "messages": [
+              {
+                "content": [
+                  {
+                    "content_block_name": "test_content_block",
+                    "content_block_type": "text",
+                    "text": "Can you cook with taro? Just answer yes or no."
+                  }
+                ],
+                "role": "user"
+              }
+            ],
+            "json_schema": {
+              "type": "object",
+              "properties": {
+                "answer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "answer"
+              ]
+            },
+            "system_prompt": null,
+            "temperature": 1,
+            "include_thinking": false,
+            "thinking_effort": "medium",
+            "top_p": 1
+          }
+        ],
+        "retry": {
+          "attempts": 5,
+          "temperature_diff": 0.1
+        },
+        "use_external_memory_output": true,
+        "state_memory_output_selector": {
+          "response": "$.response"
+        },
+        "streaming_config": {
+          "before_action": {
+            "name": "test_action_Start",
+            "output_selector": null
+          },
+          "after_action": {
+            "name": "test_action_End",
+            "output_selector": null
+          }
+        }
+      }
+    }
+  }
+}

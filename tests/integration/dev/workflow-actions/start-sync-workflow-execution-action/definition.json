@@ -1,0 +1,54 @@
+{
+  "test_action": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Comment": "test_comment",
+    "InputPath": "$",
+    "ResultSelector": {
+      "external_memory_id.$": "$.Payload.external_memory_id",
+      "output.$": "$.Payload.state_memory.output"
+    },
+    "ResultPath": "$.undefinedResult",
+    "OutputPath": "$",
+    "Catch": [],
+    "Retry": [],
+    "Parameters": {
+      "FunctionName": "LFEActionFunction",
+      "Payload": {
+        "action_type": "start_sync_workflow_execution_action",
+        "default_output": {
+          "action_type": "start_sync_workflow_execution_action",
+          "cause": "",
+          "error": "",
+          "errors": [],
+          "output": {
+            "test": "test_default_output"
+          },
+          "status": ""
+        },
+        "input": {
+          "message": "e2e_testing_text"
+        },
+        "state_memory_input_selector": {
+          "message": "$.message"
+        },
+        "state_memory_output_selector": {
+          "output": "$.output"
+        },
+        "streaming_config": {
+          "before_action": {
+            "name": "test_action_Start",
+            "output_selector": null
+          },
+          "after_action": {
+            "name": "test_action_End",
+            "output_selector": null
+          }
+        },
+        "use_external_memory_input": true,
+        "use_external_memory_output": true,
+        "workflow_id": "workflow-dbdd3e7ffdc7b481"
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "errors": null,
+  "action_type": "https_api_action",
+  "output": {
+    "args": {
+      "test": "test_parameters"
+    },
+    "data": "",
+    "files": {},
+    "form": {
+      "data": "{'message': 'hello world'}"
+    },
+    "json": {
+      "data": "{'message': 'hello world'}"
+    },
+    "url": "https://postman-echo.com/post?test=test_parameters"
+  }
+}

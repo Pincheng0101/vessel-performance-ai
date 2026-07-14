@@ -1,0 +1,1 @@
+[{"action_type":"engine_inspection","priority":"medium","due_day":1823,"current_value":190,"threshold_value":180.36,"rate_per_day":null,"trigger_eta_day":1823,"rationale":"trailing SFOC 190.0 g/kWh >= 105% of early baseline"}]
