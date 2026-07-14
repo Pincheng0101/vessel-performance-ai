@@ -167,18 +167,48 @@ def _table_builder(table: str, spec: _Spec):
 # every name below against ym_datalake.schema.ALL_TABLES.
 
 # Latest daily row per ship, for the fleet map (one dot each).
+#
+# Position and speed loss come from DIFFERENT DAYS, and that is the point. A ship's latest
+# row is wherever it is now; its latest *ISO 19030-valid* row is the last day that can carry
+# a speed loss at all (the gate drops ~78 % of days, so the two are rarely the same day).
+# Reading the speed loss off the latest row regardless — as this query used to — paints the
+# map with an ungated number: it was rendering S4 green at -3.27 % when its real condition is
+# 11.24 % (critical), S6 red at 14.01 % when it is actually 2.43 % (good), and S11 (26.83 %)
+# and S12 (12.89 %) — the two worst-fouled hulls in the fleet — as grey "no data" dots,
+# because their last calendar day happened to fail the gate. DashboardFleetOverview.vue
+# already folds on the latest valid row; the map has to agree with it.
+#
+# `speed_loss_day` is emitted so the UI can show how old the reading is: a gated number from
+# 40 days ago is honest, but only if it is labelled as being from 40 days ago.
 _POSITION_COLUMNS = (
-    'ship_id, noon_utc, report_date, latitude, longitude, heading_deg, speed_loss_pct, '
-    'cii_rating_imo, port_from, port_to, voyage'
+    'ship_id',
+    'noon_utc',
+    'report_date',
+    'latitude',
+    'longitude',
+    'heading_deg',
+    'cii_rating_imo',
+    'port_from',
+    'port_to',
+    'voyage',
 )
 
 
 def _fleet_positions(p: _NoParams) -> tuple[str, list[str]]:
+    # LEFT JOIN, not INNER: a ship with no valid day at all still gets a dot on the map — it
+    # just gets a null speed loss (a legitimately grey dot) instead of vanishing from the fleet.
+    position = ', '.join(_POSITION_COLUMNS)
+    projection = ', '.join(f'p.{c}' for c in _POSITION_COLUMNS)
     return (
-        f'SELECT {_POSITION_COLUMNS} FROM ('
-        f'SELECT {_POSITION_COLUMNS}, '
+        f'SELECT {projection}, s.speed_loss_pct, s.speed_loss_day '
+        f'FROM (SELECT {position}, '
         'row_number() OVER (PARTITION BY ship_id ORDER BY noon_utc DESC) AS rn '
-        'FROM fact_performance_daily) WHERE rn = 1 ORDER BY ship_id',
+        'FROM fact_performance_daily) p '
+        'LEFT JOIN (SELECT ship_id, speed_loss_pct, noon_utc AS speed_loss_day, '
+        'row_number() OVER (PARTITION BY ship_id ORDER BY noon_utc DESC) AS rn '
+        'FROM fact_performance_daily WHERE valid_flag AND speed_loss_pct IS NOT NULL) s '
+        'ON s.ship_id = p.ship_id AND s.rn = 1 '
+        'WHERE p.rn = 1 ORDER BY p.ship_id',
         [],
     )
 

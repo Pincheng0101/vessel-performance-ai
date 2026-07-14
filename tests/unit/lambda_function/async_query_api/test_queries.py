@@ -203,10 +203,23 @@ class TestDerivedQueries:
         sql, binds = render('fleet_positions', {})
         assert 'FROM fact_performance_daily' in sql
         # noon_utc (not the synthesized calendar) is the real axis, so the window orders on it.
-        assert 'row_number() OVER (PARTITION BY ship_id ORDER BY noon_utc DESC)' in sql
-        assert 'WHERE rn = 1' in sql
-        assert sql.rstrip().endswith('ORDER BY ship_id')
+        # Two windows: one for the position, one for the speed loss — they land on different days.
+        assert sql.count('row_number() OVER (PARTITION BY ship_id ORDER BY noon_utc DESC)') == 2
+        assert 'WHERE p.rn = 1' in sql
+        assert sql.rstrip().endswith('ORDER BY p.ship_id')
         assert binds == []
+
+    def test_fleet_positions_gates_the_speed_loss_on_valid_flag(self):
+        # The map colours its dots by this number. Taking it from the latest row REGARDLESS of
+        # valid_flag painted 10 of 15 ships wrong — S4 green when it is 11.24 % critical, S6 red
+        # when it is 2.43 % good, and the two worst-fouled hulls (S11, S12) grey. The speed loss
+        # must come from the latest row that actually passed the ISO gate.
+        sql, _binds = render('fleet_positions', {})
+        assert 'WHERE valid_flag AND speed_loss_pct IS NOT NULL' in sql
+        # LEFT JOIN: a ship with no valid day keeps its dot (grey), it does not fall off the map.
+        assert 'LEFT JOIN' in sql
+        # And the reading's age is carried out, so the UI can say how old it is.
+        assert 'noon_utc AS speed_loss_day' in sql
 
     def test_fleet_positions_takes_no_params(self):
         with pytest.raises(BadRequestError):
