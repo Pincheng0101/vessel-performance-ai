@@ -87,7 +87,7 @@ class TestCleanWindows:
 
 
 class TestCurvesByShip:
-    def test_keys_on_the_ship_and_carries_the_fitted_parameters(self, vessel):
+    def test_keys_on_the_ship_and_carries_the_fitted_parameters(self):
         rows = [
             {
                 'ref_curve_id': 'RC-S1',
@@ -99,12 +99,99 @@ class TestCurvesByShip:
             }
             for speed in (10.0, 20.0)  # 12 speed points per ship collapse to one Curve
         ]
-        curves = reference_curve.curves_by_ship(rows, [vessel])
+        curves = reference_curve.curves_by_ship(rows)
         assert set(curves) == {'S1'}
         assert curves['S1'] == CURVE
 
 
+def _power_law_points(speeds, a=4.2867, n=3.0, displacement=166_500.0, bias=1.0):
+    """Points lying exactly on ``P = a . V^n`` at the reference displacement."""
+    return [(v, bias * a * v**n, displacement) for v in speeds]
+
+
+def _fit(points, displacement_ref_t=166_500.0) -> tuple[float, bool]:
+    fit = reference_curve._fit_exponent(points, displacement_ref_t)
+    assert fit is not None, 'the pool must be fittable — the test built it that way'
+    return fit
+
+
+class TestFitExponent:
+    """The exponent is a slope over PER-SPEED-BIN MEDIANS, not over the raw points.
+
+    The clean-window sample is badly unbalanced in speed (W2: 54 points at 15 kn, 5 at 13 kn),
+    so a plain OLS slope is a slope through whichever speed the ships happened to sit at.
+    """
+
+    def test_recovers_the_exponent_of_a_clean_power_law(self):
+        speeds = [v + offset for v in range(12, 20) for offset in (0.1, 0.3, 0.5, 0.7)]
+        exponent, clamped = _fit(_power_law_points(speeds))
+        assert exponent == pytest.approx(3.0, abs=1e-9)
+        assert clamped is False
+
+    def test_piling_points_into_one_speed_bin_does_not_move_the_exponent(self):
+        """Density invariance: 47 more days at the same speed is not new evidence about the
+        slope. Under the old all-points OLS the same pile moved it."""
+        speeds = [v + offset for v in range(12, 19) for offset in (0.1, 0.3, 0.5, 0.7)]
+        points = _power_law_points(speeds)
+        # One speed bin reads 20 % high — a real possibility on a fleet that sits at one speed.
+        clump = _power_law_points([19.1, 19.4, 19.7], bias=1.2)
+
+        sparse, _ = _fit(points + clump)
+        dense, _ = _fit(points + clump * 16)
+        assert dense == pytest.approx(sparse, abs=1e-9), 'the binned fit weighs the bin, not the days in it'
+
+        xs, ys = reference_curve._log_space(points + clump * 16, 166_500.0)
+        assert reference_curve._slope(xs, ys) != pytest.approx(dense, abs=0.05), 'OLS is dragged by the clump'
+
+    def test_a_pool_too_sparse_to_bin_falls_back_to_all_points(self):
+        """Two speeds cannot fill MIN_FIT_BINS bins, but 30+ points still fit a line."""
+        points = _power_law_points([12.0] * 15 + [18.0] * 15)
+        exponent, _ = _fit(points)
+        xs, ys = reference_curve._log_space(points, 166_500.0)
+        assert exponent == pytest.approx(reference_curve._slope(xs, ys))
+
+    def test_a_railed_slope_is_reported_as_clamped(self):
+        """CURVE_N_BOUNDS is an absurdity guard. If it ever binds, the row must say so —
+        nothing downstream may read a rail value as a fit."""
+        speeds = [v + offset for v in range(12, 20) for offset in (0.1, 0.3, 0.5, 0.7)]
+        exponent, clamped = _fit(_power_law_points(speeds, n=8.0))
+        assert exponent == reference_curve.CURVE_N_BOUNDS[1]
+        assert clamped is True
+
+
 class TestBuild:
+    def test_a_thin_ship_falls_back_to_a_pool_that_can_actually_fit_a_scale(self, noon_row, vessel):
+        """S22 is the only W2-P1 ship, so its variant pool *is* its own single point — non-empty,
+        and just as unfittable. Cascading on emptiness handed that one point back and published
+        the fit it trivially achieves against itself (fit_rmse_pct = 0.0 %)."""
+        sister = vessel | {'ship_id': 'S22', 'propeller_variant': 'P2'}
+
+        rows = []
+        for i in range(40):  # S1: enough of its own points to fit the pooled exponent
+            speed = 12.0 + (i % 8)
+            wobble = 1.0 + 0.05 * ((i % 3) - 1)
+            rows.append(
+                noon_row(
+                    noon_utc=i,
+                    speed_through_water=speed,
+                    horse_power=wobble * 4.2867 * speed**3.0,
+                )
+            )
+        # S22: one clean-window day, and a 30 %-high power reading on it.
+        rows.append(noon_row(ship_id='S22', noon_utc=5, speed_through_water=18.0, horse_power=1.3 * 4.2867 * 18.0**3.0))
+
+        curves = reference_curve.build(rows, [], [vessel, sister], power_key='horse_power')
+        s1 = [r for r in curves if r['ship_id'] == 'S1']
+        s22 = [r for r in curves if r['ship_id'] == 'S22']
+
+        assert s22[0]['n_fit_points'] == 1, "the ship's own evidence is still reported as one day"
+        assert s22[0]['fit_rmse_pct'] > 0.0, 'a curve fitted against a single point cannot be a perfect fit'
+        # Both ships sit on the same speed grid, so the curves compare point for point. S22's
+        # one day reads 30 % high; a curve that had been handed it back would sit 30 % above
+        # the class. (curve_a alone is not comparable — the two ships' exponents differ.)
+        for mine, sister_row in zip(s22, s1):
+            assert mine['shaft_power_kw'] == pytest.approx(sister_row['shaft_power_kw'], rel=0.1)
+
     def test_a_pool_too_thin_to_fit_an_exponent_raises(self, noon_row, vessel):
         """Every ISO 19030 number hangs off this fit, so it fails loudly rather than
         quietly fitting a slope through noise."""

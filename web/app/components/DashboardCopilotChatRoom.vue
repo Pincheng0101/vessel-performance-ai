@@ -218,14 +218,7 @@ const streamInvoke = async ({ prompt, currentMessage, signal }) => {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    responseStallTimer.refresh();
-    buffer += decoder.decode(value, { stream: true });
-    // SSE frames are separated by a blank line; each `data:` line is one chunk.
-    const frames = buffer.split('\n\n');
-    buffer = frames.pop();
+  const applyFrames = (frames) => {
     for (const frame of frames) {
       for (const line of frame.split('\n')) {
         if (!line.startsWith('data: ')) continue;
@@ -238,7 +231,21 @@ const streamInvoke = async ({ prompt, currentMessage, signal }) => {
         applyStreamChunk(currentMessage, chunk);
       }
     }
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    responseStallTimer.refresh();
+    buffer += decoder.decode(value, { stream: true });
+    // SSE frames are separated by a blank line; each `data:` line is one chunk.
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop();
+    applyFrames(frames);
   }
+  // The stream can end without the trailing blank line that would have closed the last frame,
+  // which would strand it in the buffer. Flush the decoder and apply whatever is left.
+  buffer += decoder.decode();
+  if (buffer.trim()) applyFrames([buffer]);
 };
 
 const sendMessage = async ({ contentBlocks, pendingMessageId }) => {

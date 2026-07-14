@@ -71,7 +71,7 @@ def build_all(data_dir: str | Path, seed: int = 42) -> tuple[dict[str, list[dict
     corrected = corrections.apply(cleaned, vessels, track, convention)
 
     curve_rows = reference_curve.build(corrected, events, vessel_rows)
-    curves = reference_curve.curves_by_ship(curve_rows, vessel_rows)
+    curves = reference_curve.curves_by_ship(curve_rows)
 
     fuel_price_rows = fuel_price.build(noon_rows, seed=seed)
     prices = fuel_module.price_lookup(fuel_price_rows)

@@ -10,7 +10,7 @@ from typing import Annotated, Literal, Union
 
 import config
 import queries
-from aws_lambda_powertools.event_handler.exceptions import NotFoundError, ServiceError
+from aws_lambda_powertools.event_handler.exceptions import BadRequestError, NotFoundError, ServiceError
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ class StatusResponse(BaseModel):
     query_id: str
     status: str = Field(description='One of PENDING / RUNNING / SUCCEEDED / FAILED.')
     result_location: str | None = Field(default=None, description='S3 URI of the result set once SUCCEEDED.')
+    error: str | None = Field(default=None, description="Athena's reason for the failure, when FAILED.")
 
 
 class ResultsResponse(BaseModel):
@@ -82,42 +83,43 @@ def submit(req: SubmitBody) -> dict:
 
 
 def status(query_id: str) -> dict:
-    """GET /queries/{id} — map Athena state to API status; add result_location when done."""
+    """GET /queries/{id} — map Athena state to API status; add result_location / error."""
     item = config.get_registry(query_id)
     if item is None:
         raise NotFoundError(f'Unknown query_id: {query_id}')
 
-    state, location = config.get_state(item['exec_id'])
+    state, location, reason = config.get_state(item['exec_id'])
     mapped = _STATE_MAP.get(state, 'PENDING')
-    _best_effort_set_status(query_id, mapped)
 
     result = {'query_id': query_id, 'status': mapped}
     if mapped == 'SUCCEEDED' and location:
         result['result_location'] = location
+    if mapped == 'FAILED':
+        result['error'] = reason or f'Query {state.lower()} without a reason'
     return result
 
 
 def results(query_id: str, page_token: str | None = None) -> dict:
-    """GET /queries/{id}/results — page results inline; 409 until the query has SUCCEEDED."""
+    """GET /queries/{id}/results — page results inline.
+
+    Still running → 409, retry. Terminally FAILED/CANCELLED → 400 with Athena's reason:
+    it will never succeed, so telling the caller to keep polling would be an infinite loop.
+    """
     item = config.get_registry(query_id)
     if item is None:
         raise NotFoundError(f'Unknown query_id: {query_id}')
 
-    state, _ = config.get_state(item['exec_id'])
-    if _STATE_MAP.get(state) != 'SUCCEEDED':
+    state, _, reason = config.get_state(item['exec_id'])
+    mapped = _STATE_MAP.get(state, 'PENDING')
+    if mapped == 'FAILED':
+        raise BadRequestError(
+            f'Query {query_id} {state.lower()} and has no results: {reason or "no reason reported by Athena"}'
+        )
+    if mapped != 'SUCCEEDED':
         raise ServiceError(
             409,
-            f'Query {query_id} is not ready (status={_STATE_MAP.get(state, state)}); '
-            f'poll GET /queries/{query_id} until SUCCEEDED',
+            f'Query {query_id} is not ready (status={mapped}); poll GET /queries/{query_id} until SUCCEEDED',
         )
 
     page = config.fetch_page(item['exec_id'], page_token)
     return {'query_id': query_id, **page}
-
-
-def _best_effort_set_status(query_id: str, status: str) -> None:
-    """The registry status is just a cache — never fail the request if the write fails."""
-    try:
-        config.set_status(query_id, status)
-    except Exception:  # noqa: BLE001
-        logger.warning('failed to update registry status for %s', query_id, exc_info=True)

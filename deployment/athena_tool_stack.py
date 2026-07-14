@@ -209,7 +209,8 @@ class AthenaToolStack(Stack):
                     self._glue_table(database, name, columns, location).add_dependency(glue_db)
 
         # 7. Async query API (M5) — DynamoDB registry + Lambda + API Gateway.
-        # DynamoDB query registry: query_id → exec_id/type/status, TTL auto-cleans.
+        # DynamoDB query registry: query_id → exec_id/type, TTL auto-cleans. Live status
+        # comes from Athena on every poll, so nothing is cached here.
         registry_table = aws_dynamodb.Table(
             self,
             'QueryRegistryTable',

@@ -37,15 +37,15 @@ const sections = computed(() => [
 const builtSections = ['executive', 'fleet', 'map', 'alerts', 'planner', 'vessel', 'optimizer'];
 const placeholderSections = computed(() => sections.value.filter(section => !builtSections.includes(section.value)));
 
-// Dataset coverage (start–end relative day), shown beside the tabs so trends have a stated
-// period. noon_utc is a per-ship relative day (0 = that ship's earliest record), not a
-// calendar date, so this reads as a day range rather than a month range.
+// Dataset coverage, shown beside the tabs so trends have a stated period. The rows carry both
+// axes — noon_utc (a shared day index, day 0 = 2021-07-01) and report_date — and the dates are
+// what a reader can actually place, so print those.
 const server = useServer();
 const { data: overview } = await server.datalake.aggFleetDaily({}, { lazy: false });
 const dataPeriod = computed(() => {
   const rows = overview.value;
   if (!rows?.length) return '';
-  return `第 ${rows[0].noon_utc} – ${rows.at(-1).noon_utc} 天`;
+  return `${rows[0].report_date} – ${rows.at(-1).report_date}`;
 });
 </script>
 

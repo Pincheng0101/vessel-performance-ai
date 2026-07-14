@@ -15,6 +15,7 @@ Environment (all optional):
 import json
 import os
 import pathlib
+import re
 import time
 
 import boto3
@@ -28,9 +29,15 @@ CATALOG = os.environ.get('ATHENA_CATALOG', 'AwsDataCatalog')
 OUTPUT_LOCATION = os.environ.get('ATHENA_OUTPUT')  # None → workgroup default
 MODEL_ID = os.environ.get('BEDROCK_MODEL_ID', 'global.anthropic.claude-sonnet-4-6')
 
-MAX_ROWS = 100
+# 500 keeps the 102-row PREDICT deliverable (and any comparable result set) in a single
+# get_query_results page — Athena caps MaxResults at 1000 and NextToken is not followed.
+MAX_ROWS = 500
 POLL_INTERVAL_S = 1.0
 TIMEOUT_S = 120
+
+# A leading `--` line comment or `/* … */` block: every worked query in skill.md opens with one.
+LEADING_COMMENTS_RE = re.compile(r'^\s*(--[^\n]*\n|/\*.*?\*/\s*)+', re.S)
+READ_ONLY_RE = re.compile(r'^\(*\s*(select|with)\b', re.I | re.S)
 
 SKILL_MD = (pathlib.Path(__file__).parent / 'skill.md').read_text(encoding='utf-8')
 
@@ -98,7 +105,8 @@ Cross-cutting facts:
 - **SELECT only.** Never write DDL/DML (no CREATE/INSERT/DROP/UPDATE). One statement per call.
 - Query only tables and columns that exist in the skill. If the question can't be answered from the
   lake, say so plainly — do not invent data.
-- Keep result sets small: aggregate in SQL and use `LIMIT` (≤ 100 rows unless the user asks for more).
+- Keep result sets small: aggregate in SQL and use `LIMIT`. The tool returns at most {MAX_ROWS} rows
+  and does not paginate, so a query that could exceed that must aggregate rather than list.
 - If a question mixes several topics, answer them with separate queries rather than one giant join.
 """
 
@@ -122,8 +130,9 @@ def athena_query(query: str) -> str:
         query: One SELECT (or WITH … SELECT) statement.
     """
     stripped = query.strip().rstrip(';').strip()
-    head = stripped.split(None, 1)[0].upper() if stripped else ''
-    if head not in ('SELECT', 'WITH'):
+    # Check the first *statement* keyword, not the first token: a query may open with comments or
+    # a parenthesis. Athena accepts the comments, so only the check skips them, not the query.
+    if not READ_ONLY_RE.match(LEADING_COMMENTS_RE.sub('', stripped)):
         return json.dumps({'error': 'Read-only tool: only a single SELECT (or WITH … SELECT) statement is allowed.'})
 
     athena = boto3.client('athena')
@@ -135,25 +144,29 @@ def athena_query(query: str) -> str:
     if OUTPUT_LOCATION:
         params['ResultConfiguration'] = {'OutputLocation': OUTPUT_LOCATION}
 
+    # Every Athena call is guarded: a throttle or transient failure anywhere in the submit → poll →
+    # fetch sequence comes back as an error message the model can read and retry, never a raised
+    # exception that kills the turn.
     try:
         qid = athena.start_query_execution(**params)['QueryExecutionId']
+
+        deadline = time.time() + TIMEOUT_S
+        while True:
+            state = athena.get_query_execution(QueryExecutionId=qid)['QueryExecution']['Status']
+            if state['State'] in ('SUCCEEDED', 'FAILED', 'CANCELLED'):
+                break
+            if time.time() > deadline:
+                athena.stop_query_execution(QueryExecutionId=qid)
+                return json.dumps({'error': f'Query timed out after {TIMEOUT_S}s', 'query_execution_id': qid})
+            time.sleep(POLL_INTERVAL_S)
+
+        if state['State'] != 'SUCCEEDED':
+            return json.dumps({'error': state.get('StateChangeReason', state['State']), 'query_execution_id': qid})
+
+        result = athena.get_query_results(QueryExecutionId=qid, MaxResults=MAX_ROWS + 1)
     except Exception as e:  # noqa: BLE001 — surface the Athena error to the model
         return json.dumps({'error': str(e)})
 
-    deadline = time.time() + TIMEOUT_S
-    while True:
-        state = athena.get_query_execution(QueryExecutionId=qid)['QueryExecution']['Status']
-        if state['State'] in ('SUCCEEDED', 'FAILED', 'CANCELLED'):
-            break
-        if time.time() > deadline:
-            athena.stop_query_execution(QueryExecutionId=qid)
-            return json.dumps({'error': f'Query timed out after {TIMEOUT_S}s', 'query_execution_id': qid})
-        time.sleep(POLL_INTERVAL_S)
-
-    if state['State'] != 'SUCCEEDED':
-        return json.dumps({'error': state.get('StateChangeReason', state['State']), 'query_execution_id': qid})
-
-    result = athena.get_query_results(QueryExecutionId=qid, MaxResults=MAX_ROWS + 1)
     rows = result['ResultSet']['Rows']
     if not rows:
         return json.dumps({'columns': [], 'rows': [], 'row_count': 0})
@@ -167,6 +180,10 @@ def athena_query(query: str) -> str:
 
 app = BedrockAgentCoreApp()
 
+# One process-global Agent, so `agent.messages` is process-global conversation state — it is NOT
+# keyed by the session-id header. This is only correct because AgentCore Runtime gives each session
+# its own microVM. If sessions ever share a process, turns would bleed across users: key the history
+# by the session id (or build a per-session Agent) before that happens.
 agent = Agent(
     model=BedrockModel(model_id=MODEL_ID, max_tokens=8192),
     system_prompt=SYSTEM_PROMPT,

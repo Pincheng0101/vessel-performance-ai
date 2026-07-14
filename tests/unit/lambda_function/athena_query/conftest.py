@@ -44,12 +44,13 @@ SSM_ATHENA_CONFIG = {
 SSM_ATHENA_CONFIG_JSON = json.dumps(SSM_ATHENA_CONFIG)
 
 
-# boto3 athena stub responses.
-def get_query_execution_response(state='SUCCEEDED', reason=None):
+# boto3 athena stub responses. StatementType is DML for SELECT, DDL/UTILITY for SHOW/DESCRIBE —
+# it decides whether Athena prepended a header row to the first result page.
+def get_query_execution_response(state='SUCCEEDED', reason=None, statement_type='DML'):
     status = {'State': state}
     if reason is not None:
         status['StateChangeReason'] = reason
-    return {'QueryExecution': {'Status': status}}
+    return {'QueryExecution': {'Status': status, 'StatementType': statement_type}}
 
 
 # get_query_results ResultSet: header row + two data rows, two columns (id, name).

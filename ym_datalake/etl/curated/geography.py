@@ -38,9 +38,6 @@ ROTATION_LOOP = {
     'W2': ['CNSHA', 'KRPUS', 'JPTYO', 'USLAX', 'JPTYO', 'KRPUS'],
 }
 
-# Service speed as a fraction of design — the usual derate a schedule is planned at.
-SERVICE_SPEED_FRACTION = 0.85
-
 # A guard, not a limit: the longest real voyage is 84,150 nm, well inside this.
 _MAX_LEGS = 60
 
@@ -80,7 +77,11 @@ def build(cleaned_rows: list[dict], vessels: dict[str, dict], seed: int = 42) ->
     Returns ``(track, voyage_geo)``:
 
     * ``track[(ship_id, noon_utc)]`` -> latitude / longitude / heading_deg / port_from / port_to
-    * ``voyage_geo[(ship_id, voyage)]`` -> from_port / to_port / path_nm / planned_days
+    * ``voyage_geo[(ship_id, voyage)]`` -> from_port / to_port
+
+    The rotation's own path length stays here, in the map. It is a synthesized number and
+    ``fact_voyage`` used to build ``planned_days`` out of it — a schedule fact derived from
+    decorative geography. The schedule is measured from the real distances now (``voyages``).
     """
     by_voyage: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for row in cleaned_rows:
@@ -108,16 +109,9 @@ def build(cleaned_rows: list[dict], vessels: dict[str, dict], seed: int = 42) ->
 
             chain, index = _rotation(loop, index, target_nm)
             path = _polyline(chain)
-            path_nm = ports.path_length_nm(path)
             from_port, to_port = chain[0], chain[-1]
 
-            service_kn = SERVICE_SPEED_FRACTION * vessel['design_speed_kn']
-            voyage_geo[key] = {
-                'from_port': from_port,
-                'to_port': to_port,
-                'path_nm': path_nm,
-                'planned_days': max(1, round(path_nm / (service_kn * 24.0))),
-            }
+            voyage_geo[key] = {'from_port': from_port, 'to_port': to_port}
 
             sailed = 0.0
             for row in rows:

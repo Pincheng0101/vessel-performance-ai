@@ -76,8 +76,11 @@ Each one of these is a *wrong answer*, not a style nit.
 
 3. **`masked_flag`** marks the hackathon-masked rows (S21–S23 only): their fuel-consumption value
    was blanked. **Exclude them from consumption statistics** (`WHERE NOT masked_flag`).
-   `predict_fuel_type` names the target column on the rows to predict — **102 PREDICT cells:
-   91 `HSHFO` + 11 `VLSFO`**.
+   `predict_fuel_type` holds **the target column's name, UPPERCASE — not a fuel code**. The only two
+   values in the data are `ME_FULLSPEED_CONSUMP_HSHFO` (91 rows) and `ME_FULLSPEED_CONSUMP_VLSFO`
+   (11 rows) — **102 PREDICT cells**. Filter on the full name; `= 'HSHFO'` matches **nothing**. The
+   column it names is lowercase (`me_fullspeed_consump_hshfo`), so lower-case the value before you
+   use it as an identifier.
 
 4. **Raw `noon_report` is landed verbatim** — including **344 duplicate `(ship_id, noon_utc)`
    rows** and raw speed outliers (up to 97.8 kn). For analytics prefer curated
@@ -99,9 +102,11 @@ Each one of these is a *wrong answer*, not a style nit.
    `fact_performance_daily` (resets: `UWC`/`DD` · `PP`/`DD` · `DD`). Use them. Do **not**
    hand-roll a `max(event_day) <= noon_utc` join.
 
-8. **`fact_anomaly.cause = 'weather'` is unreachable.** The rule needs `wind_scale ≥ 5`, but
-   anomalies are only scored on `valid_flag` rows, which the ISO gate caps at Beaufort ≤ 4. It is
-   in the enum; it never appears in the data. Don't offer it as a finding.
+8. **`cause = 'weather'` is unreachable — on `fact_anomaly` *and* `fact_alert`.** The rule needs
+   `wind_scale ≥ 5`, but anomalies are only scored on `valid_flag` rows, which the ISO gate caps at
+   Beaufort ≤ 4. Alerts are raised from anomalies (plus the biofouling model), so a cause that never
+   fires on an anomaly can never reach an alert either. It is in both enums; it appears in neither
+   table. Don't offer it as a finding.
 
 ---
 
@@ -233,7 +238,7 @@ The clean-hull curve `P = a·V^n·(Δ/Δ_ref)^⅔`, **fitted** from clean-window
 Every ISO 19030 number in the lake keys off `curve_a` / `curve_n`. Partially pooled: `curve_n`
 is shared across sister ships, `curve_a` is per ship.
 
-**Grain:** ship × speed point (15 × 12) · **Rows:** 180 · **Columns:** 13
+**Grain:** ship × speed point (15 × 12) · **Rows:** 180 · **Columns:** 14
 
 | column | type | note |
 |---|---|---|
@@ -245,7 +250,8 @@ is shared across sister ships, `curve_a` is per ship.
 | `shaft_power_kw` | double | fitted clean-hull power at `speed_kn`, at `displacement_ref_t` |
 | `displacement_ref_t` | double | the displacement the curve is fitted at |
 | `curve_a` | double | fitted — **per ship** scale |
-| `curve_n` | double | fitted — **pooled** speed exponent |
+| `curve_n` | double | fitted — **pooled** speed exponent, a slope over per-speed-bin medians (W1 2.76, W2 2.57-2.59) |
+| `curve_n_clamped` | boolean | true ⇒ `curve_n` hit the bounds and is a rail, not a fit. False on every row today |
 | `fit_pool` | string | the pool the exponent came from: `<class>-<variant>`, or `<class>` when the variant pool was too thin |
 | `n_fit_points` | int | this ship's own clean-window valid points |
 | `n_pool_points` | int | the points behind the pooled exponent |
@@ -486,7 +492,7 @@ answers "did the cleaning work?" directly — no before/after window join needed
 Pass-through of raw `reference_curve` (identical columns). Check `n_fit_points` before you trust
 a ship's speed loss.
 
-**Grain:** ship × speed point · **Rows:** 180 · **Columns:** 13
+**Grain:** ship × speed point · **Rows:** 180 · **Columns:** 14
 
 | column | type | note |
 |---|---|---|
@@ -498,7 +504,8 @@ a ship's speed loss.
 | `shaft_power_kw` | double | fitted clean-hull power at `speed_kn` |
 | `displacement_ref_t` | double | the displacement the curve is fitted at |
 | `curve_a` | double | fitted — per ship |
-| `curve_n` | double | fitted — pooled |
+| `curve_n` | double | fitted — pooled, over per-speed-bin medians |
+| `curve_n_clamped` | boolean | true ⇒ a rail, not a fit. False everywhere today |
 | `fit_pool` | string | `<class>-<variant>`, or `<class>` when the variant pool was too thin |
 | `n_fit_points` | int | **below 8 ⇒ the ship borrowed its pool's scale** (S6, S8, S21, S22) |
 | `n_pool_points` | int | — |
@@ -570,8 +577,8 @@ balance is exact by construction.
 | `co2_mt` | double | sum of the daily `co2_mt` |
 | `avg_speed_loss_pct` | double | mean of the **valid** daily `speed_loss_pct` |
 | `usd_per_nm` | double | **(est.)** — |
-| `on_time_flag` | boolean | **(est.)** actual days ≤ planned days |
-| `planned_days` | int | **(est.)** rotation path / (0.85 × design speed × 24) |
+| `on_time_flag` | boolean | **(est.)** actual days ≤ planned days — i.e. did this voyage keep pace with its class |
+| `planned_days` | int | **(est.)** real `distance_nm` / the class's **median realised** voyage speed (W1 9.79 kn, W2 10.33 kn) |
 
 ### `fact_anomaly`
 
@@ -608,7 +615,7 @@ biofouling trend. Bilingual messages — `message_zh` is ready-made Traditional 
 | `last_seen_day` | int | relative day |
 | `opened_date` | string | **(est.)** calendar |
 | `last_seen_date` | string | **(est.)** calendar |
-| `cause` | string | `hull_biofouling` / `propeller` / `engine_degradation` / `weather` / `sensor` |
+| `cause` | string | `hull_biofouling` / `propeller` / `engine_degradation` / `sensor` (never `weather` — trap 8) |
 | `severity` | string | low / medium / high |
 | `driver_metric` | string | `speed_loss` / `slip` / `sfoc` / `excess_foc` |
 | `peak_value` | double | — |
@@ -765,19 +772,20 @@ LIMIT  100
 ```
 
 ```sql
--- The 102 PREDICT cells: the hackathon's actual deliverable.
+-- The 102 PREDICT cells: the hackathon's actual deliverable. predict_fuel_type is the
+-- UPPERCASE name of the target column, not a fuel code (trap 3).
 SELECT ship_id, noon_utc, predict_fuel_type
 FROM   noon_report
 WHERE  predict_fuel_type IS NOT NULL
-ORDER  BY ship_id, noon_utc       -- 102 rows: 91 HSHFO + 11 VLSFO
-LIMIT  100
+ORDER  BY ship_id, noon_utc       -- 102 rows: 91 ME_FULLSPEED_CONSUMP_HSHFO + 11 ..._VLSFO
+LIMIT  200                        -- must exceed 102: LIMIT 100 silently drops the tail
 ```
 
 ```sql
 -- Speed-power scatter against the fitted clean-hull curve, for one ship.
 SELECT d.speed_through_water, d.power_corrected_kw, c.speed_kn, c.shaft_power_kw
 FROM   fact_performance_daily d
-FULL OUTER JOIN dim_reference_curve c ON c.ship_id = d.ship_id
+JOIN   dim_reference_curve c ON c.ship_id = d.ship_id
 WHERE  d.ship_id = 'S4' AND d.valid_flag
 LIMIT  100
 ```

@@ -159,7 +159,8 @@ REFERENCE_CURVE_COLUMNS = [
     ('shaft_power_kw', 'double'),  # measured (fitted): clean-hull power at speed_kn, disp_ref
     ('displacement_ref_t', 'double'),  # class: the displacement the curve is fitted at
     ('curve_a', 'double'),  # measured (fitted): PER SHIP scale
-    ('curve_n', 'double'),  # measured (fitted): POOLED speed exponent
+    ('curve_n', 'double'),  # measured (fitted): POOLED speed exponent, on per-speed-bin medians
+    ('curve_n_clamped', 'boolean'),  # true if CURVE_N_BOUNDS bound: curve_n is a rail, not a fit
     ('fit_pool', 'string'),  # the pool the exponent came from: '<class>-<variant>', or
     # '<class>' when the variant pool was too thin (S22 is the only W2-P1 ship, and a masked
     # prediction ship at that, so its pool widens to the W2 hull class)
@@ -388,7 +389,8 @@ FACT_VOYAGE_COLUMNS = [
     ('avg_speed_loss_pct', 'double'),  # mean of the valid daily speed_loss_pct
     ('usd_per_nm', 'double'),  # estimated (USD)
     ('on_time_flag', 'boolean'),  # estimated: actual days <= planned days
-    ('planned_days', 'int'),  # estimated: rotation path / (0.85 * design speed * 24)
+    ('planned_days', 'int'),  # estimated: real distance_nm / the class's MEDIAN REALISED speed
+    # (W1 9.79 kn, W2 10.33 kn) — the only schedule this dataset carries. Not a design figure.
 ]
 
 # 16. fact_anomaly — one row per flagged (ship, day) at the driver metric.

@@ -47,13 +47,15 @@ REGISTRY_ITEM = {
     'query_id': 'q_test',
     'exec_id': 'exec-123',
     'query_type': 'fact_recommendation',
-    'status': 'PENDING',
     'ttl': 9999999999,
 }
 
 
-def get_query_execution_response(state='SUCCEEDED', location='s3://bucket/results/exec-123.csv'):
-    query_execution = {'Status': {'State': state}}
+def get_query_execution_response(state='SUCCEEDED', location='s3://bucket/results/exec-123.csv', reason=None):
+    status = {'State': state}
+    if reason is not None:
+        status['StateChangeReason'] = reason
+    query_execution = {'Status': status}
     if location is not None:
         query_execution['ResultConfiguration'] = {'OutputLocation': location}
     return {'QueryExecution': query_execution}

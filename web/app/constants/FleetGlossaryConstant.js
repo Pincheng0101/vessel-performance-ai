@@ -70,7 +70,7 @@ const Term = Object.freeze({
 
   // Executive
   ciiRisk: 'D 或 E 級船舶占全隊的比例（%）；越高代表越多船碳效不佳。',
-  savingsRealized: '超額油費從歷史高點回落的金額，作為已實現節省的估計值（USD）。',
+  savingsByShip: '各船的清潔／維修建議淨節省（USD），由高到低排序；僅列出目前有建議的船舶。',
 
   // Fleet overview
   fleetTable: '每艘船的當前狀態：速度損失與趨勢、距上次乾塢／水下清潔天數、近 30 日異常數，以及下一項維修建議。',
@@ -96,7 +96,7 @@ const Title = Object.freeze({
   ciiDistribution: 'CII rating distribution',
   ciiTrend: 'CII rating trend',
   fleetSpeedLossTrend: 'Fleet speed-loss trend',
-  savingsCaptured: 'Savings captured',
+  savingsPotential: 'Savings potential',
   fleetTable: 'Fleet vessels',
   speedLossDistribution: 'Speed-loss distribution',
 

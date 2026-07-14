@@ -120,6 +120,9 @@ def _day_range(column: str, start: int | None, end: int | None) -> tuple[list[st
     """Optional relative-day range clauses. Binds render as string literals, so the
     integer column comparison needs an explicit CAST on each placeholder."""
     if start is not None and end is not None:
+        # An inverted BETWEEN matches nothing; a 400 beats a silently empty 200.
+        if start > end:
+            raise BadRequestError(f'start_day ({start}) must be <= end_day ({end})')
         return [f'{column} BETWEEN CAST(? AS integer) AND CAST(? AS integer)'], [str(start), str(end)]
     if start is not None:
         return [f'{column} >= CAST(? AS integer)'], [str(start)]

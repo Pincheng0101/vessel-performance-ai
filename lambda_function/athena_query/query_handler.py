@@ -3,7 +3,7 @@
 import logging
 
 from config import get_athena_config, run_query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,9 @@ class RunQueryInput(BaseModel):
     model_config = ConfigDict(extra='ignore')
 
     sql: str
-    max_rows: int = 1000
+    # Bounded: 0 would return neither rows nor columns, and an unbounded value materializes
+    # the whole result set into the 6MB sync-invoke response after the query has already run.
+    max_rows: int = Field(default=1000, ge=1, le=10_000)
     # Optional per-request overrides; fall back to SSM config when omitted.
     database: str | None = None
     catalog: str | None = None

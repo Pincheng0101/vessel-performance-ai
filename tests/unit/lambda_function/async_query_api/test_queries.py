@@ -101,6 +101,17 @@ class TestTableQueries:
         assert 'WHERE event_day <= CAST(? AS integer)' in sql
         assert binds == ['500']
 
+    def test_inverted_day_range_rejected(self):
+        # An inverted BETWEEN matches nothing; a 400 beats a confusing empty 200.
+        with pytest.raises(BadRequestError):
+            render('noon_report', {'start_day': 200, 'end_day': 100})
+
+    def test_single_day_range_allowed(self):
+        # start == end is a legitimate one-day window, not an inversion.
+        sql, binds = render('noon_report', {'start_day': 100, 'end_day': 100})
+        assert 'BETWEEN CAST(? AS integer) AND CAST(? AS integer)' in sql
+        assert binds == ['100', '100']
+
     @pytest.mark.parametrize(
         'query_type,day_col',
         [

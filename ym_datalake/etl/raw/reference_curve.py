@@ -35,11 +35,20 @@ day-147 UWC under a fully pooled fit). So:
 
 * ``curve_n`` — pooled across (hull_class, propeller_variant)
 * ``curve_a`` — fitted **per ship**, on that ship's own clean-window points
+
+**The exponent is fitted on per-speed-bin medians, not on the raw points.** The clean-window
+sample is badly unbalanced in speed — W2 has 54 points at 15 kn and 5 at 13 kn — so a plain
+OLS slope is a slope through the mid-range clump, and it is not stable: trimming the speed
+floor swings raw OLS on W2 from 2.49 to 1.93. Binning by speed, keeping bins with enough
+points and regressing the bin medians gives every part of the speed range one vote, which is
+what the exponent is *about*, and the result stops moving under that trim (W1 2.61-2.76,
+W2 2.52-2.63 across bin widths). The medians also blunt the y-outliers the mean would chase.
 """
 
 from __future__ import annotations
 
 import math
+import statistics
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -56,9 +65,15 @@ MIN_FIT_POINTS = 30
 # Points needed to fit a per-ship SCALE (an intercept: far cheaper). Below this a ship
 # borrows its pool's scale and its speed loss carries the pool's offset.
 MIN_SHIP_FIT_POINTS = 8
-# A displacement-corrected speed-power exponent lives near 3-4 for a container hull.
-# Clamping keeps a thin pool (W2-P1 is a single ship) from fitting an absurd slope.
-CURVE_N_BOUNDS = (2.5, 4.5)
+# The binned exponent fit: 1 kn speed bins, a bin counts once it holds MIN_BIN_POINTS, and
+# a slope needs MIN_FIT_BINS of them to be a slope rather than a line through two clumps.
+SPEED_BIN_KN = 1.0
+MIN_BIN_POINTS = 3
+MIN_FIT_BINS = 3
+# An ABSURDITY GUARD, not a prior: what these hulls measure is ~2.5-2.8 (W1 2.76, W2 2.57 on
+# the binned fit), so the bounds sit clear of the data and only catch a pool that has gone
+# pathological. If one ever binds, `curve_n_clamped` says so — a rail value is not a fit.
+CURVE_N_BOUNDS = (2.0, 4.5)
 CURVE_POINTS = 12
 SPEED_RANGE_FRACTION = (0.5, 1.05)
 
@@ -117,17 +132,54 @@ def _log_space(points: list[tuple[float, float, float]], displacement_ref_t: flo
     return xs, ys
 
 
-def _fit_exponent(points: list[tuple[float, float, float]], displacement_ref_t: float) -> float | None:
-    """The POOLED speed exponent n: the least-squares slope over a pool's clean points."""
-    if len(points) < MIN_FIT_POINTS:
-        return None
-    xs, ys = _log_space(points, displacement_ref_t)
+def _slope(xs: list[float], ys: list[float]) -> float | None:
+    """The least-squares slope of y on x, or None if x does not vary."""
     mean_x, mean_y = sum(xs) / len(xs), sum(ys) / len(ys)
     var_x = sum((x - mean_x) ** 2 for x in xs)
     if var_x == 0.0:
         return None
-    slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / var_x
-    return min(max(slope, CURVE_N_BOUNDS[0]), CURVE_N_BOUNDS[1])
+    return sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys)) / var_x
+
+
+def _speed_bin_medians(xs: list[float], ys: list[float]) -> tuple[list[float], list[float]]:
+    """Collapse the log-space points to one (median x, median y) per 1 kn speed bin.
+
+    ``xs`` is ``log V``, so the bin key comes back out through ``exp``. A bin thinner than
+    MIN_BIN_POINTS is dropped rather than trusted: its median is one lucky point.
+    """
+    bins: dict[int, list[tuple[float, float]]] = defaultdict(list)
+    for x, y in zip(xs, ys):
+        bins[int(math.exp(x) / SPEED_BIN_KN)].append((x, y))
+    bin_xs: list[float] = []
+    bin_ys: list[float] = []
+    for _, points in sorted(bins.items()):
+        if len(points) < MIN_BIN_POINTS:
+            continue
+        bin_xs.append(statistics.median([x for x, _ in points]))
+        bin_ys.append(statistics.median([y for _, y in points]))
+    return bin_xs, bin_ys
+
+
+def _fit_exponent(points: list[tuple[float, float, float]], displacement_ref_t: float) -> tuple[float, bool] | None:
+    """The POOLED speed exponent n -> (n, whether CURVE_N_BOUNDS clamped it).
+
+    The slope is taken over the pool's per-speed-bin MEDIANS, so each speed bin weighs the
+    same regardless of how many days the ship happened to spend there (see the module
+    docstring). A pool too sparse to fill MIN_FIT_BINS bins falls back to all-points OLS.
+    """
+    if len(points) < MIN_FIT_POINTS:
+        return None
+    xs, ys = _log_space(points, displacement_ref_t)
+
+    bin_xs, bin_ys = _speed_bin_medians(xs, ys)
+    slope = _slope(bin_xs, bin_ys) if len(bin_xs) >= MIN_FIT_BINS else None
+    if slope is None:
+        slope = _slope(xs, ys)
+    if slope is None:
+        return None
+
+    clamped = min(max(slope, CURVE_N_BOUNDS[0]), CURVE_N_BOUNDS[1])
+    return (clamped, clamped != slope)
 
 
 def _fit_scale(
@@ -176,7 +228,7 @@ def build(
         class_points[vessel['hull_class']].append(point)
 
     # --- 1. the pooled exponent, one per (hull_class, propeller_variant) ------------------
-    exponents: dict[tuple[str, str], tuple[float, str, int]] = {}
+    exponents: dict[tuple[str, str], tuple[float, bool, str, int]] = {}
     for hull_class, variant in sorted({(v['hull_class'], v['propeller_variant']) for v in vessels}):
         points = variant_points[(hull_class, variant)]
         fit_pool = f'{hull_class}-{variant}'
@@ -187,30 +239,33 @@ def build(
             points = class_points[hull_class]
             fit_pool = hull_class
         vessel = next(v for v in vessels if v['hull_class'] == hull_class and v['propeller_variant'] == variant)
-        exponent = _fit_exponent(points, vessel['displacement_design_t'])
-        if exponent is None:
+        fit = _fit_exponent(points, vessel['displacement_design_t'])
+        if fit is None:
             raise ValueError(
                 f'reference_curve: pool {fit_pool} has only {len(points)} clean-window valid points '
                 f'(need {MIN_FIT_POINTS}) — every ISO 19030 number depends on this fit'
             )
-        exponents[(hull_class, variant)] = (exponent, fit_pool, len(points))
+        exponent, clamped = fit
+        exponents[(hull_class, variant)] = (exponent, clamped, fit_pool, len(points))
 
     # --- 2. the per-ship scale, on that ship's own clean-window points --------------------
     out: list[dict] = []
     for vessel in sorted(vessels, key=lambda v: v['ship_id']):
         ship_id = vessel['ship_id']
         pool_key = (vessel['hull_class'], vessel['propeller_variant'])
-        exponent, fit_pool, n_pool = exponents[pool_key]
+        exponent, clamped, fit_pool, n_pool = exponents[pool_key]
         displacement_ref_t = vessel['displacement_design_t']
 
         points = ship_points[ship_id]
         # A ship with too few clean points of its own falls back to its pool's scale. Its
         # speed loss then carries the pool's offset — visible as n_fit_points below the floor.
-        scale_points = (
-            points
-            if len(points) >= MIN_SHIP_FIT_POINTS
-            else variant_points[pool_key] or class_points[vessel['hull_class']]
-        )
+        # Each step cascades on LENGTH, not on emptiness: S22 is the only W2-P1 ship, so its
+        # variant pool *is* its own single point — non-empty, and just as unfittable.
+        scale_points = points
+        if len(scale_points) < MIN_SHIP_FIT_POINTS:
+            scale_points = variant_points[pool_key]
+        if len(scale_points) < MIN_SHIP_FIT_POINTS:
+            scale_points = class_points[vessel['hull_class']]
         fit = _fit_scale(scale_points, displacement_ref_t, exponent)
         if fit is None:
             raise ValueError(f'reference_curve: ship {ship_id} has no clean-window valid points to scale on')
@@ -233,6 +288,7 @@ def build(
                     'displacement_ref_t': displacement_ref_t,
                     'curve_a': a,
                     'curve_n': exponent,
+                    'curve_n_clamped': clamped,
                     'fit_pool': fit_pool,
                     'n_fit_points': len(points),
                     'n_pool_points': n_pool,
@@ -243,7 +299,7 @@ def build(
     return out
 
 
-def curves_by_ship(reference_curve_rows: list[dict], vessels: list[dict]) -> dict[str, Curve]:
+def curves_by_ship(reference_curve_rows: list[dict]) -> dict[str, Curve]:
     """ship_id -> its fitted Curve (the object the whole curated zone inverts)."""
     curves: dict[str, Curve] = {}
     for row in reference_curve_rows:

@@ -18,37 +18,27 @@ const fmtUsdCompact = (v) => {
   return `$${Math.round(v)}`;
 };
 
-// The fleet-wide rows (agg_fleet_daily rollup, roster, alerts, recommendations) are one call
-// each; only the per-ship daily series and anomalies need a fan-out.
+// useFleetDaily carries the roster and the per-ship daily fan-out (speed loss + fouling clocks
+// for the table, folded into the fleet snapshot for the KPIs). The alerts / recommendations are
+// one fleet-wide call each; only the anomaly points need a second fan-out.
 //
 // Floors the Suspense fallback at 1s — without it, a cache-warm reload can resolve fast enough
 // that the loading illustration flashes for a single frame.
-const [fetched] = await Promise.all([
+const [fleet, fetched] = await Promise.all([
+  useFleetDaily(),
   Promise.all([
-    server.datalake.aggFleetDaily({}, { lazy: false }),
-    server.datalake.dimVessel({ lazy: false }),
     server.datalake.factAlert({}, { lazy: false }),
     server.datalake.factRecommendation({ lazy: false }),
     server.datalake.factMaintenanceRecommendation({}, { lazy: false }),
   ]),
   delay(1000),
 ]);
-const [{ data: overviewRows }, { data: ships }, { data: alerts }, { data: recommendations }, { data: maintenanceRecs }] = fetched;
-const roster = ships.value ?? [];
+const { roster, dailyByShip: performanceByShip, snapshot, latestDate } = fleet;
+const [{ data: alerts }, { data: recommendations }, { data: maintenanceRecs }] = fetched;
 
-// Per-ship fan-out: the daily series (speed loss + fouling clocks for the table) and the
-// anomaly points (30-day count).
-const performanceData = await Promise.all(
-  roster.map(v => server.datalake.factPerformanceDaily({ shipId: v.ship_id }, { lazy: false })),
-);
 const anomalyData = await Promise.all(
   roster.map(v => server.datalake.factAnomaly({ shipId: v.ship_id }, { lazy: false })),
 );
-
-const latest = computed(() => overviewRows.value?.at(-1) ?? null);
-const performanceByShip = computed(() => Object.fromEntries(
-  roster.map((v, i) => [v.ship_id, performanceData[i].data.value ?? []]),
-));
 const anomaliesByShip = computed(() => Object.fromEntries(
   roster.map((v, i) => [v.ship_id, anomalyData[i].data.value ?? []]),
 ));
@@ -96,8 +86,8 @@ const kpis = computed(() => [
   },
   {
     label: 'Excess fuel cost',
-    value: fmtUsdCompact(latest.value?.total_excess_cost_usd),
-    sub: 'fleet, latest day',
+    value: fmtUsdCompact(snapshot.value.excessCostUsd),
+    sub: 'each ship’s own latest day',
     tooltip: FleetGlossaryConstant.Term.excessFuelCost,
   },
   {
@@ -197,10 +187,11 @@ const openVesselDetail = async (item) => {
 // --- CII rating distribution (vessel count per rating) ---
 // Same grammar as the speed-loss histogram (vertical count bars, shared "vessels" y-axis) so
 // the two panels read as a matched pair. With only 15 vessels, counts are clearer and more
-// actionable than percentages; the share is offered in the tooltip.
+// actionable than percentages; the share is offered in the tooltip. Counts come from the
+// snapshot, so the bars total the whole fleet and agree with the Fleet-size KPI beside them.
 const CII_RATINGS = ['A', 'B', 'C', 'D', 'E'];
 const ciiCountOption = computed(() => {
-  const counts = CII_RATINGS.map(r => latest.value?.[`cii_count_${r.toLowerCase()}`] ?? 0);
+  const counts = CII_RATINGS.map(r => snapshot.value.ciiCounts[r] ?? 0);
   const total = counts.reduce((sum, c) => sum + c, 0) || 1;
   return {
     grid: { left: 48, right: 16, top: 38, bottom: 40 },
@@ -268,7 +259,7 @@ const speedLossHistOption = computed(() => {
 <template>
   <div class="d-flex flex-column ga-6">
     <div class="text-caption text-medium-emphasis mb-n4">
-      最新一日 · {{ latest?.report_date }}
+      最新一日 · {{ latestDate }}
     </div>
 
     <div class="kpi-grid">

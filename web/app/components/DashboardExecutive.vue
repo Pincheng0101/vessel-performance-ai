@@ -1,8 +1,9 @@
 <script setup>
 // Executive scorecard: fleet-wide trend tiles (with sparklines) + CII rating migration +
-// savings captured + fleet speed-loss trend. Consumes the full multi-year agg_fleet_daily
-// series (the 'ALL' rollup — every KPI on this tab is already aggregated there, so no per-ship
-// fan-out is needed). Self-contained so it only loads when its tab is opened.
+// savings potential + fleet speed-loss trend. Trends come from the multi-year agg_fleet_daily
+// series (the 'ALL' rollup); the fleet-wide *counts and sums* come from useFleetDaily, because
+// an agg row only covers the ships that reported that day (see fleetUtils). Self-contained so
+// it only loads when its tab is opened.
 import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
 
 const server = useServer();
@@ -16,34 +17,41 @@ const fmtUsdCompact = (v) => {
   return `$${Math.round(v)}`;
 };
 
-// agg_fleet_daily already carries every fleet-wide figure this tab shows (speed loss, excess
-// cost, alert count, CII counts), one row per day. fact_recommendation is one row per ship
-// (15 rows, no ship_id filter) — the savings-potential total.
+// agg_fleet_daily carries this tab's fleet-wide *rates* (mean speed loss, D/E share, daily alert
+// count), one row per day. useFleetDaily carries what those rows cannot: the counts and sums,
+// folded from each ship's own latest report. fact_recommendation is one row per ship (15 rows,
+// no ship_id filter) — the savings-potential total.
 //
 // Floors the Suspense fallback at 1s — without it, a cache-warm reload can resolve fast enough
 // that the loading illustration flashes for a single frame.
-const [fetched] = await Promise.all([
+const [fleet, fetched] = await Promise.all([
+  useFleetDaily(),
   Promise.all([
     server.datalake.aggFleetDaily({}, { lazy: false }),
     server.datalake.factRecommendation({ lazy: false }),
   ]),
   delay(1000),
 ]);
+const { roster, snapshot, monthly: fleetMonthly, latestDate } = fleet;
 const [{ data: overviewRows }, { data: recommendations }] = fetched;
-const latestDate = computed(() => overviewRows.value?.at(-1)?.report_date ?? '');
 
 // Fleet speed-loss trend: avg_speed_loss_pct is the mean of that day's *valid* (ISO 19030-gated)
-// per-ship readings, so it already excludes weather-spoiled days. The noon_utc axis is a relative
-// day — each ship's day 0 is a different real calendar date — so this is an approximate fleet
-// overview, not a calendar-aligned trend.
+// per-ship readings, so it already excludes weather-spoiled days — and being a mean, it is
+// unaffected by how many ships reported. noon_utc is a shared calendar index (day 0 = 2021-07-01
+// for every ship, 1:1 with report_date), so the axis is calendar-aligned.
 const speedLossDaily = computed(() => (overviewRows.value ?? []).filter(r => r.avg_speed_loss_pct != null));
 
-// Daily rows augmented with fleet CII risk (share of vessels rated D or E).
+// Daily rows augmented with the two fleet-wide figures the raw row can't give:
+//   cii_risk_pct   — a *share*, so it survives partial reporting.
+//   excess_fleet_usd — a sum, so it does not: scale that day's reporters up to the full roster.
 const series = computed(() => (overviewRows.value ?? []).map(r => ({
   ...r,
   cii_risk_pct: r.n_vessels ? ((r.cii_count_d || 0) + (r.cii_count_e || 0)) / r.n_vessels * 100 : null,
+  excess_fleet_usd: r.n_vessels && r.total_excess_cost_usd != null
+    ? r.total_excess_cost_usd / r.n_vessels * roster.length
+    : null,
 })));
-// One row per month — light enough for sparklines and the migration area.
+// One row per month — light enough for sparklines.
 const monthly = computed(() => {
   const map = new Map();
   series.value.forEach(r => map.set(r.report_date.slice(0, 7), r));
@@ -62,9 +70,17 @@ const deltaTextClass = d => (d == null || d === 0 ? 'text-medium-emphasis' : d >
 
 // Sparklines share the muted speed-loss color, matching the fleet speed-loss trend line.
 const SPEED_LOSS_COLOR = FleetChartConstant.SpeedLossColor;
+// `latest` overrides the tile's headline where the last daily row is not the fleet's current
+// state — the excess-cost sum is folded from each ship's own latest report instead.
 const METRICS = [
   { key: 'avg_speed_loss_pct', label: 'Avg speed loss', fmt: fmtPct, tooltip: FleetGlossaryConstant.Term.avgSpeedLoss },
-  { key: 'total_excess_cost_usd', label: 'Excess fuel cost', fmt: fmtUsdCompact, tooltip: FleetGlossaryConstant.Term.excessFuelCost },
+  {
+    key: 'excess_fleet_usd',
+    label: 'Excess fuel cost',
+    fmt: fmtUsdCompact,
+    latest: () => snapshot.value.excessCostUsd,
+    tooltip: FleetGlossaryConstant.Term.excessFuelCost,
+  },
   { key: 'n_alerts', label: 'Active alerts', fmt: fmtInt, tooltip: FleetGlossaryConstant.Term.activeAlerts },
   { key: 'cii_risk_pct', label: 'CII risk (D/E share)', fmt: fmtPct, tooltip: FleetGlossaryConstant.Term.ciiRisk },
 ];
@@ -79,7 +95,7 @@ const buildTile = (dailyRows, sparkRows, m) => {
   const deltaSign = delta == null ? null : (m.fmt(Math.abs(delta)) === m.fmt(0) ? 0 : delta);
   return {
     ...m,
-    latest: vals.length ? vals[vals.length - 1] : null,
+    latest: m.latest ? m.latest() : (vals.length ? vals[vals.length - 1] : null),
     delta,
     deltaSign,
     sparkOption: {
@@ -102,13 +118,15 @@ const tiles = computed(() => METRICS.map(m => buildTile(series.value, monthly.va
 const fmtDeltaMag = m => (m.delta == null ? '–' : m.fmt(Math.abs(m.delta)));
 
 // CII rating migration — monthly stacked area (annual rating broadcast daily reads as
-// year-over-year steps; smooth off so bands don't misrepresent the counts).
+// year-over-year steps; smooth off so bands don't misrepresent the counts). Counts are folded
+// from every ship's last report of the month, so the band totals the whole fleet: it steps down
+// only when a ship genuinely leaves (S9 ends 2025-07), never because a ship skipped a report.
 const CII_RATINGS = ['A', 'B', 'C', 'D', 'E'];
 const ciiTrendOption = computed(() => ({
   legend: { top: 8, right: 8, data: CII_RATINGS },
   grid: { left: 36, right: 16, top: 40, bottom: 28 },
   tooltip: { trigger: 'axis' },
-  xAxis: { type: 'category', data: monthly.value.map(r => r.report_date.slice(0, 7)), axisLabel: { interval: 11 } },
+  xAxis: { type: 'category', data: fleetMonthly.value.map(r => r.month), axisLabel: { interval: 11 } },
   yAxis: { type: 'value', minInterval: 1, name: 'vessels' },
   series: CII_RATINGS.map(r => ({
     name: r,
@@ -119,11 +137,11 @@ const ciiTrendOption = computed(() => ({
     lineStyle: { width: 0 },
     areaStyle: { opacity: 0.92 },
     itemStyle: { color: FleetChartConstant.CiiColor[r] },
-    data: monthly.value.map(row => row[`cii_count_${r.toLowerCase()}`] ?? 0),
+    data: fleetMonthly.value.map(row => row.ciiCounts[r] ?? 0),
   })),
 }));
 
-// Fleet speed-loss trend — daily fleet mean over relative day (see speedLossDaily above).
+// Fleet speed-loss trend — daily fleet mean over the shared day index (see speedLossDaily above).
 const speedLossTrendOption = computed(() => ({
   grid: { left: 44, right: 16, top: 16, bottom: 28 },
   tooltip: { trigger: 'axis', valueFormatter: v => (v == null ? '–' : `${(+v).toFixed(1)}%`) },
@@ -141,16 +159,36 @@ const speedLossTrendOption = computed(() => ({
   }],
 }));
 
-// Savings captured: realized (peak-to-latest drop of excess cost) vs potential (Σ recommendations).
-const potential = computed(() =>
-  (recommendations.value ?? []).reduce((sum, rec) => sum + Math.max(0, rec.net_saving_usd ?? 0), 0),
-);
-const realized = computed(() => {
-  const vals = (overviewRows.value ?? []).map(r => r.total_excess_cost_usd).filter(v => v != null);
-  if (!vals.length) return 0;
-  return Math.max(0, Math.max(...vals) - vals[vals.length - 1]);
+// Savings potential — Σ of the open cleaning recommendations, broken down by ship. There is no
+// "realized savings" counterpart: fleet excess cost *rises* across the window (fouling outpaces
+// the 23 cleanings in it), so any peak-to-latest or baseline-to-recent drop is either zero or an
+// artifact of the day the fleet happened to be sampled on.
+const savingsByShip = computed(() => fleetUtils.savingsByShip(recommendations.value));
+const potential = computed(() => savingsByShip.value.reduce((sum, rec) => sum + rec.savingUsd, 0));
+const savingsByShipOption = computed(() => {
+  // ECharts stacks a category axis bottom-up, so reverse to put the largest saving on top.
+  const rows = [...savingsByShip.value].reverse();
+  return {
+    grid: {
+      left: 8, right: 56, top: 8, bottom: 8, containLabel: true,
+    },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: v => fmtUsdCompact(v) },
+    xAxis: { type: 'value', show: false },
+    yAxis: {
+      type: 'category',
+      data: rows.map(r => r.shipId),
+      axisTick: { show: false },
+      axisLine: { show: false },
+    },
+    series: [{
+      type: 'bar',
+      barWidth: '60%',
+      label: { show: true, position: 'right', formatter: p => fmtUsdCompact(p.value) },
+      itemStyle: { color: FleetChartConstant.SemanticRamp.good, borderRadius: [0, 3, 3, 0] },
+      data: rows.map(r => r.savingUsd),
+    }],
+  };
 });
-const capturedPct = computed(() => (potential.value > 0 ? realized.value / potential.value * 100 : null));
 </script>
 
 <template>
@@ -202,43 +240,23 @@ const capturedPct = computed(() => (potential.value > 0 ? realized.value / poten
       </UsageResultCardFrame>
 
       <UsageResultCardFrame
-        :title="FleetGlossaryConstant.Title.savingsCaptured"
+        :title="FleetGlossaryConstant.Title.savingsPotential"
         :tooltip="FleetGlossaryConstant.Term.savingsPotential"
       >
         <UsageResultCard>
-          <div class="pa-2 d-flex flex-column ga-3">
+          <div class="pa-2 d-flex flex-column ga-2">
             <div class="d-flex align-baseline ga-2">
-              <span class="text-h4 font-weight-bold">{{ capturedPct == null ? '–' : `${capturedPct.toFixed(1)}%` }}</span>
-              <span class="text-body-2 text-medium-emphasis">of potential captured</span>
+              <span class="text-h4 font-weight-bold">{{ fmtUsdCompact(potential) }}</span>
+              <span class="d-flex align-center ga-1 text-body-2 text-medium-emphasis">
+                across {{ savingsByShip.length }} of {{ roster.length }} vessels
+                <AppInputTooltip :text="FleetGlossaryConstant.Term.savingsByShip" />
+              </span>
             </div>
-            <v-progress-linear
-              :model-value="capturedPct ?? 0"
-              color="success"
-              height="10"
-              rounded
+            <AppEChart
+              :option="savingsByShipOption"
+              :height="228"
+              :bordered="false"
             />
-            <div class="d-flex justify-space-between text-caption">
-              <div>
-                <div class="d-flex align-center ga-1 text-medium-emphasis">
-                  Realized
-                  <AppInputTooltip :text="FleetGlossaryConstant.Term.savingsRealized" />
-                </div>
-                <div class="font-weight-bold">
-                  {{ fmtUsdCompact(realized) }}
-                </div>
-              </div>
-              <div class="text-right">
-                <div class="text-medium-emphasis">
-                  Potential
-                </div>
-                <div class="font-weight-bold">
-                  {{ fmtUsdCompact(potential) }}
-                </div>
-              </div>
-            </div>
-            <div class="text-caption text-medium-emphasis">
-              {{ fmtUsdCompact(potential - realized) }} remaining opportunity
-            </div>
           </div>
         </UsageResultCard>
       </UsageResultCardFrame>

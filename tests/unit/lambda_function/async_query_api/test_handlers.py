@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import config
 import pytest
-from aws_lambda_powertools.event_handler.exceptions import NotFoundError, ServiceError
+from aws_lambda_powertools.event_handler.exceptions import BadRequestError, NotFoundError, ServiceError
 from handlers import SubmitBody, results, status, submit
 from pydantic import TypeAdapter, ValidationError
 
@@ -110,18 +110,27 @@ class TestStatus:
         out = status('q_test')
         assert 'result_location' not in out
 
-    def test_updates_registry_status(self, athena_mock, table_mock):
+    def test_failed_surfaces_athena_reason(self, athena_mock, table_mock):
+        # Athena's StateChangeReason is the only diagnosis a caller ever gets.
         table_mock.get_item.return_value = {'Item': dict(REGISTRY_ITEM)}
-        athena_mock.get_query_execution.return_value = get_query_execution_response('RUNNING')
-        status('q_test')
-        table_mock.update_item.assert_called_once()
+        athena_mock.get_query_execution.return_value = get_query_execution_response(
+            'FAILED', reason='SYNTAX_ERROR: column does not exist'
+        )
+        out = status('q_test')
+        assert out['status'] == 'FAILED'
+        assert out['error'] == 'SYNTAX_ERROR: column does not exist'
 
-    def test_registry_update_failure_swallowed(self, athena_mock, table_mock):
+    def test_failed_without_reason_still_reports_error(self, athena_mock, table_mock):
         table_mock.get_item.return_value = {'Item': dict(REGISTRY_ITEM)}
-        athena_mock.get_query_execution.return_value = get_query_execution_response('RUNNING')
-        table_mock.update_item.side_effect = RuntimeError('ddb down')
-        out = status('q_test')  # must not raise
-        assert out['status'] == 'RUNNING'
+        athena_mock.get_query_execution.return_value = get_query_execution_response('CANCELLED')
+        out = status('q_test')
+        assert out['status'] == 'FAILED'
+        assert out['error']
+
+    def test_succeeded_has_no_error(self, athena_mock, table_mock):
+        table_mock.get_item.return_value = {'Item': dict(REGISTRY_ITEM)}
+        athena_mock.get_query_execution.return_value = get_query_execution_response('SUCCEEDED')
+        assert 'error' not in status('q_test')
 
     def test_unknown_query_id_raises_404(self, athena_mock, table_mock):
         table_mock.get_item.return_value = {}
@@ -164,12 +173,33 @@ class TestResults:
         out = results('q_test')
         assert config._decode_token(out['next_page_token']) == 'athena-next-xyz'
 
-    def test_not_succeeded_raises_409(self, athena_mock, table_mock):
+    @pytest.mark.parametrize('athena_state', ['QUEUED', 'RUNNING'])
+    def test_still_running_raises_retryable_409(self, athena_mock, table_mock, athena_state):
         table_mock.get_item.return_value = {'Item': dict(REGISTRY_ITEM)}
-        athena_mock.get_query_execution.return_value = get_query_execution_response('RUNNING')
+        athena_mock.get_query_execution.return_value = get_query_execution_response(athena_state)
         with pytest.raises(ServiceError) as exc:
             results('q_test')
         assert exc.value.status_code == 409
+
+    @pytest.mark.parametrize('athena_state', ['FAILED', 'CANCELLED'])
+    def test_terminal_failure_raises_400_not_409(self, athena_mock, table_mock, athena_state):
+        # A failed query never becomes SUCCEEDED, so a 409 "poll until SUCCEEDED" would send
+        # the caller into an infinite loop. 400 + Athena's reason ends it.
+        table_mock.get_item.return_value = {'Item': dict(REGISTRY_ITEM)}
+        athena_mock.get_query_execution.return_value = get_query_execution_response(
+            athena_state, reason='SYNTAX_ERROR: boom'
+        )
+        with pytest.raises(BadRequestError) as exc:
+            results('q_test')
+        assert exc.value.status_code == 400
+        assert 'SYNTAX_ERROR: boom' in str(exc.value.msg)
+
+    def test_malformed_page_token_raises_400(self, athena_mock, table_mock):
+        # A bad token is client error, not a 500 out of binascii.
+        table_mock.get_item.return_value = {'Item': dict(REGISTRY_ITEM)}
+        athena_mock.get_query_execution.return_value = get_query_execution_response('SUCCEEDED')
+        with pytest.raises(BadRequestError):
+            results('q_test', 'not-valid-base64!!')
 
     def test_unknown_query_id_raises_404(self, athena_mock, table_mock):
         table_mock.get_item.return_value = {}

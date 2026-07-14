@@ -159,15 +159,15 @@ const MAINT_ZH = {
   DD: '乾塢',
 };
 // Used by the calendar-axis charts (excess cost, CII), which key off report_date rather than the
-// relative-day axis every other chart here uses.
+// day-index axis every other chart here uses.
 const fmtDate = (ts) => {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
 // --- Speed-loss trend (main visual) ---
-// noon_utc / event_day / trigger_eta_day are relative-day integers (day 0 = this ship's earliest
-// record), so this axis is a day count, not a time axis.
+// noon_utc / event_day / trigger_eta_day are day indices into the fleet's shared window (day 0 =
+// 2021-07-01 for every ship, 1:1 with report_date), so this axis is a day count, not a time axis.
 const speedLossTrendOption = computed(() => {
   const pts = (daily.value ?? [])
     .map(d => ({ day: d.noon_utc, sl: d.speed_loss_pct, valid: d.valid_flag, daysSinceCleaning: d.days_since_cleaning }))
@@ -1020,6 +1020,10 @@ const recentAnomalyCount = (metric) => {
   if (lastDay == null) return 0;
   return (anomalies.value ?? []).filter(a => a.metric === metric && a.noon_utc != null && lastDay - a.noon_utc <= DIAGNOSTIC_ALERT_WINDOW_DAYS).length;
 };
+// The deviation at which each metric turns `high`. Named because dominantDiagnostic divides by
+// them to put four different units (% speed loss, % of SFOC baseline, % slip, % excess FOC) on
+// one comparable scale.
+const DIAGNOSTIC_HIGH = { speedLoss: THRESHOLD, slip: 15, sfoc: 5, excessFoc: 8 };
 const causeDiagnostics = computed(() => {
   const stats = diagnosticStats.value;
   const slipDelta = stats.slip.latestIndex == null ? null : stats.slip.latestIndex - 100;
@@ -1031,19 +1035,19 @@ const causeDiagnostics = computed(() => {
   const excessAnomalies = recentAnomalyCount('excess_foc');
 
   const hullLevel = diagnosticLevel(
-    (slLatest.value ?? 0) >= THRESHOLD || speedLossAnomalies >= 2,
+    (slLatest.value ?? 0) >= DIAGNOSTIC_HIGH.speedLoss || speedLossAnomalies >= 2,
     (slLatest.value ?? 0) >= 6 || speedLossAnomalies >= 1,
   );
   const propellerLevel = diagnosticLevel(
-    (slipDelta != null && slipDelta >= 15) || slipAnomalies >= 2,
+    (slipDelta != null && slipDelta >= DIAGNOSTIC_HIGH.slip) || slipAnomalies >= 2,
     (slipDelta != null && slipDelta >= 8) || slipAnomalies >= 1,
   );
   const engineLevel = diagnosticLevel(
-    (sfocDelta != null && sfocDelta >= 5) || sfocAnomalies >= 2,
+    (sfocDelta != null && sfocDelta >= DIAGNOSTIC_HIGH.sfoc) || sfocAnomalies >= 2,
     (sfocDelta != null && sfocDelta >= 2) || sfocAnomalies >= 1,
   );
   const excessLevel = diagnosticLevel(
-    (excessDelta != null && excessDelta >= 8) || excessAnomalies >= 2,
+    (excessDelta != null && excessDelta >= DIAGNOSTIC_HIGH.excessFoc) || excessAnomalies >= 2,
     (excessDelta != null && excessDelta >= 3) || excessAnomalies >= 1,
   );
 
@@ -1054,6 +1058,7 @@ const causeDiagnostics = computed(() => {
       icon: metricIcon('speed_loss'),
       level: hullLevel,
       score: Math.max(slLatest.value ?? 0, speedLossAnomalies * 4),
+      highThreshold: DIAGNOSTIC_HIGH.speedLoss,
       value: slLatest.value == null ? '–' : `${slLatest.value.toFixed(1)}%`,
       label: '速度損失',
       detail: `近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${speedLossAnomalies} 件異常`,
@@ -1065,6 +1070,7 @@ const causeDiagnostics = computed(() => {
       icon: metricIcon('slip'),
       level: propellerLevel,
       score: Math.max(slipDelta ?? 0, slipAnomalies * 4),
+      highThreshold: DIAGNOSTIC_HIGH.slip,
       value: fmtIndexDelta(stats.slip.latestIndex),
       label: '滑失 vs 基準',
       detail: `目前 ${fmtMetricRaw('slip', stats.slip.latestValue)} · 近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${slipAnomalies} 件異常`,
@@ -1076,6 +1082,7 @@ const causeDiagnostics = computed(() => {
       icon: metricIcon('sfoc'),
       level: engineLevel,
       score: Math.max(sfocDelta ?? 0, sfocAnomalies * 4),
+      highThreshold: DIAGNOSTIC_HIGH.sfoc,
       value: fmtIndexDelta(stats.sfoc.latestIndex),
       label: 'SFOC vs 基準',
       detail: `目前 ${fmtMetricRaw('sfoc', stats.sfoc.latestValue)}`,
@@ -1087,6 +1094,7 @@ const causeDiagnostics = computed(() => {
       icon: metricIcon('excess_foc'),
       level: excessLevel,
       score: Math.max(excessDelta ?? 0, excessAnomalies * 4),
+      highThreshold: DIAGNOSTIC_HIGH.excessFoc,
       value: fmtIndexDelta(stats.excessFoc.latestIndex),
       label: '超額油耗 vs 基準',
       detail: `目前 ${fmtMetricRaw('excess_foc', stats.excessFoc.latestValue)} · 近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${excessAnomalies} 件異常`,
@@ -1098,13 +1106,20 @@ const causeDiagnostics = computed(() => {
     status: diagnosticStatus(item.level),
   }));
 });
+// Severity first, then how far past its own "high" bar the metric sits. The raw scores are not
+// comparable across metrics — a 5.5% speed loss (low) and a +5.2% SFOC (high) are different
+// units with different bars — so ranking on score alone can crown a `low` item over a `high` one
+// and make the summary below claim "no deviation" while a tile beside it reads 需優先確認.
+const DIAGNOSTIC_LEVEL_RANK = { high: 2, medium: 1, low: 0 };
 const dominantDiagnostic = computed(() => {
-  const [top] = [...causeDiagnostics.value].sort((a, b) => b.score - a.score);
+  const [top] = [...causeDiagnostics.value].sort((a, b) =>
+    (DIAGNOSTIC_LEVEL_RANK[b.level] - DIAGNOSTIC_LEVEL_RANK[a.level])
+    || (b.score / b.highThreshold - a.score / a.highThreshold));
   return top ?? null;
 });
 const causeDiagnosticSummary = computed(() => {
   const item = dominantDiagnostic.value;
-  if (!item || item.level === 'low') return '目前診斷訊號未顯示明顯偏離基準。';
+  if (!item || causeDiagnostics.value.every(d => d.level === 'low')) return '目前診斷訊號未顯示明顯偏離基準。';
   return `目前較明顯的證據集中在${item.title}：${item.summary}`;
 });
 const metricExtent = (stats) => {
@@ -1207,8 +1222,8 @@ const causeDiagnosticsOption = computed(() => {
 });
 
 // --- Alert feed (newest first, paged) ---
-// Alerts are keyed to this ship's relative-day axis, not a calendar, so there is nothing for a
-// date-range picker to filter against — this just paginates every alert, newest last-seen-day first.
+// Alerts carry day indices, not dates, so there is nothing for a date-range picker to bind to
+// without a join — this just paginates every alert, newest last-seen-day first.
 const sortedAlerts = computed(() =>
   [...(alerts.value ?? [])].sort((a, b) => (b.last_seen_day ?? 0) - (a.last_seen_day ?? 0)),
 );

@@ -1,12 +1,14 @@
 """I/O layer: SSM config + Athena client + DynamoDB registry. This is the mocking boundary for tests."""
 
 import base64
+import binascii
 import json
 import logging
 import os
 import time
 
 import boto3
+from aws_lambda_powertools.event_handler.exceptions import BadRequestError
 from aws_lambda_powertools.utilities.parameters import SSMProvider
 
 logger = logging.getLogger(__name__)
@@ -60,11 +62,16 @@ def start_query(sql: str, params: list[str]) -> str:
     return athena.start_query_execution(**kwargs)['QueryExecutionId']
 
 
-def get_state(exec_id: str) -> tuple[str, str | None]:
-    """Return ``(athena_state, output_location)`` for one execution."""
+def get_state(exec_id: str) -> tuple[str, str | None, str | None]:
+    """Return ``(athena_state, output_location, state_change_reason)`` for one execution.
+
+    The reason is Athena's only explanation of a FAILED/CANCELLED query, so it is what the
+    API surfaces instead of a bare 'FAILED'.
+    """
     query_execution = athena.get_query_execution(QueryExecutionId=exec_id)['QueryExecution']
+    status = query_execution['Status']
     location = query_execution.get('ResultConfiguration', {}).get('OutputLocation')
-    return query_execution['Status']['State'], location
+    return status['State'], location, status.get('StateChangeReason')
 
 
 def put_registry(query_id: str, exec_id: str, query_type: str) -> None:
@@ -74,7 +81,6 @@ def put_registry(query_id: str, exec_id: str, query_type: str) -> None:
             'query_id': query_id,
             'exec_id': exec_id,
             'query_type': query_type,
-            'status': 'PENDING',
             'ttl': int(time.time()) + _TTL_SECONDS,
         }
     )
@@ -83,16 +89,6 @@ def put_registry(query_id: str, exec_id: str, query_type: str) -> None:
 def get_registry(query_id: str) -> dict | None:
     """Return the registry item for ``query_id``, or None if unknown/expired."""
     return table.get_item(Key={'query_id': query_id}).get('Item')
-
-
-def set_status(query_id: str, status: str) -> None:
-    """Update the cached status on the registry item (best-effort; ``status`` is reserved)."""
-    table.update_item(
-        Key={'query_id': query_id},
-        UpdateExpression='SET #s = :s',
-        ExpressionAttributeNames={'#s': 'status'},
-        ExpressionAttributeValues={':s': status},
-    )
 
 
 def fetch_page(exec_id: str, page_token: str | None = None) -> dict:
@@ -128,4 +124,8 @@ def _encode_token(token: str) -> str:
 
 
 def _decode_token(token: str) -> str:
-    return base64.urlsafe_b64decode(token.encode()).decode()
+    """Decode a client-supplied page_token; a malformed one is a 400, not a 500."""
+    try:
+        return base64.urlsafe_b64decode(token.encode()).decode()
+    except (binascii.Error, UnicodeDecodeError) as exc:
+        raise BadRequestError('Invalid page_token; pass back the next_page_token from a previous page') from exc

@@ -173,7 +173,7 @@ def detrended_scatter(
     the wrong one wins.
     """
     curve_rows = reference_curve.build(corrected_rows, events, vessel_rows, power_key='power_corrected_kw')
-    curves = reference_curve.curves_by_ship(curve_rows, vessel_rows)
+    curves = reference_curve.curves_by_ship(curve_rows)
 
     first_day: dict[str, int] = {}
     for row in corrected_rows:

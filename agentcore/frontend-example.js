@@ -34,6 +34,9 @@ async function getToken() {
       scope: SCOPE,
     }),
   });
+  // Without this, a failed token call yields access_token=undefined (sent as "Bearer undefined")
+  // and expiresAt=NaN — the real Cognito error would surface as an opaque 403 from invoke.
+  if (!res.ok) throw new Error(`token request failed: ${res.status} ${await res.text()}`);
   const { access_token, expires_in } = await res.json();
   cached = { token: access_token, expiresAt: Date.now() + expires_in * 1000 };
   return access_token;
@@ -76,6 +79,9 @@ export async function askAgent(prompt, { onDelta, onTool, sessionId } = {}) {
           onDelta?.(chunk);
         } else if (chunk && chunk.tool) {
           onTool?.(chunk.tool); // e.g. show「查詢資料庫中…」
+        } else if (chunk && chunk.error) {
+          // the agent (and the runtime) emit {error} frames — surfacing them beats an empty answer
+          throw new Error(`agent error: ${chunk.error}`);
         }
       }
     }

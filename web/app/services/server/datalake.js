@@ -41,8 +41,9 @@ const query = (type, params = {}, { lazy = true } = {}) => {
   });
 };
 
-// A day range accepts either bound alone, both, or neither (⇒ full history). Only the tables
-// with a relative-day axis accept it; every query_type is `extra='forbid'` on unlisted params,
+// A day range accepts either bound alone, both, or neither (⇒ full history). Bounds are noon_utc
+// day indices into the fleet's shared window (day 0 = 2021-07-01, 1:1 with report_date). Only the
+// tables carrying that axis accept it; every query_type is `extra='forbid'` on unlisted params,
 // so day range is opt-in per type rather than folded into a shared byShip() helper.
 const dayRangeParams = ({ startDay, endDay } = {}) => ({
   ...(startDay !== undefined && { start_day: startDay }),

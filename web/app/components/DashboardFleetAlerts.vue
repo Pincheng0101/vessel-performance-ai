@@ -11,7 +11,9 @@ const router = useRouter();
 const T = FleetGlossaryConstant.Term;
 
 // fact_alert is one row per alert episode across the whole fleet, open and closed alike; the
-// roster is only needed for the "of N ships" denominator.
+// roster is only needed for the "of N ships" denominator. agg_fleet_daily supplies the fleet's
+// last day, which anchors the 30-day window below — it is the same `agg_fleet_daily:{}` the
+// dashboard page itself loads, so useAsyncData serves it from cache rather than refetching.
 //
 // Floors the Suspense fallback at 1s — without it, a cache-warm reload can resolve fast enough
 // that the loading illustration flashes for a single frame.
@@ -19,10 +21,11 @@ const [fetched] = await Promise.all([
   Promise.all([
     server.datalake.factAlert({}, { lazy: false }),
     server.datalake.dimVessel({ lazy: false }),
+    server.datalake.aggFleetDaily({}, { lazy: false }),
   ]),
   delay(1000),
 ]);
-const [{ data: alerts }, { data: ships }] = fetched;
+const [{ data: alerts }, { data: ships }, { data: overviewRows }] = fetched;
 
 // driver_metric — the raw signal whose deviation opened the episode.
 const METRIC_ZH = {
@@ -58,16 +61,40 @@ const rows = computed(() => (alerts.value ?? []).map((r, i) => ({
 
 // --- KPIs ---
 // The backlog is the *open* episodes; the closed ones stay in the table (and the total tile) as
-// history. Each ship's relative-day axis is its own, so there is no fleet-wide "last 30 days"
-// cutoff to count against — open/closed is the status the data actually carries.
+// history. Alongside it, how much of that backlog is *new*: opened_day is a day index into the
+// fleet's shared window (day 0 = 2021-07-01 for every ship), so a fleet-wide 30-day cutoff is
+// simply the last day the fleet reported, less 30.
+//
+// "Recently seen" would say nothing here — every open episode's last_seen_day already falls
+// inside that window, because the upstream closer is what ends an episode that stops recurring.
+// Newly *opened* is the figure the status flag doesn't already carry.
+const ALERT_WINDOW_DAYS = 30;
+const fleetLastDay = computed(() => overviewRows.value?.at(-1)?.noon_utc ?? null);
 const openRows = computed(() => rows.value.filter(r => r.status === 'open'));
 const highSeverityCount = computed(() => openRows.value.filter(r => r.severity === 'high').length);
 const vesselsAffected = computed(() => new Set(openRows.value.map(r => r.shipId)).size);
+const recentRows = computed(() => {
+  const lastDay = fleetLastDay.value;
+  if (lastDay == null) return [];
+  return rows.value.filter(r => r.openedDay != null && lastDay - r.openedDay <= ALERT_WINDOW_DAYS);
+});
+// The cutoff day carries a report_date, and a date is what a reader can place.
+const windowStartDate = computed(() => {
+  if (fleetLastDay.value == null) return '';
+  const cutoff = fleetLastDay.value - ALERT_WINDOW_DAYS;
+  return (overviewRows.value ?? []).find(r => r.noon_utc === cutoff)?.report_date ?? '';
+});
 const kpis = computed(() => [
   { label: 'Open alerts', value: `${openRows.value.length}`, sub: 'unresolved episodes', tooltip: T.openAlertCases },
   {
     label: 'High severity', value: `${highSeverityCount.value}`, sub: 'need priority attention', tooltip: T.highSeverityAlerts,
     color: highSeverityCount.value > 0 ? FleetChartConstant.SemanticRamp.critical : undefined,
+  },
+  {
+    label: `New alerts (${ALERT_WINDOW_DAYS}d)`,
+    value: fleetLastDay.value == null ? '–' : `${recentRows.value.length}`,
+    sub: windowStartDate.value ? `opened since ${windowStartDate.value}` : 'opened recently',
+    tooltip: T.recentAlerts,
   },
   { label: 'Vessels affected', value: `${vesselsAffected.value}`, sub: `of ${ships.value?.length ?? 0} ships`, tooltip: T.vesselsWithAlerts },
   { label: 'Total episodes', value: `${rows.value.length}`, sub: 'incl. closed', tooltip: T.anomaly },
@@ -308,7 +335,11 @@ const openVesselDetail = async (item) => {
   grid-template-columns: repeat(2, 1fr);
 
   @media (min-width: 600px) {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  @media (min-width: 1280px) {
+    grid-template-columns: repeat(5, 1fr);
   }
 }
 </style>

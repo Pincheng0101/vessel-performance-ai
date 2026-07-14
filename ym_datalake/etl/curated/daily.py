@@ -182,7 +182,9 @@ def build(
                 'co2_mt': co2,
                 'excess_foc_mt': excess_foc,
                 'excess_cost_usd': excess_cost,
-                'cum_excess_cost_usd': cum_excess if excess_cost else None,
+                # `is not None`, not truthiness: a clean-hull day costs $0 of excess, and a
+                # cumulative series that goes null on its zero-increment days is not cumulative.
+                'cum_excess_cost_usd': cum_excess if excess_cost is not None else None,
                 **_cost_attribution(row, excess_cost, price, vessel, hours),
                 # CII is annual; cii.py broadcasts it back onto these rows.
                 'cii_aer': None,
@@ -213,35 +215,40 @@ def _cost_attribution(row: dict, excess_cost: float | None, price: float | None,
     ADDITIVE, not a partition: weather and operational fuel are burned *on top of* the
     fouling penalty, so a chart stacking all three totals more than ``excess_cost_usd``.
     All three are ESTIMATED — they are priced in USD.
+
+    Each channel is gated on **its own** inputs, because being additive means being
+    independent: the weather channel is a resistance, an SFOC and an engine hour count, and
+    a day missing ``me_consumption`` (so with no fouling number) has still burned fuel
+    pushing through the weather. Nulling all three together would make one channel's gap
+    look like a day with no cost at all.
     """
-    null = {
-        'excess_cost_fouling_usd': None,
+    # The fouling channel is `excess_cost`, which is already priced (and already None when the
+    # day has no price, no me_consumption or no speed loss). The other two need the price here.
+    channels: dict[str, float | None] = {
+        'excess_cost_fouling_usd': excess_cost,
         'excess_cost_weather_usd': None,
         'excess_cost_operational_usd': None,
     }
-    if price is None or excess_cost is None:
-        return null
+    if price is None:
+        return channels
 
     sfoc = row.get('sfoc')
     power = row.get('horse_power')
-    if not sfoc or not power or not hours:
-        return null
+    stw = row.get('speed_through_water')
+    me_foc = row.get('me_consumption')
 
-    # Weather: the fuel the ISO 15016 correction just removed. A following wind gives a
+    # Weather: the fuel the ISO 15016 resistances account for. A following wind gives a
     # negative resistance, hence a negative (i.e. saved) cost — floored at zero here so
     # the chart never shows a negative penalty.
-    r_env_kn = (row.get('resistance_wind_kn') or 0.0) + (row.get('resistance_wave_kn') or 0.0)
-    dp_env_kw = physics.resistance_to_power_kw(r_env_kn * 1000.0, row['speed_through_water'])
-    weather_foc = physics.foc_mt(max(dp_env_kw, 0.0), sfoc, hours)
+    if sfoc and power and hours and stw:
+        r_env_kn = (row.get('resistance_wind_kn') or 0.0) + (row.get('resistance_wave_kn') or 0.0)
+        dp_env_kw = physics.resistance_to_power_kw(r_env_kn * 1000.0, stw)
+        channels['excess_cost_weather_usd'] = physics.foc_mt(max(dp_env_kw, 0.0), sfoc, hours) * price
 
     # Operational: the SFOC penalty for running the engine away from its optimum load.
-    load = min(1.05, power / vessel['mcr_kw'])
-    penalty = _SFOC_LOAD_COEF * (load - _LOAD_OPTIMUM) ** 2
-    me_foc = row.get('me_consumption') or 0.0
-    operational_foc = me_foc * penalty / (1.0 + penalty)
+    if me_foc and power:
+        load = min(1.05, power / vessel['mcr_kw'])
+        penalty = _SFOC_LOAD_COEF * (load - _LOAD_OPTIMUM) ** 2
+        channels['excess_cost_operational_usd'] = me_foc * penalty / (1.0 + penalty) * price
 
-    return {
-        'excess_cost_fouling_usd': excess_cost,
-        'excess_cost_weather_usd': weather_foc * price,
-        'excess_cost_operational_usd': operational_foc * price,
-    }
+    return channels
