@@ -50,9 +50,14 @@ def _cmd_build(args: argparse.Namespace) -> int:
         for name in catalog:
             print(f'    {name:<38} {len(tables[name]):>7} rows')
 
+    total, valid = diagnostics['total_rows'], diagnostics['valid_rows']
     print('\n  Pipeline findings:')
     print(f'    duplicate (ship, day) rows collapsed  {diagnostics["duplicate_rows_collapsed"]}')
-    print(f'    ISO 19030 valid rows                  {diagnostics["valid_rows"]}')
+    print(f'    ISO 19030 valid rows                  {valid}/{total} ({valid / total * 100:.1f}%)')
+    for reason, n in sorted(diagnostics['reject_reasons'].items(), key=lambda kv: -kv[1]):
+        print(f'      rejected: {reason:<24} {n:>6}')
+    # 'none' winning means the ISO 15016 correction was computed, scored and REJECTED — the
+    # Beaufort <= 4 gate does the weather work, and power_corrected_kw is the measured power.
     print(f'    WIND_DIRECTION convention chosen      {diagnostics["wind_convention"]}')
     for convention, score in sorted(diagnostics['wind_convention_scores'].items(), key=lambda kv: kv[1]):
         print(f'      {convention:<14} detrended speed-loss sd {score:6.3f} pp')

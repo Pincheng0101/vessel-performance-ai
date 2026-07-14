@@ -9,8 +9,20 @@ code    meaning                                                        value / r
 ISP     In-service performance: per-cycle mean speed loss             cycle mean / first cycle's
 DDP     Dry-dock performance: the +/-45-day window around a dry dock  mean after / mean before
 ME      Maintenance effect: recovery at one event (+/-30 days)        before - after / before
-MT      Maintenance trigger: first crossing of the 8 % trailing mean  8.0 / null
+MT      Maintenance trigger: per-cycle crossing of the 8 % mean       8.0 / null
 ======  ============================================================  ===========================
+
+``n_points`` / ``n_reference_points`` carry the sample count behind each number. Without
+them a DDP fitted on 3 points is indistinguishable from one fitted on 90, and ISO 19030's
+own warning is that "the shorter the evaluation period, the larger the uncertainty" — the
+**maintenance trigger is intrinsically the noisiest of the four** (doc/iso-19030.md:102).
+A row whose window holds fewer than ``MIN_WINDOW_POINTS`` is not emitted at all.
+
+**MT is evaluated per hull-fouling cycle, not once per ship.** A trigger that can only
+fire on the first crossing in the whole record would pin a ship to a crossing it made
+years and several cleanings ago, and could never re-fire for the *current* fouling cycle —
+which is the one thing a maintenance trigger exists to do. Each cycle (bounded by the real
+UWC/DD resets, same ``_cycles`` as ISP) therefore gets at most one MT row.
 
 A real constraint of this dataset: **5 of the 15 ships (S9-S12, S23) never dry-dock**,
 so they get **no DDP rows at all**. That is a fact about the fleet, not a bug — the
@@ -34,9 +46,13 @@ def _mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
-def _window_mean(series: list[tuple[int, float]], lo: int, hi: int) -> float | None:
-    """Mean speed loss over the valid points in [lo, hi)."""
-    values = [v for d, v in series if lo <= d < hi]
+def _window(series: list[tuple[int, float]], lo: int, hi: int) -> list[float]:
+    """The valid speed-loss points in [lo, hi)."""
+    return [v for d, v in series if lo <= d < hi]
+
+
+def _window_mean(values: list[float]) -> float | None:
+    """The window's mean — None when it is too thin to mean anything."""
     return _mean(values) if len(values) >= MIN_WINDOW_POINTS else None
 
 
@@ -57,9 +73,7 @@ def build(daily_rows: list[dict], events: list[dict]) -> list[dict]:
         ship_events = sorted(events_by_ship[ship_id], key=lambda e: e['event_day'])
         out.extend(_isp(ship_id, series, ship_events))
         out.extend(_event_indicators(ship_id, series, ship_events))
-        mt = _mt(ship_id, series)
-        if mt:
-            out.append(mt)
+        out.extend(_mt(ship_id, series, ship_events))
     return out
 
 
@@ -77,12 +91,14 @@ def _isp(ship_id: str, series: list[tuple[int, float]], events: list[dict]) -> l
     """ISP: each cleaning cycle's mean speed loss, referenced to the first cycle's."""
     rows: list[dict] = []
     reference: float | None = None
+    reference_n = 0
     for start, end in _cycles(series, events):
-        mean = _window_mean(series, start, end)
+        values = _window(series, start, end)
+        mean = _window_mean(values)
         if mean is None:
             continue
         if reference is None:
-            reference = mean
+            reference, reference_n = mean, len(values)
         rows.append(
             {
                 'ship_id': ship_id,
@@ -93,6 +109,8 @@ def _isp(ship_id: str, series: list[tuple[int, float]], events: list[dict]) -> l
                 'event_day': None,
                 'value': mean,
                 'reference_value': reference,
+                'n_points': len(values),
+                'n_reference_points': reference_n,
                 'detail': None,
             }
         )
@@ -107,8 +125,12 @@ def _event_indicators(ship_id: str, series: list[tuple[int, float]], events: lis
         if event_type == 'UWI':  # an inspection changes nothing; there is no effect to measure
             continue
 
-        before = _window_mean(series, day - ME_WINDOW_DAYS, day)
-        after = _window_mean(series, day + 1, day + 1 + ME_WINDOW_DAYS)
+        # n_points counts the EVALUATION window, n_reference_points the REFERENCE window —
+        # for both ME and DDP the reference is the before-window, the evaluation the after.
+        before_values = _window(series, day - ME_WINDOW_DAYS, day)
+        after_values = _window(series, day + 1, day + 1 + ME_WINDOW_DAYS)
+        before = _window_mean(before_values)
+        after = _window_mean(after_values)
         if before is not None and after is not None:
             rows.append(
                 {
@@ -120,14 +142,18 @@ def _event_indicators(ship_id: str, series: list[tuple[int, float]], events: lis
                     'event_day': day,
                     'value': before - after,  # positive = the hull recovered
                     'reference_value': before,
+                    'n_points': len(after_values),
+                    'n_reference_points': len(before_values),
                     'detail': f'after={after:.2f}',
                 }
             )
 
         if event_type != 'DD':
             continue
-        dd_before = _window_mean(series, day - DDP_WINDOW_DAYS, day)
-        dd_after = _window_mean(series, day + 1, day + 1 + DDP_WINDOW_DAYS)
+        dd_before_values = _window(series, day - DDP_WINDOW_DAYS, day)
+        dd_after_values = _window(series, day + 1, day + 1 + DDP_WINDOW_DAYS)
+        dd_before = _window_mean(dd_before_values)
+        dd_after = _window_mean(dd_after_values)
         if dd_before is not None and dd_after is not None:
             rows.append(
                 {
@@ -139,26 +165,42 @@ def _event_indicators(ship_id: str, series: list[tuple[int, float]], events: lis
                     'event_day': day,
                     'value': dd_after,
                     'reference_value': dd_before,
+                    'n_points': len(dd_after_values),
+                    'n_reference_points': len(dd_before_values),
                     'detail': None,
                 }
             )
     return rows
 
 
-def _mt(ship_id: str, series: list[tuple[int, float]]) -> dict | None:
-    """MT: the first day the 14-day trailing-mean speed loss crosses the 8 % trigger."""
-    for day, _ in series:
-        window = [v for d, v in series if day - MT_WINDOW_DAYS < d <= day]
-        if len(window) >= MIN_WINDOW_POINTS and sum(window) / len(window) >= MT_TRIGGER_PCT:
-            return {
-                'ship_id': ship_id,
-                'indicator': 'MT',
-                'period_start_day': None,
-                'period_end_day': None,
-                'event_type': None,
-                'event_day': day,
-                'value': MT_TRIGGER_PCT,
-                'reference_value': None,
-                'detail': 'trailing-mean speed loss crossed the maintenance trigger',
-            }
-    return None
+def _mt(ship_id: str, series: list[tuple[int, float]], events: list[dict]) -> list[dict]:
+    """MT: the first day *of each hull cycle* the 14-day trailing mean crosses the 8 % trigger.
+
+    Scoped per cycle so the trigger tracks the hull the ship is sailing on now. The trailing
+    window is clamped to the cycle too: a window that reached back across a hull cleaning
+    would average the old fouled hull into the new clean one and re-fire the trigger on
+    day 1 of a freshly cleaned cycle.
+    """
+    rows: list[dict] = []
+    for start, end in _cycles(series, events):
+        cycle = [(d, v) for d, v in series if start <= d < end]
+        for day, _ in cycle:
+            window = [v for d, v in cycle if day - MT_WINDOW_DAYS < d <= day]
+            if len(window) >= MIN_WINDOW_POINTS and sum(window) / len(window) >= MT_TRIGGER_PCT:
+                rows.append(
+                    {
+                        'ship_id': ship_id,
+                        'indicator': 'MT',
+                        'period_start_day': start,
+                        'period_end_day': end - 1,
+                        'event_type': None,
+                        'event_day': day,
+                        'value': MT_TRIGGER_PCT,
+                        'reference_value': None,
+                        'n_points': len(window),
+                        'n_reference_points': None,
+                        'detail': 'trailing-mean speed loss crossed the maintenance trigger',
+                    }
+                )
+                break  # one crossing per cycle: the cycle ends at the next hull reset
+    return rows

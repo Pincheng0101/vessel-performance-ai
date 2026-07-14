@@ -9,9 +9,17 @@ The derivation chain, in order:
 
 1. ``clean``       — dedupe, clip the impossible cells, backfill displacement
 2. ``geography``   — drape a track (decorative; never feeds a number below)
-3. ``corrections`` — ISO 15016: subtract wind + wave power  -> ``power_corrected_kw``
+3. ``corrections`` — score the ISO 15016 wind/wave correction and, on this dataset,
+   **reject** it: ``convention='none'`` wins, so ``power_corrected_kw`` is the measured
+   power *unchanged* and the Beaufort <= 4 gate does the weather work instead. The
+   ``correction_applied`` / ``correction_convention`` columns say so on every row.
 4. ``reference_curve`` — invert the fitted clean-hull curve at that power -> ``v_expected_kn``
 5. **here**        — ``speed_loss_pct = (v_expected - STW) / v_expected . 100``
+
+**The sign.** Positive = speed lost = degradation. This is the **negation** of ISO
+19030-2's signed convention (where degradation is negative); it is a declared deviation
+under ISO 19030-3 (doc/iso-19030-conformance.md), and the whole stack — thresholds, the
+8 % maintenance trigger, ``excess_foc``, the UI colour ramps — reads it this way.
 
 Everything downstream — indicators, anomalies, alerts, recommendations, CII, the
 economics — is a function of this table.
@@ -61,8 +69,18 @@ def build(
     curves: dict[str, Curve],
     track: dict,
     prices: dict[tuple[int, str], float],
+    convention: str,
 ) -> list[dict]:
-    """The daily fact table. ``corrected_rows`` are cleaned rows with the ISO 15016 terms."""
+    """The daily fact table. ``corrected_rows`` are cleaned rows with the ISO 15016 terms.
+
+    ``convention`` is the wind convention ``corrections.choose_convention`` picked. It is
+    landed on every row (``correction_applied`` / ``correction_convention``) rather than
+    left implicit, because on this dataset the empirical winner is ``'none'`` — the ISO
+    15016 correction is computed, scored and *rejected*, so ``power_corrected_kw`` is the
+    measured power unchanged. A consumer asking "is this wind-corrected?" must be able to
+    read the answer off the row instead of inferring a yes from the column's name.
+    """
+    correction_applied = convention != 'none'
     by_ship: dict[str, list[dict]] = defaultdict(list)
     for row in corrected_rows:
         by_ship[row['ship_id']].append(row)
@@ -99,7 +117,7 @@ def build(
 
         for row in rows:
             day = row['noon_utc']
-            valid = filters.is_valid(row, vessel)
+            reason = filters.reject_reason(row, vessel)
             position = track.get((ship_id, day), {})
 
             stw = row.get('speed_through_water')
@@ -162,6 +180,8 @@ def build(
                 'resistance_wave_kn': row.get('resistance_wave_kn'),
                 'power_corrected_kw': power,
                 'speed_corrected_kn': row.get('speed_corrected_kn'),
+                'correction_applied': correction_applied,
+                'correction_convention': convention,
                 'v_expected_kn': v_expected,
                 'speed_loss_pct': speed_loss,
                 'slip_apparent': physics.slip_fraction(row['avg_speed'], pitch, rpm)
@@ -196,7 +216,10 @@ def build(
                 'anomaly_flag': False,
                 'anomaly_cause': None,
                 'anomaly_severity': None,
-                'valid_flag': valid,
+                'valid_flag': reason is None,
+                # The gate that dropped this day (null when it passed). 78 % of the days fail
+                # the gate, and "why" is the ISO 19030 drill-down — see filters.reject_reason.
+                'reject_reason': reason,
                 'masked_flag': bool(row.get('masked_flag')),
             }
             out.append(record)

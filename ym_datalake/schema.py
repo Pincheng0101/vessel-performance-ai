@@ -237,9 +237,22 @@ FACT_PERFORMANCE_DAILY_COLUMNS = [
     ('sea_height', 'double'),  # measured: m
     ('resistance_wind_kn', 'double'),  # ISO 15016: Blendermann wind added resistance (kN)
     ('resistance_wave_kn', 'double'),  # ISO 15016: STAWAVE-1 wave added resistance (kN)
-    ('power_corrected_kw', 'double'),  # ISO 15016: horse_power - wind/wave power
-    ('speed_corrected_kn', 'double'),  # ISO 15016: STW (current is already excluded)
-    ('v_expected_kn', 'double'),  # ISO 19030: clean-hull speed at the corrected power
+    # NOT wind-corrected. The ISO 15016 correction is computed, SCORED and REJECTED on this
+    # dataset: the no-correction control wins the detrended-scatter test (4.432 pp vs 4.878
+    # bow_relative / 4.940 true_compass), so `convention='none'` and this column is
+    # `horse_power` PASSED THROUGH UNCHANGED. The Beaufort <= 4 gate in `valid_flag`, not a
+    # correction term, is what keeps weather out of the speed loss. `correction_applied`
+    # below says so on every row. The name is kept only because renaming it ripples through
+    # the fixtures, the UI and the query API. See ym_datalake/etl/curated/corrections.py.
+    ('power_corrected_kw', 'double'),  # = horse_power (correction rejected; see above)
+    ('speed_corrected_kn', 'double'),  # = STW, unchanged (current is already excluded)
+    ('correction_applied', 'boolean'),  # false on this dataset: the ISO 15016 correction is rejected
+    ('correction_convention', 'string'),  # the arm chosen empirically: none / bow_relative / true_compass
+    ('v_expected_kn', 'double'),  # ISO 19030: clean-hull speed at that power
+    # SIGN: (v_expected - STW) / v_expected * 100 => POSITIVE = SPEED LOST = DEGRADATION.
+    # This is the NEGATION of ISO 19030-2's signed convention (degradation negative). It is a
+    # declared deviation under ISO 19030-3 — see doc/iso-19030-conformance.md. The whole stack
+    # (the 8 % MT trigger, excess_foc, the UI colour ramps) reads it this way.
     ('speed_loss_pct', 'double'),  # ISO 19030: (v_expected - STW) / v_expected * 100
     ('slip_apparent', 'double'),  # (V_th - SOG) / V_th
     ('slip_real', 'double'),  # (V_th - STW) / V_th
@@ -267,20 +280,33 @@ FACT_PERFORMANCE_DAILY_COLUMNS = [
     ('anomaly_cause', 'string'),  # filled from fact_anomaly
     ('anomaly_severity', 'string'),  # filled from fact_anomaly
     ('valid_flag', 'boolean'),  # ISO 19030 gate (>=22h full speed, Bft <=4, deep water, ...)
+    # Why the gate dropped this day; null when it passed. The gate drops ~78 % of the days,
+    # and ISO 19030's core value is being able to say WHICH gate dropped a given one
+    # (doc/iso-19030.md:110-116). One of: masked / missing_propulsion /
+    # displacement_backfilled / admiralty / not_full_speed / beaufort / low_speed /
+    # displacement_band / shallow_water. See ym_datalake/etl/curated/filters.py.
+    ('reject_reason', 'string'),
     ('masked_flag', 'boolean'),  # measured: S21-S23 masked window
 ]
 
 # 8. fact_performance_indicator — ISO 19030 period indicators, long format.
 # 5 ships (S9-S12, S23) have no DD at all, so they get no DDP rows.
+# MT is emitted PER HULL CYCLE (a ship that crosses 8 % again after a cleaning triggers
+# again), so a ship can carry more than one MT row.
 FACT_PERFORMANCE_INDICATOR_COLUMNS = [
     ('ship_id', 'string'),
     ('indicator', 'string'),  # ISP / DDP / ME / MT
-    ('period_start_day', 'int'),  # ISP: cycle start
-    ('period_end_day', 'int'),  # ISP: cycle end; DDP: event_day + 45
+    ('period_start_day', 'int'),  # ISP, MT: cycle start
+    ('period_end_day', 'int'),  # ISP, MT: cycle end; DDP: event_day + 45
     ('event_type', 'string'),  # ME, DDP: the event the row is keyed to
     ('event_day', 'int'),  # ME, DDP, MT: event / crossing day
     ('value', 'double'),  # per indicator (see doc)
     ('reference_value', 'double'),  # per indicator (see doc)
+    # The sample counts behind value / reference_value. A DDP on 3 points and one on 90 are
+    # not the same number, and ISO 19030 is explicit that the shorter the evaluation period
+    # the larger the uncertainty (doc/iso-19030.md:102). MT has no reference window.
+    ('n_points', 'int'),  # points in the evaluation window
+    ('n_reference_points', 'int'),  # points in the reference window; null for MT
     ('detail', 'string'),  # free-text
 ]
 

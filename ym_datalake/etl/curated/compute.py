@@ -27,6 +27,7 @@ and every speed-loss number derived from it would be noise.
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
 from ym_datalake.etl import fuel as fuel_module
@@ -76,7 +77,7 @@ def build_all(data_dir: str | Path, seed: int = 42) -> tuple[dict[str, list[dict
     fuel_price_rows = fuel_price.build(noon_rows, seed=seed)
     prices = fuel_module.price_lookup(fuel_price_rows)
 
-    daily_rows = daily.build(corrected, vessels, events, curves, track, prices)
+    daily_rows = daily.build(corrected, vessels, events, curves, track, prices, convention)
     cii.apply(daily_rows, vessels)
 
     anomalies = anomaly.build(daily_rows)
@@ -131,6 +132,10 @@ def build_all(data_dir: str | Path, seed: int = 42) -> tuple[dict[str, list[dict
             for r in curve_rows[:: reference_curve.CURVE_POINTS]
         ],
         'valid_rows': sum(1 for r in daily_rows if r['valid_flag']),
+        'total_rows': len(daily_rows),
+        # The ISO gate drops ~78 % of the days; this is the breakdown it drops them on.
+        # Auditability is the point of the gate, not a by-product (doc/iso-19030.md:110-116).
+        'reject_reasons': dict(sorted(Counter(r['reject_reason'] for r in daily_rows if r['reject_reason']).items())),
         'duplicate_rows_collapsed': len(noon_rows) - len(cleaned),
     }
     return tables, diagnostics

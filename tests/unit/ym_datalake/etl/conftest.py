@@ -42,11 +42,17 @@ def vessel() -> dict:
 
 @pytest.fixture
 def noon_row():
-    """Factory for a cleaned noon row that passes every ISO 19030 gate for S1.
+    """Factory for a **corrected** noon row that passes every ISO 19030 gate for S1.
 
     Every ``noon_report`` column is present (``clean.clip_row`` indexes them directly),
     null unless the valid day needs a value. ``displacement_source`` / ``mean_draft_m``
     are the two columns ``clean`` adds downstream; ``filters`` reads both.
+
+    ``power_corrected_kw`` is the column ``corrections`` adds, and it is what ``filters``
+    gates on (and what ``daily`` computes the speed loss from) — so it carries the same
+    value as ``horse_power`` here, exactly as the winning ``convention='none'`` arm leaves
+    it. A test that wants to prove the gate and the metric read the *same* field can move
+    the two apart.
     """
 
     def _make(**overrides) -> dict:
@@ -59,6 +65,7 @@ def noon_row():
             speed_through_water=18.0,
             avg_speed=17.5,
             horse_power=25000.0,  # Admiralty ~706, mid-band
+            power_corrected_kw=25000.0,  # convention='none': the measured power, unchanged
             displacement=166500.0,
             displacement_source='measured',
             mean_draft_m=14.5,

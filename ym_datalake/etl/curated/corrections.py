@@ -23,21 +23,24 @@ been removed. Whatever is left is the correction's own error.
 
 **The answer, on this dataset (4,657 ISO-valid points):**
 
-=================  =========================
-convention         detrended speed-loss sd
-=================  =========================
-**none (control)**  **4.534 pp**
-bow_relative        5.009 pp
-true_compass        5.011 pp
-=================  =========================
+==================  =========================
+convention          detrended speed-loss sd
+==================  =========================
+**none (control)**  **4.432 pp**
+bow_relative        4.878 pp
+true_compass        4.940 pp
+==================  =========================
+
+(The pipeline prints this table on every build — ``python -m ym_datalake.etl build``. If the
+numbers above ever disagree with the ones it prints, the numbers above are the stale ones.)
 
 Read that table carefully, because it says something sharper than "bow-relative" or
 "true compass":
 
-1. **The two conventions are indistinguishable** — 5.009 vs 5.011 pp, a 0.04 % gap.
+1. **The two conventions are near-indistinguishable** — 4.878 vs 4.940 pp, a 1.3 % gap.
    ``true_compass`` routes the angle through a **fabricated** heading; if ``WIND_DIRECTION``
    really were bow-relative, mangling it that way should visibly degrade the result. It
-   does not. So the direction column carries **essentially no information** for this
+   barely does. So the direction column carries **essentially no information** for this
    correction, under either reading. The question is not answerable from the data because
    the data has no answer in it.
 2. **Both are worse than not correcting at all.** The correction multiplies an
@@ -45,6 +48,13 @@ Read that table carefully, because it says something sharper than "bow-relative"
    flagged not-derivable in ``vessel_master``), at a Beaufort <= 4 gate where the true wind
    effect is already small relative to the ~15 % scatter in the power channel. It adds
    about 0.5 pp of noise and removes nothing.
+
+**So this lake's speed loss is NOT wind-corrected, and every surface that says otherwise is
+wrong.** ``power_corrected_kw`` is ``horse_power`` passed through unchanged; the column keeps
+its name only because renaming it ripples through the fixtures, the UI and the query API.
+``fact_performance_daily.correction_applied`` / ``correction_convention`` land that fact on
+every row so a consumer can read it instead of inferring a "yes" from a column name. Declared
+in doc/iso-19030-conformance.md as a deviation permitted under ISO 19030-3.
 
 So the ISO 15016 wind/wave correction is **decorative on this dataset** and does not touch
 ``power_corrected_kw`` — the ISO 19030 Beaufort gate is what excludes weather here, not a

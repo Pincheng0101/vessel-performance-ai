@@ -1,9 +1,12 @@
-"""``filters.is_valid`` — the 9-gate ISO 19030 validity predicate.
+"""``filters`` — the 9-gate ISO 19030 validity predicate, and the reason it rejects on.
 
 Every ISO number in the lake is computed only on the days this returns True for, so a gate
 that silently stops gating is a silent corruption of the whole curated zone. Each test
 starts from a day that passes, breaks exactly one field, and asserts the rejection — so a
 failure names the gate that moved.
+
+``reject_reason`` is the predicate; ``is_valid`` is that predicate read as a bool. The
+reason is not decoration — it is what makes the 78 % the gate drops auditable.
 
 Thresholds are read from the module's own constants, never re-typed as literals: a test
 that hardcodes ``4`` would keep passing if ``MAX_BEAUFORT`` were loosened to 8.
@@ -161,3 +164,59 @@ class TestDeepWaterGate:
     def test_the_design_draft_stands_in_for_a_missing_mean_draft(self, noon_row, vessel):
         """No draft on the row is not a rejection — the gate falls back to the particular."""
         assert filters.is_valid(noon_row(mean_draft_m=None), vessel) is True
+
+
+class TestThePowerGateReadsTheCorrectedPower:
+    """The gate must require the field the METRIC consumes.
+
+    ``daily`` computes the speed loss from ``power_corrected_kw``. While the winning
+    ``convention='none'`` leaves that equal to ``horse_power`` the distinction is invisible,
+    but under any other arm ``corrections`` can null the corrected power out (a correction
+    that eats the whole engine output) — and a gate reading ``horse_power`` would then hand
+    back a ``valid_flag=True`` row whose ``speed_loss_pct`` is ``None``: an ISO-valid point
+    with no ISO number in it.
+    """
+
+    def test_a_nulled_corrected_power_is_rejected_even_with_a_healthy_measured_power(self, noon_row, vessel):
+        row = noon_row(horse_power=25000.0, power_corrected_kw=None)
+        assert filters.reject_reason(row, vessel) == 'missing_propulsion'
+
+    def test_a_zeroed_corrected_power_is_rejected(self, noon_row, vessel):
+        assert filters.is_valid(noon_row(power_corrected_kw=0.0), vessel) is False
+
+    def test_the_admiralty_gate_still_reads_the_MEASURED_power(self, noon_row, vessel):
+        """The Admiralty coefficient is a raw physical invariant and its band was calibrated
+        on measured speed/power pairs, so it does not follow the correction."""
+        impossible = _power_for(166500.0, 18.0, filters.ADMIRALTY_BAND[1] * 1.5)
+        row = noon_row(horse_power=impossible, power_corrected_kw=25000.0)
+        assert filters.reject_reason(row, vessel) == 'admiralty'
+
+
+class TestRejectReason:
+    """78 % of the days are dropped; ISO 19030's core value is being able to say *which* gate
+    dropped a given one (doc/iso-19030.md:110-116). A bare bool throws that away."""
+
+    def test_a_valid_day_has_no_reason(self, noon_row, vessel):
+        assert filters.reject_reason(noon_row(), vessel) is None
+
+    @pytest.mark.parametrize(
+        'reason,overrides',
+        [
+            ('masked', {'masked_flag': True}),
+            ('missing_propulsion', {'speed_through_water': None}),
+            ('displacement_backfilled', {'displacement_source': 'backfilled'}),
+            ('not_full_speed', {'hours_full_speed': filters.MIN_FULL_SPEED_HOURS - 0.1}),
+            ('beaufort', {'wind_scale': filters.MAX_BEAUFORT + 1.0}),
+            ('shallow_water', {'water_depth': 5.0}),
+        ],
+    )
+    def test_each_gate_names_itself(self, noon_row, vessel, reason, overrides):
+        assert filters.reject_reason(noon_row(**overrides), vessel) == reason
+
+    def test_a_missing_beaufort_names_the_beaufort_gate(self, noon_row, vessel):
+        """An ungated weather day cannot be called steady — and it must say so, not go silent."""
+        assert filters.reject_reason(noon_row(wind_scale=None), vessel) == 'beaufort'
+
+    def test_is_valid_is_the_same_predicate_read_as_a_bool(self, noon_row, vessel):
+        assert filters.is_valid(noon_row(), vessel) is True
+        assert filters.is_valid(noon_row(masked_flag=True), vessel) is False

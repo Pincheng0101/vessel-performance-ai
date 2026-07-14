@@ -24,7 +24,8 @@ def build(vessel):
 
     def _build(*rows: dict, priced: bool = True) -> list[dict]:
         prices = {(row['noon_utc'], 'VLSFO'): PRICE_USD_PER_MT for row in rows} if priced else {}
-        return daily.build(list(rows), {'S1': vessel}, [], {'S1': CURVE}, {}, prices)
+        # 'none' is the convention the empirical test picks on the real dataset.
+        return daily.build(list(rows), {'S1': vessel}, [], {'S1': CURVE}, {}, prices, 'none')
 
     return _build
 
