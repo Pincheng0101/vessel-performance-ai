@@ -1,4 +1,5 @@
-# GitLab CI/CD — auto-deploy the CDK stacks to AWS on every push to `main`.
+# GitLab CI/CD — deploy the CDK stacks to AWS. Push to `main` creates the
+# pipeline; the deploy job is *manual* (click ▶️ in GitLab to run it).
 #
 # Credentials come from CI/CD variables (Settings ▸ CI/CD ▸ Variables), NOT this
 # file — never commit AWS keys. Set these three as *Protected* (and Masked if
@@ -15,7 +16,7 @@ stages:
 
 deploy:
   stage: deploy
-  image: node:20-bookworm
+  image: node:22-bookworm
   # Docker-in-Docker: CDK bundles the Lambdas by running a container.
   services:
     - name: docker:27-dind
@@ -27,7 +28,10 @@ deploy:
     CDK_DEFAULT_REGION: us-west-2
     UV_NO_SYNC: '1' # `uv run` (cdk.json app cmd) must not re-sync/pull dev deps
   rules:
+    # Push to main creates the pipeline but the deploy waits for a manual ▶️
+    # click in GitLab (Pipelines / Jobs) before it runs.
     - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
   before_script:
     # Tolerate a lowercase `aws_session_token` variable — the AWS SDK only reads
     # the uppercase name, so normalize it here.
