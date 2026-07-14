@@ -1,863 +1,1072 @@
 # 航運術語辭典 (Shipping & Vessel-Performance Terminology)
 
 本檔是本專案的**單一權威術語辭典 (single source of truth for terminology)**。專案為陽明海運
-(Yang Ming) AI 船舶效能分析概念驗證 (Proof of Concept，POC)：以合成的午報 (Noon Report) 與
-水下檢查 (Underwater Inspection，UWI) 資料為輸入，套用 ISO 15016 / ISO 19030 國際標準公式，
-再疊加異常偵測 (anomaly detection)、碳強度指標 (CII) 與維修最佳化，最後落地為 Athena 資料表與
-Web 儀表板 (Dashboard)。
+(Yang Ming) 船舶效能分析：以**真實的**去識別化午報 (Noon Report)、船舶主檔與維修事件為輸入，
+套用 ISO 15016 / ISO 19030 國際標準公式，再疊加異常偵測 (anomaly detection)、碳強度指標 (CII)
+與維修最佳化，落地為 20 張 Athena 資料表。
 
-本辭典收錄**領域術語與方法**。門檻值與係數（如維修觸發 8%、CII 係數 a=1984）在相關術語內順帶
-說明，不單獨列內部程式常數名。每則術語以 `中文 (英文)` 標題呈現，附解說、關鍵公式、單位與判讀。
-數值以程式碼實作為權威值；若敘事文稿與程式碼不一致（如維修觸發門檻），一律以程式碼值為準並註明。
+**數值以程式碼為權威。** 每則術語標註其實作位置；若本檔與程式碼不一致，**以程式碼為準**，本檔即為
+臭蟲 (bug)。本檔所有數字均已對照 `ym_datalake/` 原始碼與線上資料湖 (data lake) 查核。
 
-> 相關文件：資料字典見 `doc/table-schema-zh.md`；ETL 方法見 `doc/curated-dataset.md`（M2）與
-> `doc/insights.md`（M3）；整體規格見 `doc/poc-spec.md`；儀表板雙語 hint 見 `web/glossary.js`。
+> 相關文件：資料字典 (data dictionary) 見 [`schema.md`](schema.md)；來源檔案見
+> [`dataset.md`](dataset.md)；精煉區演算法見 [`curated-dataset.md`](curated-dataset.md)；
+> **哪些欄位是合成的**見 [`synthetic-dataset.md`](synthetic-dataset.md)；ISO 19030 方法見
+> [`iso-19030.md`](iso-19030.md)；船舶諸元反推見 [`vessel.md`](vessel.md)。
+
+---
+
+## 0. 讀本檔之前：三個必要前提
+
+### 資料是真的，疊加層是估計的 (Real data, estimated overlay)
+
+`dataset/vt_fd.csv`（21,282 筆午報）、`dataset/vessel.jsonl`（15 艘）、`dataset/maintenance.csv`
+（77 筆事件）是**真實的去識別化營運資料**，原封不動落地於原始區 (raw zone)。本專案**沒有資料
+產生器 (generator)，也沒有地面實況 (ground truth)**——無從比對「植入的真值」，因為沒有植入。
+
+但為了讓分析可行，部分欄位是**合成 (synthesized) 的估計值**，集合為：**日曆紀元 (calendar
+epoch)、全部地理資訊 (lat/lon/heading/港口)、全部美金金額 (USD)、IMO 船舶識別號、UWI 的四個數值
+訊號、以及維修事件的成本/停役/地點**。這些欄位在 `schema.md` 標記為 `estimated`，**永遠不可當作
+事實引用 (never quote as fact)**。
+
+### 沒有任何資料表分割 (No partitions)
+
+全湖約 4 MB，遠低於分割修剪 (partition pruning) 划算的規模。**20 張表全部未分割**，`ship_id` 是
+普通欄位而非分割鍵 (partition key)。不要寫分割述詞 (partition predicate)。
+
+### 時間是相對日整數 (Relative-day integer axis)
+
+`noon_utc` / `event_day` / `inspection_day` / `fuel_price.day` 共用同一條**相對日**軸，第 0 天到
+第 1825 天（約 5 年）。原始區**完全沒有日曆**；精煉區 (curated zone) 才補上日曆，且該日曆的紀元
+本身就是估計值（見〈日曆紀元〉）。
 
 ---
 
 ## 目錄 (Table of Contents)
 
-1. [法規與標準](#1-法規與標準) — IMO、ISO 15016/19030、MARPOL、MEPC.352/353/354(78)、Z%、Rubert、NSTM、UN/LOCODE
-2. [碳排放與能效指標](#2-碳排放與能效指標) — CII、AER、EEOI、CO₂、碳因子 C_F、SFOC
-3. [船體與螺槳性能指標](#3-船體與螺槳性能指標) — 速度損失、期望船速、滑失、海軍係數、速度–功率曲線、ISP/DDP/MT/ME、超額油耗
-4. [物理與環境修正](#4-物理與環境修正) — 附加阻力、風阻 R_AA、浪阻 R_AW、環境功率 ΔP_env、排水量換算、推進效率、淺水/密度修正
-5. [船舶規格與尺寸](#5-船舶規格與尺寸) — DWT、GT、Lpp、船寬、設計吃水、MCR/NCR、設計船速、螺槳、方形係數、輕載排水量、TEU、船級
-6. [載況與靜水力](#6-載況與靜水力) — 排水量、吃水、俯仰差、載貨/壓載、貨重、質量平衡、靜水力表
-7. [氣海象環境](#7-氣海象環境) — 蒲福風級、有義波高、湧浪、風、海流、海水密度、海溫/氣溫/氣壓、迎浪
-8. [航行與推進](#8-航行與推進) — SOG、STW、對地/對水距離、航行小時、主機轉速、船艏向、航次/航段、節、海里、慢速航行
-9. [燃油與機械](#9-燃油與機械) — FOC、主機/輔機/鍋爐、HFO/VLSFO/LSMGO/MGO、洗滌器、LCV、加油價
-10. [汙損與維護行動](#10-汙損與維護行動) — 生物附著、汙損速率、距上次清潔天數、進塢、船體清潔、螺槳拋光/修理、塗層更新、主機檢查、成因→行動決策表、單項預測、維修規劃/服務窗口、維修觸發門檻
-11. [水下檢查與船況](#11-水下檢查與船況) — UWI、潛水員/ROV、船體汙損等級、覆蓋率、螺槳狀況、螺槳粗糙度、塗層狀況
-12. [成本與經濟](#12-成本與經濟) — 額外油費、累計額外成本、超額油費歸因（汙損／天氣／操作分量）、潛在節省、淨節省、燃油代價、回本天數、效果回復、最佳清潔時機 t\*
-13. [統計與分析方法](#13-統計與分析方法) — Theil-Sen、Huber、分段迴歸、EWMA、滾動/MAD z、IQR、IsolationForest、bootstrap CI、相關係數、precision/recall、殘差/基線、外推、趨勢、告警事件
-14. [資料與系統概念](#14-資料與系統概念) — 午報、資料湖、raw/curated zone、fact_/dim_/agg_ 表、營運船隊、地面實況、閉環可還原性、一致性檢查 C1–C14、資料品質、儀表板三頁
+1. [法規與標準](#1-法規與標準)
+2. [碳排放與能效指標](#2-碳排放與能效指標)
+3. [船體與螺槳性能指標](#3-船體與螺槳性能指標)
+4. [物理與環境修正](#4-物理與環境修正)
+5. [船舶規格與尺寸](#5-船舶規格與尺寸)
+6. [載況與靜水力](#6-載況與靜水力)
+7. [氣海象環境](#7-氣海象環境)
+8. [航行與推進](#8-航行與推進)
+9. [燃油與機械](#9-燃油與機械)
+10. [汙損與維護行動](#10-汙損與維護行動)
+11. [水下檢查與船況](#11-水下檢查與船況)
+12. [成本與經濟](#12-成本與經濟)
+13. [統計與分析方法](#13-統計與分析方法)
+14. [資料與系統概念](#14-資料與系統概念)
+15. [附錄：本專案「不存在」的術語](#15-附錄本專案不存在的術語)
 
 ---
 
 ## 1. 法規與標準
 
-國際海事組織與 ISO 標準界定了本專案指標的計算方法與合規參照。
-
 ### 國際海事組織 (International Maritime Organization, IMO)
 
-聯合國轄下負責船舶安全與海洋環境保護的專門機構。制定 MARPOL 公約與其下 MEPC 決議，是 CII、EEXI
-等能效法規的來源。IMO 亦為每艘船核發終生不變的 7 位數識別號（見〈IMO 船舶識別號〉）。
+聯合國轄下負責船舶安全與海洋環境保護的專門機構。制定防止船舶污染國際公約 (MARPOL) 與其下的海洋
+環境保護委員會 (MEPC) 決議，是 CII 等能效法規的來源。
 
 ### IMO 船舶識別號 (IMO Number)
 
-國際海事組織核發的船舶唯一識別碼，終生不變、不隨改名或轉籍變動。本專案以合成的 7 位數 IMO
-`9700001`–`9700009` 作為 9 艘示範船隊的主鍵與 Athena 分割鍵 (partition key)。
+IMO 核發的船舶唯一識別碼，終生不變。**本專案的 `imo_number` 是合成的** (`9800001`–`9800015`)，
+**不是真實 IMO 號**，也**不是分割鍵**——它只是 `dim_vessel` 上一個估計欄位。真正的船舶主鍵是
+去識別化的 `ship_id`（`S1`…`S23`）。
 
 ### 防止船舶污染國際公約 (MARPOL)
 
-International Convention for the Prevention of Pollution from Ships，IMO 的核心環保公約。其
-附則六 (Annex VI) 規範船舶大氣排放，是 CII 碳強度法規的母法脈絡；MEPC 系列決議即在此框架下通過。
+International Convention for the Prevention of Pollution from Ships。其附則六 (Annex VI) 規範船舶
+大氣排放，是 CII 碳強度法規的母法脈絡。
 
 ### 海洋環境保護委員會決議 (MEPC.352/353/354(78))
 
-Marine Environment Protection Committee 通過的 CII 技術決議：**MEPC.352(78)** 定 CII 計算方法、
-**MEPC.353(78)** 定各船型參照線係數 `a, c`、**MEPC.354(78)** 定 A–E 評級的 dd 邊界向量。本專案
-貨櫃船 (container ship) 採其公告值（見〈CII 參照線〉、〈dd 評級邊界向量〉）。
+**MEPC.352(78)** 定 CII 計算方法、**MEPC.353(78)** 定各船型參照線係數 `a, c`、**MEPC.354(78)** 定
+A–E 評級的 dd 邊界向量。本專案採其貨櫃船 (container ship) 公告值（見〈CII 參照線〉、
+〈dd 評級邊界向量〉）。碳因子採 **MEPC.308(73)**。
 
-### ISO 15016 船舶試航速度功率修正標準 (ISO 15016)
+### ISO 15016 船舶速度功率修正標準 (ISO 15016)
 
-規範如何把「受環境干擾的量測值」修正到「參考條件」，以取得可比較的**修正功率 (corrected power)**
-與**修正船速 (corrected speed)**。修正項含風阻、波浪附加阻力、水溫/密度、淺水與排水量換算。本專案
-於 ETL 階段 S3 套用（見〈第 4 章 物理與環境修正〉）。
+規範如何把受環境干擾的量測值修正到參考條件，取得可比較的**修正功率 (corrected power)** 與**修正
+船速 (corrected speed)**。本專案實作於 `etl/curated/corrections.py`。
+
+> ⚠️ **實測結果：本資料集上此修正是「不作用」的。** 見〈修正功率〉——修正慣例 (convention) 由執行期
+> 擇優選出，而勝出者是 `none`，故 `power_corrected_kw` 恆等於量測的 `horse_power`（線上資料 20,036
+> 筆非空列，100% 相等）。風阻/浪阻仍然計算並保留，供成本歸因使用。
 
 ### ISO 19030 船體與螺槳性能量測標準 (ISO 19030)
 
-規範以「百分比速度損失 (percentage speed loss)」量化船體與螺槳性能衰退的國際標準，並定義 ISP /
-DDP / MT / ME 等週期指標。它同時提供資料過濾準則（穩態、深水、低風浪），本專案以 `valid_flag`
-落實（見〈valid_flag 有效點旗標〉）。
+規範以**百分比速度損失 (percentage speed loss)** 量化船體與螺槳性能衰退，並定義 ISP / DDP / ME /
+MT 四個週期指標。它同時提供資料過濾準則（穩態、深水、低風浪），本專案以 `valid_flag` 落實（見
+〈有效點旗標〉）。
 
 ### CII 碳強度法規 (Carbon Intensity Indicator regulation)
 
-IMO 自 2023 年起對 5,000 GT 以上船舶施行的營運碳強度規範：每年計算達成值 (attained CII)，對照
-逐年折減的 required 線，給予 A–E 評級（D 連續三年或 E 須提出矯正計畫）。方法細節見〈第 2 章〉。
+IMO 自 2023 年起對 5,000 總噸 (GT) 以上船舶施行的營運碳強度規範：每年計算達成值 (attained CII)，
+對照逐年折減的 required 線，給予 A–E 評級。實作於 `etl/curated/cii.py`。
 
 ### 逐年折減率 (Reduction Factor, Z%)
 
-required 線相對基準參照線的逐年加嚴百分比：`required = (1 − Z%) · CII_ref`。本專案貨櫃船採
-IMO 公告時程 **2023→5、2024→7、2025→9、2026→11 (%)**。Z% 越大代表合規門檻越嚴。
+required 線相對基準參照線的逐年加嚴百分比：`required = (1 − Z%) · CII_ref`。程式碼權威值
+（`cii.py:20`）：
 
-### 魯伯特量表 (Rubert Scale)
+| 年 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 | 其他 |
+|---|---|---|---|---|---|---|---|
+| Z% | 0 | 0 | **5** | **7** | **9** | **11** | 11 |
 
-螺槳與船體表面粗糙度的標準比對量表，等級 **A–F**（A 最光滑/最佳、F 最粗糙/最差）。UWI 以此評定
-`propeller_condition`：E/F 建議螺槳修理 (propeller repair)、C/D 建議螺槳拋光 (propeller polishing)。
-
-### NSTM 船體汙損評級 (Naval Ships' Technical Manual rating)
-
-美國海軍技術手冊定義的船體生物附著分級法，本專案量化為 **0–100** 的 `hull_fouling_rating`
-（越高越髒），≥60 建議船體清潔 (hull cleaning)。見〈船體汙損等級〉。
+折減的效果在資料上看得見：2023 年以前 AER 評級與 IMO 評級完全一致；2024 年起同一達成值的 IMO 評級
+開始落後 AER 一級（如 2025 年有 3,223 個船日 AER=A 但 IMO=B）。
 
 ### UN/LOCODE 聯合國港口代碼 (UN/LOCODE)
 
-United Nations Code for Trade and Transport Locations，5 碼的港口/地點代碼（前 2 碼國家、後 3
-碼地點，如 `KRPUS` = 韓國釜山、`NLRTM` = 荷蘭鹿特丹）。午報的 `port_from`/`port_to` 採此格式。
+5 碼的港口代碼（前 2 碼國家、後 3 碼地點，如 `KRPUS` = 韓國釜山、`NLRTM` = 荷蘭鹿特丹）。
+`dim_port` 收錄 10 個真實港口，但**本船隊從未真正靠泊過它們**——港口是合成航線的產物（見
+〈合成地理〉）。
 
 ---
 
 ## 2. 碳排放與能效指標
 
-衡量單位運輸的 CO₂ 排放與燃油效率；CII 為法規指標，EEOI/SFOC 為營運與機械指標。
-
 ### 碳強度指標 (Carbon Intensity Indicator, CII)
 
-船舶每載重噸·海里的 CO₂ 排放量評級 (A–E)，A 最佳。屬年度指標，本專案逐船×年計算後**廣播
-(broadcast)** 至該年每一天的資料列。貨櫃船以容量 = 載重噸 (DWT)，故 AER 與完整 IMO 達成值數值
-相同，只差在評級參照線（見〈CII 評級（AER 基準）〉與〈CII 評級（IMO 折減線）〉）。
+船舶每載重噸·海里的 CO₂ 排放量評級 (A–E)，A 最佳。屬**年度**指標，本專案逐船×年計算後**廣播
+(broadcast)** 至該年每一天的資料列（`fact_performance_daily.cii_*`）。貨櫃船的容量 (capacity) 即
+載重噸 (DWT)，故 `cii_aer` 與 `cii_imo` **數值完全相同**，只差在評級所對照的線。
 
 ### CII 達成值 (Attained CII)
 
-實際營運算出的碳強度：`attained = Σ_year(total_foc · C_F) · 1e6 / (DWT · Σ_year distance_og)`，
-單位 gCO₂/dwt·nm。分子為全年各燃油油耗×碳因子的 CO₂ 總量，分母為載重噸×全年對地航距。
+`attained = Σ_year(co2_mt) · 1e6 / (DWT · Σ_year total_distance)`，單位 gCO₂/dwt·nm
+（`cii.py:60`）。分子分母皆對該年**所有**日資料求和（不套 `valid_flag`）。
 
 ### CII 參照線 (CII Reference Line, CII_ref)
 
-評級基準：`CII_ref = a · DWT^(−c)`，貨櫃船 **a = 1984、c = 0.489**（MEPC.353）。船越大單位碳強度
-基準越低。`cii_rating_aer` 即以此線評級。
+`CII_ref = a · DWT^(−c)`，貨櫃船 **a = 1984、c = 0.489**（MEPC.353，`cii.py:17-18`）。
 
-### CII 評級（AER 基準）(cii_aer)
+### CII 評級（AER 基準）(cii_rating_aer)
 
-以年度效率比 (AER) 對**基準參照線 CII_ref** 評出的 A–E 等級，不含逐年折減。
+達成值對**未折減的基準參照線** `CII_ref` 評出的 A–E 等級。
 
-### CII 評級（IMO 折減線）(cii_imo)
+### CII 評級（IMO 折減線）(cii_rating_imo)
 
-以達成值對**該年折減後的 required 線**評出的 A–E 等級：`required = (1 − Z%) · CII_ref`。因逐年
-折減，同一達成值在後續年份評級會逐步變差。
+達成值對**該年折減後的 required 線** `(1 − Z%)·CII_ref` 評出的 A–E 等級。因逐年折減，同一達成值在
+後續年份會逐步變差。
 
 ### dd 評級邊界向量 (dd Vector)
 
-把「達成值 / required」比值切成 A–E 五級的邊界乘數，貨櫃船為 **(0.83, 0.94, 1.07, 1.19)**
-（MEPC.354）。比值 <0.83·required 為 A，>1.19·required 為 E，其間依序 B/C/D。
+把「達成值 / 參照線」比值切成 A–E 五級的邊界乘數，貨櫃船為 **(0.83, 0.94, 1.07, 1.19)**
+（MEPC.354，`cii.py:19`）：比值 ≤0.83 為 A、≤0.94 為 B、≤1.07 為 C、≤1.19 為 D，其上為 E。
 
 ### 年度效率比 (Annual Efficiency Ratio, AER)
 
-每載重噸·海里的 CO₂ 排放量 (gCO₂/dwt·nm)，越低越佳。以 DWT 作分母容量，是 CII 的簡化算法；貨櫃船
-的 AER 達成值與完整 IMO 達成值相同。
+每載重噸·海里的 CO₂ 排放量 (gCO₂/dwt·nm)，越低越佳。貨櫃船以 DWT 為容量，故 AER 達成值與 IMO
+達成值相同。
 
 ### 能效營運指標 (Energy Efficiency Operational Indicator, EEOI)
 
-每**貨噸**·海里的 CO₂ 排放量：`eeoi = co2 · 1e6 / (cargo · distance_og)`，單位 gCO₂/t·nm。以實際
-載貨量為分母，反映真實運輸效率；壓載 (ballast) 或零貨量日為 null。與 AER 差異在於分母用貨重而非
-載重噸。
+每**貨噸**·海里的 CO₂ 排放量：`eeoi = co2_mt · 1e6 / (cargo_on_board · total_distance)`，單位
+gCO₂/t·nm（`physics.py:132`）。以實際載貨量為分母，反映真實運輸效率；壓載或零貨量日為 null。
 
 ### 二氧化碳排放量 (CO₂ Emissions, co2_mt)
 
-由油耗換算的日排放：`co2_mt = total_foc · C_F[fuel]`（噸）。是 CII/EEOI 的分子來源，靠港
-(in-port) 日亦有值。
+`co2_mt = total_consump · C_F[當日燃油]`（`daily.py:118`）。用**全船總油耗**乘上**當日主燃油**的
+碳因子。
 
 ### 碳因子 (Carbon Factor, C_F)
 
-每噸燃油完全燃燒的 CO₂ 排放係數 (tCO₂/t)：**HFO 3.114、VLSFO 3.151、MGO/LSMGO 3.206**。含碳量越高
-係數越大，故輕質餾出油 (MGO) 反而略高。
+每噸燃油完全燃燒的 CO₂ 排放係數 (tCO₂/t)，MEPC.308(73)（`fuel.py:38`）：
+
+| 燃油 | HSHFO | ULSFO | VLSFO | LSMGO | BIO_HSFO |
+|---|---|---|---|---|---|
+| C_F | 3.114 | 3.151 | 3.151 | 3.206 | **3.114** |
+
+`BIO_HSFO` **刻意沿用化石 HSHFO 的因子**（保守估計，不給生質燃油減碳優惠）。
 
 ### 主機燃油消耗率 (Specific Fuel Oil Consumption, SFOC)
 
-每產生 1 kWh 軸功率所耗燃油克數：`sfoc = me_foc · 1e6 / (me_power · hours)`，單位 g/kWh，越低越
-省油。是引擎狀態指標——**速度損失未升但 SFOC 升→研判引擎劣化 (engine degradation)**（見〈成因分類〉）。
+每產生 1 kWh 軸功率所耗燃油克數 (g/kWh)，越低越省油。來源即午報的 `sfoc` 欄位（精煉區改名
+`sfoc_g_kwh`，並經離群裁剪至 120–400）。是引擎狀態指標——**速度損失未升但 SFOC 升 → 研判引擎劣化
+(engine degradation)**。
 
 ---
 
 ## 3. 船體與螺槳性能指標
 
-ISO 19030 核心指標：以修正後的可比條件量化船體/螺槳性能衰退。**速度損失正值 = 效能衰退**（同功率下
-比乾淨船體慢），數值越大越糟，維修後應階梯下降——全系統一致採此正負號慣例。
+ISO 19030 核心指標。**速度損失正值 = 效能衰退**（同功率下比乾淨船體慢），數值越大越糟，維修後應
+階梯下降——全系統一致採此正負號慣例。
 
 ### 速度損失 (Speed Loss, speed_loss_pct)
 
-相同（修正）主機功率下，實際船速較乾淨船體基準的下降百分比，主因船體/螺槳汙損：
-`speed_loss_pct = (v_expected − STW) / v_expected × 100`（+ = 劣化）。是本專案主指標，趨勢圖、門檻
-線、成本模型皆以它為核心。
+相同（修正）主機功率下，實際對水船速較乾淨船體基準的下降百分比：
+
+```
+speed_loss_pct = (v_expected_kn − STW) / v_expected_kn × 100     # daily.py:113
+```
+
+正值 = 劣化。是本專案的主指標。**注意：它在每一列都會計算**（含 `valid_flag = false` 的列）；
+`valid_flag` 只規範「哪些點可以拿來擬合/趨勢分析」，不規範哪些點有值。
 
 ### 期望船速 / 乾淨船速 (Expected / Clean-hull Speed, v_expected_kn)
 
-在**修正功率**下由乾淨船體速度–功率曲線求得的應有船速：`v_expected = curve.clean_speed_kn
-(power_corrected, Δ)`。它是速度損失的比較基準；實際對水船速 (STW) 低於它即為損失。
+在修正功率下由乾淨船體速度–功率曲線反解的應有船速：
 
-### 螺槳滑失率 (Propeller Slip, slip)
+```
+v_expected = (P_corrected / (a · (Δ/Δ_ref)^(2/3)))^(1/n)          # reference_curve.py:81
+```
 
-理論航距與實際航距的差異百分比：先由螺距與轉速求理論船速 `V_th = pitch · RPM · 60 / 1852`（kn），
-再 `slip = (V_th − V) / V_th`。**視滑失 (apparent slip)** 用對地船速 (SOG)、**真滑失 (real slip)**
-用對水船速 (STW)。上升多因螺槳汙損/受損或海流；真滑失突升是螺槳異常的主要判據。
+### 乾淨船體參考曲線 (Clean-hull Reference Curve)
+
+`P = a · V^n · (Δ/Δ_ref)^(2/3)`（`reference_curve.py:76`）。**每艘船一組 `curve_a` / `curve_n`**，
+存於 `reference_curve` / `dim_reference_curve`（15 船 × 12 個速度點 = 180 列，速度網格
+0.50–1.05 × 設計船速）。
+
+### 部分池化擬合 (Partially Pooled Fit)
+
+曲線擬合的核心設計（`reference_curve.py:178-217`）：
+
+- **`curve_n`（速度指數）是「池化 (pooled)」的**——同一 `(hull_class, propeller_variant)` 池共用一
+  個指數。它是船型的性質，單船約 26 個乾淨點無法定出，但整池數百點可以。池內點數 < 30 時，池擴大到
+  整個 `hull_class`（`fit_pool` 欄位記錄實際用的池）。指數夾在 **[2.5, 4.5]**。
+- **`curve_a`（尺度）是「逐船 (per ship)」擬合的**——姊妹船並不全等。若用池化的尺度，各船自身的基準
+  效率差異會變成速度損失的常數偏移，**那個偏移足以讓一次清潔看起來把船弄得更糟**。單船乾淨點
+  < 8 (`MIN_SHIP_FIT_POINTS`) 時才退回池值（`n_fit_points` 欄位可查；S6、S8、S21、S22 屬之）。
+
+擬合樣本 = **乾淨視窗 (clean window)**：每艘船的首日與每次 UWC/DD 事件日之後 **60 天**內、且通過
+`valid_flag` 的點（`reference_curve.py:96`）。注意 **PP（螺槳拋光）不開啟乾淨視窗**。
+
+### 螺槳滑失率 (Propeller Slip, slip_apparent / slip_real)
+
+理論航距與實際航距的差異比例。先由螺距 (pitch) 與轉速求理論船速：
+
+```
+V_th = pitch_m · rpm · 60 / 1852       (kn)                       # physics.py:101
+slip = (V_th − V) / V_th                                          # physics.py:109
+```
+
+- **視滑失 (apparent slip)** 用對地船速 (SOG, `avg_speed`)
+- **真滑失 (real slip)** 用對水船速 (STW, `speed_through_water`)
+
+⚠️ 兩者皆為**分數 (fraction)，不是百分比**——`slip_real = 0.05` 代表 5%。真滑失突升是螺槳異常的
+主要判據。
 
 ### 海軍係數 (Admiralty Coefficient, admiralty_coef)
 
-簡易船體推進效率基準：`C_A = Δ^(2/3) · STW³ / P_S`（Δ=排水量、P_S=主機功率）。**數值下降代表船體/
-螺槳汙損加劇**，可與速度損失互相佐證。
-
-### 速度–功率曲線 (Speed–Power Curve)
-
-實測船速對主機功率的關係，與乾淨船體基準曲線比較以量化性能衰退；散點相對基準線右移即代表劣化。
-基準曲線形如 `P = a · V^n`（指數 n≈3.5–4.2），排水量修正為 `P ∝ Δ^(2/3)`。每船一組海試
-(sea trial) 基準點存於 `dim_reference_curve`。
+簡易船體推進效率基準：`C_A = Δ^(2/3) · STW³ / P`（`physics.py:129`）。**數值下降代表船體/螺槳汙損
+加劇**。注意它餵入的是**原始 `horse_power`**，不是修正功率。它同時是 `valid_flag` 的守門條件之一
+（合理帶 300–1300）。
 
 ### 在役性能指標 (In-service Performance, ISP)
 
-ISO 19030 週期指標：各汙損週期的平均速度損失相對**首週期**的落差，衡量在航長期劣化。長格式
-(long format) 存於 `fact_performance_indicator`，`value`=該週期平均、`reference_value`=首週期平均。
+ISO 19030 週期指標：各汙損週期的平均速度損失，對照**首週期**。`value` = 該週期平均、
+`reference_value` = 首週期平均。週期由 UWC/DD 切分。線上 34 列，涵蓋 15 艘船。
 
 ### 進塢性能指標 (Dry-docking Performance, DDP)
 
-進塢 (dry dock) 前後各 **±45 天**視窗的平均速度損失對比（後 vs 前），衡量塢修效益。`value`=進塢後
-45 天平均、`reference_value`=進塢前 45 天平均。
+進塢 (dry dock) 前後各 **45 天**視窗的平均速度損失對比。`value` = 進塢**後** 45 天平均、
+`reference_value` = 進塢**前** 45 天平均。
 
-### 維修觸發 (Maintenance Trigger, MT)
+> 每個視窗至少要 3 個有效點才成立，加上 5 艘船（S9–S12、S23）根本沒進過塢，**線上只有 2 列**。
+> DDP 在本資料集上幾乎是空的——引用前先查。
 
-速度損失的 **14 天移動平均**首次越過觸發門檻（本專案 **8%**）的日期，用於預警。`value`=8.0（門檻）、
-`event_date`=越界日。門檻值權威來源見〈維修觸發門檻〉。
+### 維修觸發指標 (Maintenance Trigger, MT)
+
+速度損失的 **14 天移動平均**首次越過 **8.0%** 觸發門檻的日期（`indicators.py:148`）。
+`value` = **8.0（門檻常數本身，不是觀測值）**、`reference_value` = null、`event_day` = 越界日。
+每艘船至多一列（首次越界即停），線上 13 列。
 
 ### 維修效益 (Maintenance Effect, ME)
 
-單一維修事件前後（各 **±30 天**）的平均速度損失落差（前 − 後，+ = 已恢復），驗證維修成效。
-`me_recovery_pct = ME.value / ME.reference_value × 100`；與成本並列可得回本天數 (payback)。
+單一維修事件前後各 **30 天**的平均速度損失落差（`indicators.py:110`）：
+
+```
+value           = before − after      # 正值 = 船體已回復
+reference_value = before
+```
+
+`UWI`（純檢查）不計 ME。派生欄位 `fact_maintenance_event.me_recovery_pct = value / reference_value
+× 100`。線上 38 列，涵蓋 12 艘船。
 
 ### 超額油耗 (Excess Fuel Oil Consumption, excess_foc_mt)
 
-汙損造成的每日多耗燃油：`excess_foc = me_foc · [1 − (1 − s)^n]`（實作式，s = speed_loss/100、
-n = 曲線指數）。等價於以乾淨油耗表示的 `FOC_clean · [(1/(1−s))^n − 1]`（規格 §4.4）。是成本模型與
-維修時機最佳化的輸入。
+汙損造成的每日多耗燃油（`physics.py:140`）：
+
+```
+excess_foc_mt = me_consumption · [1 − (1 − s)^n]    s = speed_loss_pct/100, n = curve_n
+```
+
+`s ≤ 0` 或 `s ≥ 1` 時為 0。是成本模型與維修時機最佳化的輸入。
 
 ---
 
 ## 4. 物理與環境修正
 
-ISO 15016 的修正邏輯：把量測功率扣除環境附加阻力所耗的功率，還原到可比的參考條件。本專案 ETL 反推
-產生器的完全相同前向物理，使植入的速度損失可還原（閉環 C13）。
-
 ### 附加阻力 (Added Resistance)
 
-相對於平靜水面試航條件，風、浪、淺水、密度等環境因素額外造成的船體阻力。ISO 15016 修正即在扣除
-其對應功率，取得修正功率。
+相對於平靜水面條件，風、浪等環境因素額外造成的船體阻力。ISO 15016 修正即在扣除其對應功率。
 
 ### 風阻 (Wind Resistance, R_AA / resistance_wind_kn)
 
-由相對風在水線上受風面積產生的縱向阻力，以 Blendermann / STA-JIP 風阻係數集計算：
-`R_AA = ½·ρ_air·C_AA(ψ)·A_XV·V_WR² − ½·ρ_air·C_AA(0)·A_XV·V_G²`（ψ=相對風向、A_XV=橫向受風面積、
-V_WR=相對風速）。單位 kN，靠港日為 null。
+Blendermann 縱向風阻，以單一係數配餘弦角度形狀（`physics.py:71`）：
+
+```
+C_AA = 0.85 · cos(θ_apparent)          # C_AA_HEAD = 0.85（貨櫃船滿載迎風值）
+R_AA = ½ · ρ_air · C_AA · A_XV · V_apparent²        ρ_air = 1.225 kg/m³
+```
+
+`A_XV` = `transverse_area_m2`（**估計值**，非量測）。順風時 cos < 0，阻力可為**負**。
+
+> 這是 Blendermann 的**單係數近似**，不是完整的 Blendermann 係數表查表。
 
 ### 波浪附加阻力 (Added Wave Resistance, R_AW / resistance_wave_kn)
 
-波浪造成的額外阻力，本專案採 **STAWAVE-1** 迎浪近似：
-`R_AWL = (1/16)·ρ_sw·g·H_s²·B·√(B/L_BWL)`（H_s=有義波高、B=船寬、L_BWL=水線長）。單位 kN。
+STAWAVE-1 迎浪近似（`physics.py:77`）：
 
-### 修正功率 / 修正船速 (Corrected Power / Speed, power_corrected_kw / speed_corrected_kn)
+```
+R_AWL = (1/16) · ρ_sw · g · Hs² · B · √(B / Lpp)    ρ_sw = 1025, g = 9.81
+```
 
-扣除環境附加功率後的可比值：`power_corrected = me_shaft_power_kw − ΔP_env`；`speed_corrected =
-speed_tw_kn`（STW，海流已在對水基準中移除）。修正功率是求期望船速的輸入。
+角度衰減：相對浪向 ≤45° 全額、45°→90° 線性遞減、≥90° 為 0。`Hs` = `sea_height`。
 
 ### 環境附加功率 (Environmental Power, ΔP_env)
 
-風阻與浪阻換算所需的額外軸功率總和：`ΔP_env = 風(Blendermann) + 浪(STAWAVE-1 迎浪)` 附加功率，
-約占總功率 10–20%。需要午報的船艏向 (heading) 才能重建其分量。
+風阻與浪阻換算成的額外軸功率（`physics.py:94`）：
+
+```
+ΔP_env_kw = (R_AA + R_AW) · V_ms / η / 1000         η = PROPULSIVE_EFFICIENCY = 0.70
+```
+
+### 修正功率 / 修正船速 (Corrected Power / Speed)
+
+`power_corrected_kw` 與 `speed_corrected_kn`。
+
+- **`speed_corrected_kn` 恆等於 STW**——海流已內含於對水基準，本專案不做任何速度修正。
+- **`power_corrected_kw` 在本資料集上恆等於 `horse_power`。** 原因見下。
+
+### 修正慣例擇優 (Correction Convention Selection) ⚠️
+
+午報的風/浪方向是 **16 方位點 (0–15)**，但**沒有註明是「相對船艏」還是「真方位」**。
+`corrections.py` 因此實作三種慣例 `('bow_relative', 'true_compass', 'none')`，在執行期各跑一遍，
+以**去趨勢散布 (detrended scatter)** 最小者勝出（`corrections.py:223`）。
+
+實測（4,657 個 ISO 有效點）：**`none` = 4.534 pp、`bow_relative` = 5.009 pp、`true_compass` =
+5.011 pp** → **`none` 勝出**，即「不修正」比任何一種方向假設都更能收斂散布。
+
+**後果：`power_corrected_kw` = 量測的 `horse_power`，ISO 15016 修正完全不影響速度損失。** 線上資料
+20,036 筆非空列 100% 相等，可自行驗證。風阻/浪阻欄位仍照算並保留——它們被用於**超額油費的天氣
+歸因**（見〈天氣分量〉）。
+
+> 這不是臭蟲，是誠實。方向欄位語意不明時，硬套一個錯的慣例只會把雜訊放大。
 
 ### 排水量換算 (Displacement Correction)
 
-把不同載況的功率/船速換算到參考排水量：`P ∝ Δ^(2/3)`。ISO 19030 的 valid_flag 亦要求排水量落在
-基準曲線適用範圍 `Δ ∈ [0.5, 1.2]·Δ_ref`。
+把不同載況的功率換算到參考排水量：`P ∝ Δ^(2/3)`。`valid_flag` 亦要求
+`Δ ∈ [0.5, 1.2] · Δ_design`。
 
 ### 推進效率 (Propulsion Efficiency, η)
 
-主機軸功率轉換為有效推進力的效率，受船體/螺槳汙損影響而下降。海軍係數與速度損失即為其外顯代理指標。
+軸功率轉換為有效推進力的效率，本專案取固定 **0.70**（`physics.py:29`），僅用於阻力→功率換算。
 
-### 淺水修正 / 密度修正 (Shallow-water / Density Correction)
+### 深水門檻 (Deep-water Threshold)
 
-水深不足時（Lackenby / Schlichting 法）與海水密度/黏度偏離參考值時對阻力所做的修正。本專案午報無
-水深欄位，淺水修正為 N/A；密度/水溫修正則依 `sea_water_density`/`sea_water_temp` 進行。
+淺水會抬高阻力，故 ISO 19030 要求深水。本專案**有** `water_depth` 欄位，門檻為兩條規則取大
+（`physics.py:153`）：
+
+```
+h_min = max( 3 · √(B · T) ,  2.75 · V² / g )       V 為 STW (m/s), g = 9.81
+```
+
+水深缺值即判為無效點。
 
 ---
 
 ## 5. 船舶規格與尺寸
 
-`vessel_master` / `dim_vessel` 記錄的每船靜態規格，是效能計算的縮放基準。本專案船隊橫跨常見貨櫃
-船級。
+`vessel_master` / `dim_vessel` 的每船靜態規格。**本船隊是 15 艘去識別化貨櫃船，分成兩個姊妹船級**
+(sister-ship class)。諸元多為由午報反推擬合而得，見 [`vessel.md`](vessel.md)。
+
+### 船級 / 船殼級 (Hull Class, hull_class)
+
+**`W1` / `W2`**——本專案僅有的兩個船型分組，由午報的功率–速度關係與螺距分群反推。**船隊 (fleet)
+就等於船殼級**，沒有第二個船隊維度。
+
+### 螺槳型式 (Propeller Variant, propeller_variant)
+
+**`P1`**（螺距 9.886 m）/ **`P2`**（9.556 m）。與 `hull_class` 組成參考曲線的池化鍵。
 
 ### 載重噸 (Deadweight Tonnage, DWT)
 
-船舶可裝載的最大總重量（公噸），含貨物、燃油、淡水、備品等。貨櫃船以 DWT 作為 CII 的容量
-(capacity)，故 AER 與 IMO 達成值一致。
+船舶可裝載的最大總重量 (t)。貨櫃船以 DWT 作為 CII 的容量。**本欄為估計值**（用估計的輕載排水量
+反推）。
 
 ### 總噸位 (Gross Tonnage, GT)
 
-船舶內部容積的無因次量度，CII 法規適用門檻（5,000 GT 以上）以此界定，與載重噸不同。
+船舶內部容積的無因次量度，CII 法規適用門檻（5,000 GT 以上）以此界定。
 
 ### 垂線間長 (Length Between Perpendiculars, Lpp)
 
-船艏艉垂線間的船長 (m)，常用於船體性能與波浪阻力計算（如 STAWAVE-1 的水線長）。
+船艏艉垂線間的船長 (m)，STAWAVE-1 浪阻公式中的水線長即以此代入。
 
-### 船寬 (Breadth / Moulded Breadth, B)
+### 船寬 (Breadth, B) / 設計吃水 (Design Draft) / 貨櫃當量 (TEU)
 
-船舶的最大模寬 (m)，波浪附加阻力公式中的 `B`。
-
-### 設計吃水 (Design Draft)
-
-設計工況下的吃水深度 (m)，對應設計排水量與設計船速的基準載況。
+`breadth_m`、`design_draft_m`、`teu_nominal`——姊妹船級的設計值 (`class` 級 provenance)，全級相同。
 
 ### 最大持續額定功率 (Maximum Continuous Rating, MCR)
 
-主機可長期連續運轉的最大功率 (kW)，是主機能力上限與各船級縮放的基準。
+主機可長期連續運轉的最大功率 (kW)。由午報的功率上包絡反推。離群裁剪以 `1.15 × mcr_kw` 為上界。
 
 ### 正常持續額定功率 (Normal Continuous Rating, NCR)
 
-日常營運的常用續航功率，約 **0.85·MCR**，對應設計船速的巡航點。
+日常營運的常用功率，約 **0.85 × MCR**。
 
-### 設計船速 (Design Speed, Vdes)
+### 設計船速 (Design Speed, design_speed_kn)
 
-船舶於設計工況下的合約/服務航速 (kn)。ISO 19030 的低速過濾以 `STW ≥ 0.5·Vdes` 為門檻。
+平靜水面功率曲線轉折點的 STW。多處門檻以它為基準：`valid_flag` 要求 `STW ≥ 0.5 · Vdes`；參考曲線
+網格為 0.50–1.05 × Vdes；速度剖面網格為 0.50–1.00 × Vdes。
 
 ### 定距螺槳 (Fixed-Pitch Propeller, FPP)
 
-槳葉角度固定、以轉速調節推力的螺槳型式。本專案船隊皆為 FPP，其螺距 (pitch)、直徑 (diameter)、
-槳葉數 (n_blades) 為固定規格，是計算理論船速 V_th 與滑失的依據。
+槳葉角度固定、以轉速調節推力。本船隊皆為 FPP，其螺距 (`pitch_m`) 是理論船速 V_th 與滑失計算的
+依據。
 
 ### 方形係數 (Block Coefficient, Cb)
 
-船體水下體積相對外接長方體 (Lpp×B×吃水) 的比值 `Cb = ∇ / (Lpp·B·T)`，反映船型豐瘦；貨櫃船
-Cb 偏低（船型較瘦長）以利高速。
+`Cb = ∇ / (Lpp · B · T)`，反映船型豐瘦。
 
-### 輕載排水量 (Lightship)
+### 輕載排水量 (Lightship, lightship_t)
 
-空船本身（船體、機械、固定設備）的重量，不含貨物/燃油/壓載。質量平衡中：
-`排水量 Δ = lightship + 貨重 + 壓載 + 燃油 + 備品`。
+空船本身的重量，不含貨/油/壓載。**本欄為估計值**——無法從午報反推。
 
-### 設計排水量 (Design Displacement, Δ_ref)
+### 每公分吃水噸數 (Tonnes Per Centimetre, TPC, tpc_t_per_cm)
 
-基準速度–功率曲線所對應的參考排水量 (t)。實際排水量偏離時以 `P ∝ Δ^(2/3)` 換算。
+吃水每變化 1 cm 所對應的排水量變化 (t/cm)。**它驅動排水量回填**（見〈排水量回填〉）。
 
-### 標準貨櫃當量 (Twenty-foot Equivalent Unit, TEU)
+### 橫向受風面積 (Transverse Area, transverse_area_m2)
 
-以 20 呎貨櫃為基準的裝載量單位，用於描述貨櫃船規模（如 YM WELLNESS 約 11,000 TEU）。
-
-### 船級 (Vessel Class)
-
-貨櫃船依尺度分級：**支線型 (Feeder) → Feedermax → 巴拿馬極限型 (Panamax) → 後巴拿馬型
-(Post-Panamax) → 新巴拿馬型 (Neo-Panamax) → 超大型 (Ultra Large Container Vessel, ULCV)**。本
-專案 9 艘示範船涵蓋各級，深入探討對象 **YM WELLNESS** 為 Neo-Panamax。
+水線上迎風投影面積 (m²)，風阻公式的 `A_XV`。**本欄為估計值**——無法從午報反推。
 
 ---
 
 ## 6. 載況與靜水力
 
-描述船舶當日的裝載狀態與吃水；載況決定排水量，進而影響功率需求與各項修正。
-
 ### 排水量 (Displacement, Δ)
 
-船舶排開海水的重量，等於全船總重 (t)。由平均吃水經靜水力近似換算，並需滿足質量平衡
-`Δ = lightship + cargo + ballast + fuel + stores`（一致性規則 C5）。
+船舶排開海水的重量 (t)。午報只有 **68.5%** 的列有此值，其餘由吃水回填。
 
 ### 吃水 (Draft)
 
-船體浸入水中的深度 (m)：分**艏吃水 (draft_fore)**、**艉吃水 (draft_aft)**、**平均吃水
-(mean_draft = (艏+艉)/2)**。是查靜水力表求排水量的輸入。
+`fore_draft` / `after_draft` / `mid_draft` (m)。精煉區的 `mean_draft_m` = `mid_draft`，缺值時取
+`(fore + after) / 2`（`clean.py:108`）。
 
-### 俯仰差 (Trim)
+### 排水量回填 (Displacement Backfill) 與 `displacement_source`
 
-艉吃水減艏吃水：`trim = draft_aft − draft_fore`（m）。正值為艉傾 (by the stern)，影響阻力與推進
-效率。
+排水量缺值時由吃水經靜水力近似推估（`clean.py:118`）：
 
-### 載貨 / 壓載 (Laden / Ballast, condition_flag)
+```
+Δ = Δ_design + (T − T_design) · 100 · TPC  +  該船殼級的中位數殘差偏移
+```
 
-**laden**=載貨航行、**ballast**=空載壓載航行。壓載或零貨量日 EEOI 無意義而為 null。
+（×100 是公尺→公分。偏移量由該船殼級的實測殘差中位數重新擬合。）
 
-### 貨重 (Cargo Weight, cargo_weight_mt)
+`displacement_source` 欄位記錄該列是 **`measured`（量測）** 還是 **`backfilled`（回填）**。線上
+20,938 列中有 **6,665 列是回填的**。⚠️ **`valid_flag` 只採用 `measured` 的列**——回填值不足以支撐
+ISO 19030 的擬合。
 
-當日實際載貨重量 (t)，質量平衡的組成之一，也是 EEOI 的分母因子。
+### 貨重 (Cargo on Board, cargo_on_board)
 
-### 質量平衡 (Mass Balance)
-
-排水量須等於各重量組成之和（見〈排水量〉公式），確保合成資料的載況物理自洽（C5）。
-
-### 靜水力表 (Hydrostatic Table)
-
-船舶在各吃水下的排水量、浮心、每公分排水噸等靜水力參數對照表；本專案以近似關係由平均吃水換算
-排水量。
+當日實際載貨重量 (t)，EEOI 的分母因子。
 
 ---
 
 ## 7. 氣海象環境
 
-午報記錄的氣象與海象，是 ISO 15016 環境修正與 ISO 19030 有效點過濾（風浪過大剔除）的依據。
+午報記錄的氣海象，是 ISO 15016 環境修正與 ISO 19030 有效點過濾的依據。
 
-### 蒲福風級 (Beaufort Scale, beaufort)
+### 蒲福風級 (Beaufort Scale, wind_scale)
 
-以整數 0–12 描述風力強度的分級，與風速及波高相關 (C11)。ISO 19030 有效點過濾要求 **Beaufort ≤ 6**；
-異常偵測則以 **Beaufort ≥ 7** 作為海況異常 (weather) 的直接信號。
+風力強度分級。**本專案的 `valid_flag` 要求 Beaufort ≤ 4**（`filters.py:46`），比 ISO 19030 常見的
+≤6 更嚴。
 
-### 有義波高 (Significant Wave Height, Hs / wave_height_m)
+> ⚠️ 這道閘門有一個重要的連鎖後果：**異常偵測只跑在有效點上**，而有效點的風級恆 ≤4，但天氣成因
+> 的判定條件是風級 **≥5**——**故 `cause = 'weather'` 永遠不可能出現**。見〈天氣成因（不可達）〉。
 
-海浪中最高 1/3 波高的平均 (m)，STAWAVE-1 浪阻公式的關鍵輸入 `H_s`；波高與蒲福風級正相關。
+### 有義波高 (Significant Wave Height, Hs / sea_height)
 
-### 湧浪 (Swell)
+海浪中最高 1/3 波高的平均 (m)，STAWAVE-1 浪阻公式的關鍵輸入。
 
-由遠處風場傳來、與當地風不同步的長週期波（`swell_height_m`/`swell_dir_deg`），與當地風浪並存但
-成因不同。
+### 湧浪 (Swell, swell_height / swell_direction)
 
-### 風速 / 風向 (Wind Speed / Direction)
+由遠處風場傳來的長週期波，與當地風浪並存但成因不同。
 
-真風速 (kn) 與風向 (°)。與船速合成為相對風 (V_WR)，決定風阻大小與方向。
+### 十六方位點 (16-point Compass, 0–15) ⚠️
 
-### 海流 (Current, current_speed_kn / current_dir_deg)
+`wind_direction` / `swell_direction` / `sea_direction` **不是角度**，而是 **0–15 的十六方位點**
+整數（每點 22.5°）。程式碼以 `compass_to_deg(p) = p × 22.5` 轉換（`physics.py:45`）。**把它當成度數
+用會得到完全錯誤的方向。**
 
-水體流動 (kn/°)。對地船速與對水船速之差即海流投影分量：`SOG ≈ STW + 海流投影`（C4）。ISO 修正
-以 STW 為對水基準，海流已內含其中。
+### 水深 (Water Depth, water_depth)
 
-### 海水密度 (Sea Water Density, sea_water_density_kg_m3)
+m。淺水閘門的輸入（見〈深水門檻〉）。
 
-海水單位體積質量 (kg/m³，約 1025–1028)，隨溫鹽變化；影響浮力（排水量）與阻力的密度修正。
+### 海水溫度 (Sea Water Temperature, sea_water_temp)
 
-### 海溫 / 氣溫 / 氣壓 (Sea/Air Temperature, Air Pressure)
-
-`sea_water_temp_c`、`air_temp_c`（°C）與 `air_pressure_hpa`（hPa）。海溫影響海水密度/黏度與雷諾數
-(Reynolds) 修正；氣壓/氣溫為氣象背景。
-
-### 迎浪 (Head Sea)
-
-波浪主要來自船艏方向的海況。STAWAVE-1 為迎浪近似法，於此條件下對波浪附加阻力估計最具代表性。
+°C。午報有此欄，但**本專案未用它做密度/黏度修正**。
 
 ---
 
 ## 8. 航行與推進
 
-描述船舶當日的移動與主機運轉；對地/對水的區分是滑失與海流一致性的基礎。
+### 對地船速 (Speed Over Ground, SOG / avg_speed)
 
-### 對地船速 (Speed Over Ground, SOG / speed_og_kn)
+相對海底的實際航速 (kn)，含海流影響。用於視滑失。
 
-相對海底（GPS）的實際航速 (kn)，含海流影響。用於視滑失 (apparent slip) 與對地航距。
+### 對水船速 (Speed Through Water, STW / speed_through_water)
 
-### 對水船速 (Speed Through Water, STW / speed_tw_kn)
+相對水體的航速 (kn)。**是速度損失、真滑失、海軍係數與所有 ISO 指標的基準速度**，也是
+`speed_corrected_kn` 的值。
 
-相對水體（速度計）的航速 (kn)，是速度損失與真滑失的基準，也是 ISO 修正後的 `speed_corrected_kn`。
+### 航距 (Distance, total_distance)
 
-### 對地航距 / 對水航距 (Distance Over Ground / Through Water)
+對地航距 (nm)，是 EEOI / AER 的距離分母，也是合成航跡推進的依據。
 
-`distance_og_nm ≈ SOG · steaming_hours`、`distance_tw_nm ≈ STW · steaming_hours`（海里，C3）。對地
-航距為 EEOI/AER 的距離分母。
+### 海流代理 (Current Proxy, diff_stw_sog_slip)
 
-### 航行小時 (Steaming Hours)
+STW 與 SOG 的差值。本專案**沒有**獨立的海流速度/方向欄位；此欄是唯一的海流代理。
 
-當日主機推進航行的時數（航行中約 24、靠港 0），是油耗/航距換算的時間基準。
+### 航行小時 (Steaming Hours, hours_total / hours_full_speed)
 
-### 主機轉速 (Main Engine RPM, me_rpm)
+`hours_total` 為當日總時數（裁剪上限 24）、`hours_full_speed` 為全速航行時數。
+**`valid_flag` 要求 `hours_full_speed ≥ 22`**（`filters.py:45`）——只有近乎整日穩態全速的日子才算數。
 
-主機每分鐘轉數，與螺距相乘得理論船速 V_th（滑失計算，C7）。
+### 主機轉速 (Main Engine RPM, me_avg_rpm)
+
+與螺距相乘得理論船速 V_th（滑失計算）。
 
 ### 船艏向 (Heading, heading_deg)
 
-船艏指向的方位角 (°)。ETL 需要它把風/浪分解到船體縱向以重建環境修正；缺此欄則無法還原
-風/浪功率。
+**估計值**——真實午報沒有船艏向。精煉區的 `heading_deg` 是合成航跡上該日所在航段的大圓方位角。
 
-### 航次 / 航段 (Voyage / Leg)
+### 航次 (Voyage, voyage / voyage_no)
 
-`voyage_no`=航次編號、`leg`=航段（`<起>-<訖>` 港對）。用於把逐日午報歸屬到航程脈絡。
+⚠️ **本專案的「航次」是一趟多月的環線 (rotation)，不是港到港的單一航段 (leg)。** 中位數約 71 天 /
+19,000 海里。`fact_voyage` 共 300 列（15 船 × 各 17–26 航次）。沒有 `leg` 欄位。
 
-### 節 (Knot, kn)
+### 計畫天數 / 準點 (planned_days / on_time_flag)
 
-航速單位，1 節 = 1 海里/小時 ≈ 1.852 km/h。
+**估計值**（`geography.py:119`）：
 
-### 海里 (Nautical Mile, nm)
+```
+planned_days = 合成環線路徑長 / (0.85 · design_speed_kn · 24)
+on_time_flag = (arrive_day − depart_day + 1) ≤ planned_days
+```
 
-航海距離單位，1 nm ≈ 1.852 km。理論船速換算 `V_th = pitch·RPM·60/1852` 中的 1852 即 1 nm 的公尺數。
+分母的 0.85 是假設的服務速度比例。**這是模型，不是排程事實。**
+
+### 節 (Knot, kn) / 海里 (Nautical Mile, nm)
+
+1 節 = 1 海里/小時；1 nm = 1852 m。理論船速公式 `V_th = pitch · RPM · 60 / 1852` 中的 1852 即此。
 
 ### 慢速航行 (Slow Steaming)
 
-刻意降低航速以節省燃油與減排的營運策略；降速使單位油耗與碳強度下降，是 CII 合規的常見手段。
+刻意降低航速以節省燃油與減排。其經濟最適點由 `fact_speed_profile` 求得（見〈經濟航速〉）。
 
 ---
 
 ## 9. 燃油與機械
 
-午報的燃油與各機種油耗，是能量平衡、碳排與成本計算的來源。
-
 ### 燃油消耗量 (Fuel Oil Consumption, FOC)
 
-每日耗油量 (t)，分**主機 (me_foc)**、**輔機 (ae_foc)**、**鍋爐 (boiler_foc)**，總和為
-`total_foc = me + ae + boiler`（C8）。能量平衡：`me_foc ≈ P_shaft · SFOC · hours / 1e6`（C2）。
+- **`total_consump` → `total_foc_mt`**：全船總油耗 (t/day)，含主機、輔機、鍋爐。CO₂ 與 CII 的來源。
+- **`me_consumption` → `me_foc_mt`**：主機油耗 (t/day)。超額油耗與成本模型的來源。
 
-### 主機 / 輔機 / 鍋爐 (Main Engine / Auxiliary Engine / Boiler)
+> 本資料集**沒有**輔機 (AE) 與鍋爐 (boiler) 的分項油耗欄位——只有總量與主機量。
 
-**主機 (ME)** 提供推進軸功率、**輔機 (AE)** 供船上電力、**鍋爐 (boiler)** 供蒸氣加熱。三者油耗
-分別計量，僅主機油耗用於速度損失/SFOC 等推進指標。
+### 五種燃油 (Fuel Types)
 
-### 燃油種類 (Fuel Types: HFO / VLSFO / LSMGO / MGO)
+`HSHFO` · `ULSFO` · `VLSFO` · `LSMGO` · `BIO_HSFO`（`fuel.py:18`），對應午報的五個
+`me_fullspeed_consump_*` 欄位。
 
-- **HFO**（Heavy Fuel Oil，重燃油）：高硫，須配洗滌器 (scrubber) 使用；C_F 3.114、LCV 40.2。
-- **VLSFO**（Very Low Sulphur Fuel Oil，超低硫燃油）：海上主要用油；C_F 3.151、LCV 41.0。
-- **LSMGO / MGO**（(Low Sulphur) Marine Gas Oil，船用輕柴油）：靠港/管制區用油；C_F 3.206、LCV 42.7。
+| | HSHFO | ULSFO | VLSFO | LSMGO | BIO_HSFO |
+|---|---|---|---|---|---|
+| 低位發熱值 LCV (MJ/kg) | 40.2 | 41.2 | 40.2 | 42.7 | 39.4 |
+| 碳因子 C_F (t/t) | 3.114 | 3.151 | 3.151 | 3.206 | 3.114 |
 
-### 洗滌器 (Scrubber)
+線上實際使用量：HSHFO 10,574 船日 > VLSFO 8,146 > LSMGO 1,256 > BIO_HSFO 467 > ULSFO 182。
 
-廢氣清洗系統，使船舶得以續用高硫 HFO 而符合硫排放上限。本專案船隊 `9700003`、`9700009` 於海上
-用 HFO 即因配有洗滌器。
+> `LCV_MJ_KG` 定義於 `fuel.py:25`，但**目前沒有任何公式引用它**——純文件性質。
 
-### 低位發熱值 (Lower Calorific Value, LCV, fuel_lcv_mj_kg)
+### 當日燃油 (Day Fuel Type, fuel_type)
 
-單位質量燃油的可用發熱量 (MJ/kg)，越高越耐燒。可由 `功率 = me_foc · LCV / SFOC` 反推軸功率。各
-燃油值見〈燃油種類〉。
+`fact_performance_daily.fuel_type` = 當日五個 `me_fullspeed_consump_*` 中**燒得最多**的那一種
+（`fuel.py:87`）；遮蔽日則退回 `predict_fuel_type`。
+
+### 低位發熱值 (Lower Calorific Value, LCV)
+
+單位質量燃油的可用發熱量 (MJ/kg)，越高越耐燒。見上表。
 
 ### 加油價 (Bunker Price, price_usd_per_mt)
 
-各燃油每噸價格 (USD/t) 的時間序列（`fuel_price` 表）。以 `(date, fuel_type)` 聯結，為額外油耗
-定價，是超額油費與維修成本效益的輸入。
+⚠️ **完全是合成的。** `fuel_price` 表是一條**均值回歸的幾何隨機漫步 (mean-reverting geometric
+random walk)**（`fuel.py:48`，種子 42）：基準價 HSHFO 450 / ULSFO 640 / VLSFO 600 / LSMGO 800 /
+BIO_HSFO 720 USD/t，日對數報酬標準差 0.012，回歸係數 0.02，上下限為基準價的 0.5×–2.0×。
+
+**本資料湖裡每一個美金數字都源自這張表。** 引用任何 USD 欄位時都必須說明它是模型值。
 
 ---
 
 ## 10. 汙損與維護行動
 
-汙損隨時間累積使速度損失上升，維修事件將其重置；成因→行動決策表由 UWI 與異常成因推導每船的維修
-行動。
+### 生物附著 / 船體汙損 (Biofouling)
 
-### 生物附著 / 船體汙損 (Biofouling / Fouling)
-
-船體與螺槳附著的海生物與黏泥，使阻力上升、速度損失漸增。**生物附著在本專案中表現為趨勢斜率
-(fouling rate)，而非點異常成因**——漸進汙損以分段斜率呈現，不會被標成單日 anomaly。
+船體與螺槳附著的海生物與黏泥，使阻力上升、速度損失漸增。**在本專案中它表現為趨勢斜率
+(trend slope)，而非單日異常成因**——漸進汙損不會被標成 `fact_anomaly` 的點異常，只會在
+`fact_alert` 以 `hull_biofouling` 成因出現（來源 `fouling_model`）。
 
 ### 汙損速率 (Fouling Rate, fouling_rate_pct_per_day)
 
-速度損失每日增加的百分點 (%/day)，即開放週期 (open cycle) 速度損失 vs 距上次清潔天數的 Theil-Sen
-斜率。越高代表汙損越快，是最佳清潔時機 t\* 成本模型的關鍵斜率 β 來源。
+開放週期 (open cycle) 內「速度損失 vs 距上次清潔天數」的 Theil-Sen 斜率 (%/day)
+（`recommendation.py:109`）。**注意：它不是成本模型的 β**（見〈最佳清潔時機〉）。
 
-### 距上次清潔天數 (Days Since Cleaning, days_since_cleaning)
+### 四種原子事件 (Atomic Event Types)
 
-自最近一次船體清潔或進塢起算的天數（聯集時鐘 (union clock)）。**只有 `hull_cleaning ∪ dry_dock` 會重置
-此時鐘**，拋光/塗層/螺槳修理不會。是汙損趨勢迴歸的橫軸。等於 `min(days_since_dry_dock,
-days_since_in_water)`，即以下兩個獨立時鐘的較小值。
+來源 `maintenance.csv` 的 77 筆事件含複合型別（如 `UWC+PP`），本專案以 `+` 拆解成 **115 筆原子
+事件**：
 
-### 距上次乾塢天數 (Days Since Dry-dock, days_since_dry_dock)
+| `event_type` | 意義 | 重置的時鐘 |
+|---|---|---|
+| **`UWC`** | 水下船體清潔 (underwater hull cleaning) | 僅船體 |
+| **`PP`** | 螺槳拋光 (propeller polishing) | 僅螺槳 |
+| **`UWI`** | 水下檢查 (underwater inspection) | **不重置任何時鐘**（純檢查） |
+| **`DD`** | 進塢 (dry dock) | 船體 **與** 螺槳 |
 
-自最近一次乾塢 (dry-dock) 起算的天數；**只有 `dry_dock` 會重置此時鐘**。首週期錨定於視窗起點。
+`source_event_type` 保留原始複合值，6 種：`PP` · `UWI` · `UWC` · `DD` · `UWI+PP` · `UWC+PP`。
+以 `(ship_id, event_day)` 分組即可還原成原本的 77 筆。線上分布：UWI 43、PP 49、UWC 13、DD 10。
 
-### 距上次水下清潔天數 (Days Since In-water Cleaning, days_since_in_water)
+### 三個獨立時鐘 (The Three Clocks)
 
-自最近一次水下船體清潔 (in-water hull cleaning，即 `hull_cleaning`) 起算的天數；**只有 `hull_cleaning`
-會重置此時鐘**。首週期錨定於視窗起點。
+`fact_performance_daily` 上的三個現成欄位（`daily.py:34-35`）——**直接用，不要自己 join 算**：
 
-### 進塢 (Dry Dock)
+| 欄位 | 重置事件 |
+|---|---|
+| `days_since_cleaning` | `UWC` ∪ `DD` |
+| `days_since_polish` | `PP` ∪ `DD` |
+| `days_since_dry_dock` | `DD` |
 
-船舶進乾塢做大修，含全面船體清潔、塗層更新與螺槳處理，是最徹底的汙損重置事件（每 2.5–5 年）。塢修
-效益以 DDP 指標衡量。
+### 維修成本與停役 (Maintenance Cost & Downtime)
 
-### 船體清潔 (Hull Cleaning)
+⚠️ **全為估計值**（`recommendation.py:33`）：
 
-在水下或塢內清除船體附著物以回復速度，重置汙損時鐘（每 6–12 月）。其成本最佳時機由汙損成本模型
-求 t\*（見〈最佳清潔時機〉）。
+| 事件 | `cost_usd` | `downtime_hours` |
+|---|---|---|
+| `DD` | 1,400,000 | 380 |
+| `UWC` | 90,000 | 18 |
+| `PP` | 30,000 | 8 |
+| `UWI` | 8,000 | 4 |
 
-### 螺槳拋光 (Propeller Polishing)
+**全額成本 (full cost) = `cost_usd` + `downtime_hours` × 1,000 USD/h**。UWC 的全額成本
+= 90,000 + 18,000 = **108,000 USD**，即成本模型的 K。
 
-打磨螺槳表面以降低粗糙度、回復推進效率。UWI 判 `propeller_condition ∈ {C,D}`、
-`propeller_roughness_um > 300` 或有螺槳異常時建議（優先度 medium）。不重置汙損時鐘。
+### 維修行動決策表 (Cause→Action Decision Table)
 
-### 螺槳修理 (Propeller Repair)
+`fact_maintenance_recommendation` 的五種 `action_type`，每一種的**實際**觸發條件
+（`recommendation.py:205-324`）：
 
-修復螺槳的實體損傷（如葉緣受損）。UWI 判 `propeller_condition ∈ {E,F}` 或高嚴重度螺槳異常時建議
-（優先度 high，並抑制拋光建議）。
+| `action_type` | 觸發條件 | 門檻 | `source` |
+|---|---|---|---|
+| `hull_cleaning` | 成本模型收斂（`fact_recommendation.status = 'ok'`） | 8.0 %/day | `fouling_model` |
+| `propeller_polishing` | 最新 UWI 的 `propeller_roughness_um ≥ 300`，或 Theil-Sen 外推 365 天內會越過 300 | 300 µm | `uwi` 或 `uwi+anomaly` |
+| `propeller_repair` | 同上，門檻 430 | 430 µm | `uwi` 或 `uwi+anomaly` |
+| `coating_renewal` | `coating_breakdown_pct ≥ 45`，或外推 365 天內越過 | 45 % | `uwi` |
+| `engine_inspection` | SFOC 相對基線（序列前 1/3 的中位數）漂移 **≥ 5%** | 5 % | `sfoc_trend` |
 
-### 塗層更新 (Coating Renewal)
+> ⚠️ **狀況等級 (Good/Fair/Poor) 不直接觸發任何行動。** 觸發全部走**合成的數值欄位**
+> （`propeller_roughness_um`、`coating_breakdown_pct`）。等級只是**間接**影響——它決定該數值是從哪
+> 個區間抽出來的（見〈UWI 數值訊號〉），並出現在 `rationale` 文字裡。
+>
+> `source = 'uwi+anomaly'` 的條件是：近 180 天內存在 ≥1 筆 `cause='propeller'` 的異常。
+>
+> 線上實況：20 列，含 `hull_cleaning` 10、`coating_renewal` 5、`engine_inspection` 3、
+> `propeller_polishing` 2、**`propeller_repair` 0**（型別存在但目前無船達標）。
 
-重新塗覆船體防汙塗層 (antifouling coating)。UWI 判 `coating_condition = poor` 時建議（優先度
-medium）。
+### 優先度 (Priority)
 
-### 主機檢查 (Engine Inspection)
-
-主機的檢查/檢修。近 **180 天**內出現引擎劣化 (engine_degradation) 異常 ≥1 時建議（≥2→high，
-否則 medium）。
-
-### 維修事件 (Maintenance Event)
-
-`maintenance_event` 記錄的維修/事件，型別含 `hull_cleaning`、`propeller_polishing`、`dry_dock`、
-`coating_renewal`、`propeller_repair`。附現金成本與停役時數。
-
-### 停役時數 (Downtime, downtime_hours)
-
-維修導致的停航時數。**事件全額成本 = cost_usd + downtime_hours · $1000/h**，用於回本天數與 t\* 的
-清潔成本 K。
-
-### 成因→行動決策表 (Cause→Action Decision Table)
-
-由**最新 UWI 狀況 + 近 180 天異常成因 + 汙損成本模型**推導每船維修行動的規則表（`recommend_actions`），
-輸出 `fact_maintenance_recommendation`（粒度：船×行動，附優先度、到期日、佐證、證據來源
-source ∈ {uwi, anomaly, fouling_model, uwi+anomaly}）。某船若無待辦則無任何列，代表維修進度良好。
+由「到期日距最後一天的天數」決定（`recommendation.py:151`）：**≤30 天 → `high`；≤90 天 →
+`medium`；其餘 → `low`**。
 
 ### 單項預測 (Per-action Forecast)
 
-針對每一維修行動，取其劣化指標對距重置天數 (days-since-reset) 的 Theil-Sen 穩健斜率外推，預測何時
-越過該行動的門檻值以設定 `due_date`：螺槳拋光粗糙度 → 300 µm、螺槳修理 → 430 µm、塗層更新崩解率
-→ 45%、主機檢查 SFOC → +5%。斜率非正或點數不足時，`due_date` 退回依優先度設定的預估窗口，而非
-留白。
+每一行動取其劣化指標對時間的 **Theil-Sen 穩健斜率**外推，求越過門檻的日子 (`trigger_eta_day`)。
+斜率 ≤ 0（無惡化趨勢）或越界日超出 **365 天**視野者，該行動**直接不產生列**——所以
+「某船沒有某項建議」代表的是「不需要」，不是資料缺漏。
 
 ### 維修規劃 / 服務窗口 (Maintenance Planner / Service Window)
 
-把各行動各自預測的 `due_date` 批次整併為船舶「下一次維修窗口」的統籌規劃層：以
-**`_PLAN_BATCH_DAYS = 60`** 天為容差，貪婪 (greedy) 兩段批次——先將需進塢行動（塗層更新、螺槳修理）
-依最早到期日分批成 dry_dock 窗口（進塢為強制錨點，窗口日期恆取該批最早進塢到期日，不提前）；再將
-水下行動（船體清潔、螺槳拋光、主機檢查）併入鄰近的 dry_dock 窗口，未併入者自成 in_water 窗口。每列
-輸出 `plan_date`（窗口日期）與 `plan_service_type` ∈ {`dry_dock`, `in_water`}。
+把各行動的到期日批次整併（`recommendation.py:330`），常數 **`BATCH_WINDOW_DAYS = 60`**：
+
+1. 需進塢的行動（**`coating_renewal`、`propeller_repair`**）以其中**最早的到期日**為錨點，形成一個
+   `dry_dock` 窗口。
+2. 水下行動（`hull_cleaning`、`propeller_polishing`、`engine_inspection`）若到期日在錨點 **±60 天**
+   內，就併入該 `dry_dock` 窗口（順道做，省一次調度）。
+3. 未併入者自行以最早到期日成一個 `in_water` 窗口。
+
+輸出 `plan_day` 與 `plan_service_type ∈ {dry_dock, in_water}`。
 
 ### 維修觸發門檻 (Maintenance Trigger Threshold, MT_TRIGGER_PCT)
 
-驅動 MT 指標與 `trigger_eta` 的速度損失門檻。**程式碼權威值為 8%**（`periods.MT_TRIGGER_PCT = 8.0`）；
-規格 §5.5 與部分 WELLNESS 敘述寫作約 10%——以 8% 為實際資料值，約 10% 僅為文字敘述。
+**8.0 %** 速度損失（`indicators.py:29`）。它同時驅動 MT 指標、`trigger_eta_day`、`hull_cleaning` 的
+門檻、以及 `hull_biofouling` 告警的嚴重度分級。**單一權威常數，全系統共用。**
 
 ---
 
 ## 11. 水下檢查與船況
 
-UWI（`uwi` / `fact_uwi`）以事件型記錄船體與螺槳的實地狀況，佐證異常成因並觸發維修建議。
+`uwi` / `fact_uwi` 共 53 列（43 個 UWI 原子 + 10 個 DD）。**真實的是等級，估計的是數字。**
 
 ### 水下檢查 (Underwater Inspection, UWI)
 
-由潛水員或載具對水下船體與螺槳進行的檢查，記錄汙損等級、覆蓋率、螺槳狀況/粗糙度與塗層狀況，並給
-建議行動 (`none`/`polish`/`clean`)。與真實汙損狀態正相關（一致性規則 C10）。
+對水下船體與螺槳的檢查。`inspection_type` 只有兩個值：**`UWI`（在水中）** 與 **`DD`（乾塢）**
+——**沒有** `diver` / `ROV` 之分。
 
-### 潛水員 / 遙控載具 (Diver / ROV)
+### 三級狀況等級 (Good / Fair / Poor) ✅ 真實
 
-檢查執行方式 `inspection_type ∈ {diver, ROV, UWI}`：**diver** 為潛水員、**ROV**
-(Remotely Operated Vehicle) 為遙控水下載具。
+`propeller_condition`、`hull_coating_condition` 採**真實的三級制**，直接讀自來源維修檔。
 
-### 船體汙損等級 (Hull Fouling Rating, hull_fouling_rating)
+> ⚠️ **不是 Rubert A–F 量表。** 本專案沒有 Rubert 量表。程式碼在 `raw/uwi.py:15` 與
+> `schema.py:185` 兩處明文否定它。
 
-水下檢查判定的船體汙損程度 **0–100**（NSTM 量表，越高越髒）。**≥60 建議船體清潔**（優先度 medium、
-source=uwi）。
+等級是**稀疏的**（77 筆來源事件中：螺槳 45 筆有評、塗層 26 筆、氣蝕 36 筆），其餘為 null。
+`hull_coating_condition` 實際只出現 `Good` / `Fair`——**`Poor` 從未在來源中出現**。
 
-### 船體汙損覆蓋率 (Hull Fouling Coverage, hull_fouling_coverage_pct)
+### 氣蝕 (Cavitation, cavitation_found)
 
-船體被附著物覆蓋的面積百分比 (%)，與汙損等級並列描述附著範圍。
+`Yes` / `No`。螺槳表面因局部低壓產生氣泡並潰滅，會侵蝕槳葉。
 
-### 螺槳狀況 (Propeller Condition, propeller_condition)
+### UWI 數值訊號 (The Four Estimated Signals) ⚠️ 全部是估計值
 
-Rubert 量表 **A–F**（A 最佳、F 最差）：**E/F 建議螺槳修理、C/D 建議拋光**。是螺槳維修行動的主要
-判據。
+四個數值欄位都是**合成的**，以真實等級與**該日真實的 14 天移動平均速度損失**為條件抽樣
+（`raw/uwi.py`，逐次檢查獨立設種，可重現）：
 
-### 螺槳粗糙度 (Propeller Roughness, propeller_roughness_um)
+| 欄位 | 合成方式 |
+|---|---|
+| `propeller_roughness_um` | 由 `propeller_condition` 決定抽樣區間：Good [150, 260)、Fair [260, 380)、Poor [380, 520)、未評 [200, 420)；再以速度損失把位置往區間高端推 |
+| `coating_breakdown_pct` | 由 `hull_coating_condition` 決定：Good [2, 18)、Fair [20, 44)、Poor [46, 85)、未評 [5, 60) |
+| `hull_fouling_rating` | `速度損失 × 7 + 抖動(−6, +6)`，夾在 **0–100**。**與等級無關，純由速度損失驅動** |
+| `hull_fouling_coverage_pct` | `min(rating × 1.15, 100)`——**是 rating 的確定性函數**，不帶新資訊 |
 
-螺槳表面粗糙度 (µm)，越高摩擦阻力越大。**>300 µm 觸發拋光建議**。
+這些區間設計得很刻意：**`Poor` 的螺槳粗糙度必然 ≥300**（一定觸發拋光）、**`Poor` 的塗層崩解率必然
+≥45**（一定觸發塗層更新），而 `Good` 必然低於門檻。等級透過區間間接決定了行動。
 
-### 塗層狀況 (Coating Condition, coating_condition)
+> `hull_fouling_rating` 是 0–100 的尺度，但**它不是 NSTM 評級**，也沒有「≥60 就清潔」這條規則。
+> 它只是速度損失的一個線性重述。
 
-船體防汙塗層評級 `good`/`fair`/`poor`：**poor 建議塗層更新**（優先度 medium）。
+### 建議行動 (recommended_action)
+
+`fact_uwi` 自帶的三值建議（`raw/uwi.py:76`），**與 `fact_maintenance_recommendation` 是兩套獨立
+邏輯**：
+
+```
+if speed_loss_pct >= 8.0 or coating_breakdown_pct >= 45.0:  'clean'
+elif propeller_roughness_um >= 300.0:                        'polish'
+else:                                                        'none'
+```
+
+### 船體汙損類型 (Hull Fouling Type, hull_fouling_type) ⚠️
+
+逗號分隔的清單，取值為 `barnacle`（藤壺）· `slime`（黏泥）· `algae`（藻類）· `tubeworm`（管蟲）·
+`calcium`（鈣質）。**順序與空白不一致**（`barnacle,slime` vs `slime, calcium`）——**必須用
+`LIKE '%barnacle%'` 比對，絕不可用 `=`。**
 
 ---
 
 ## 12. 成本與經濟
 
-把汙損與維修轉換為金額，支撐清潔時機與維修投資決策。
+> **本章每一個數字都是估計值**，因為它們全部下游於合成的加油價。
 
 ### 額外燃油成本 (Excess Fuel Cost, excess_cost_usd)
 
-因速度損失多耗燃油產生的每日成本：`excess_cost = excess_foc × fuel_price(date, fuel_type)`（USD）。
+`excess_cost_usd = excess_foc_mt × price_usd_per_mt(當日, 當日燃油)`（`daily.py:122`）。
 
 ### 累計額外成本 (Cumulative Excess Cost, cum_excess_cost_usd)
 
-自本汙損週期起累加的額外燃油成本（USD），呈現汙損「代價曲線」，是清潔急迫性的直觀依據。
+自本汙損週期起累加的額外燃油成本，**`days_since_cleaning` 一下降（發生清潔）就歸零**
+（`daily.py:126`）。呈現汙損的「代價曲線」。
 
-### 潛在節省 (Savings Potential, savings_potential)
+### 超額油費歸因 (Excess-cost Attribution) ⚠️ 三者是「可加」不是「拆分」
 
-依各船清潔建議可節省的燃油成本總額 (USD)，用於船隊層級的資源排程。
+把燃油代價依物理來源分成三個分量（`daily.py:206`）：
 
-### 淨節省 (Net Saving, net_saving_usd)
+| 分量 | 定義 |
+|---|---|
+| `excess_cost_fouling_usd` | **等於** `excess_cost_usd`——ISO 19030 速度損失罰則 |
+| `excess_cost_weather_usd` | 由 ISO 15016 算出的 ΔP_env 換算成油耗再乘油價 |
+| `excess_cost_operational_usd` | 引擎負載偏離最佳點 (80% MCR) 的 SFOC 罰則：`penalty = 0.18 · (load − 0.80)²` |
 
-在最佳時機 t\* 清潔（相對於拖到觸發門檻才清潔）所省下的成本：
-`net_saving = ∫_{T*}^{trigger} (c(t) − J*) dt`（USD）。僅在 trigger ETA 存在且晚於 T\* 時計算，
-否則 null。
-
-### 燃油代價 (Fuel Penalty)
-
-汙損導致的額外燃油消耗與其累計成本的統稱，對應超額油耗與累計額外成本曲線。
-
-### 超額油費歸因 (Excess-cost Attribution)
-
-將每個航行日的燃油代價 (fuel penalty) 依物理來源拆解為三個可加 (additive) 分量：船體汙損
-(fouling)、天氣 (weather)、操作 (operational)。汙損分量等於既有的額外燃油成本
-(`excess_cost_usd`)；天氣與操作為在其之上的額外燃油，故三者堆疊的總額大於 `excess_cost_usd`。
-深潛 (deep-dive) 頁以堆疊面積圖呈現，用來釐清「速度損失非全屬汙損」的爭議。
-
-### 汙損分量 (Fouling Component, excess_cost_fouling_usd)
-
-燃油代價中歸因於船體與螺槳汙損增阻的部分（USD），數值上等於 ISO 19030 速度損失罰則
-`excess_cost_usd`。
-
-### 天氣分量 (Weather Component, excess_cost_weather_usd)
-
-燃油代價中歸因於風、浪環境增阻的部分（USD）：由 ISO 15016 修正移除的增阻功率
-`dp_env_kw = resistance_to_power_kw((resistance_wind_kn + resistance_wave_kn)·1000, STW)`
-換算燃油後乘當日油價。
-
-### 操作分量 (Operational Component, excess_cost_operational_usd)
-
-燃油代價中歸因於引擎負載 (engine load) 偏離最佳效率點（約 80% MCR）的 SFOC 罰則（USD）：
-`me_foc · p/(1+p) × price`，`p = 0.18·(load−0.80)²`，`load = me_power/mcr`；鏡射生成器
-`_sfoc` 的負載 U 形曲線。
-
-### 回本天數 (Payback, payback_days)
-
-維修成本以節省燃油回收所需的天數：`payback = 事件全額成本 / 每日超額成本節省`（比較事件前後 ±30 天
-的平均 `excess_cost_usd`）。視窗空或節省 ≤ 0 時為 null。
+⚠️ **三者相加會大於 `excess_cost_usd`**——天氣與操作分量是**疊加在**汙損分量之上的額外燃油，不是
+把它切三塊。用來說明「速度損失不全是汙損造成的」。
 
 ### 效果回復 (Recovery, me_recovery_pct)
 
-維修後速度損失回復的百分比：`me_recovery_pct = (前 − 後)/前 × 100`，越高代表維修越有效（見〈維修
-效益 ME〉）。
+`fact_maintenance_event.me_recovery_pct = ME.value / ME.reference_value × 100`——維修後速度損失回復
+的百分比，越高代表維修越有效。**這是「這次清潔到底有沒有效」的直接答案，不需要自己做前後視窗
+join。**
+
+### 回本天數 (Payback, payback_days)
+
+維修的全額成本以節省的燃油回收所需天數。事件前後 ±30 天平均 `excess_cost_usd` 的差即日節省；視窗
+空或節省 ≤ 0 時為 null。
 
 ### 最佳清潔時機 (Optimal Cleaning Time, t\* / t_star_days)
 
-使週期平均成本率最小的建議清潔天數，僅適用於船體清潔。以開放週期的每日超額成本率
-`c(t) = α + β·t` 建模，週期成本率 `J(T) = K/T + α + β·T/2`，閉合解 **`T* = √(2K/β)`**；
-`recommended_clean_date = last_cleaning + round(T*)`。K = 船體清潔全額成本中位數（無清潔史時退回
-船隊中位數）。退化條件（<30 定價點、β ≤ 0、CI 跨 0、無 K）→ `status = insufficient_history`。
+使週期平均成本率最小的清潔天數，**僅適用於船體清潔**（`recommendation.py:63-143`）。以開放週期的
+每日超額成本率建模：
+
+```
+c(t) = α + β·t                    ← Theil-Sen 擬合「每日 excess_cost_usd vs 距上次清潔天數」
+J(T) = K/T + α + β·T/2            ← 週期平均成本率
+T*   = √(2K / β)                  ← 閉合解
+recommended_clean_day = last_cleaning_day + round(T*)
+```
+
+⚠️ **關鍵澄清：β 是「成本斜率」(USD/day/day)，不是汙損速率 (%/day)。** 兩者是不同的 Theil-Sen
+擬合，不可互換。K = **UWC 的全額成本 = 108,000 USD**（恆為 UWC，不用 DD/PP）。
+
+### 資料不足 (status = 'insufficient_history')
+
+`fact_recommendation.status` 只有兩值。退化為 `insufficient_history` 的條件（線上 5/15 艘船）：
+
+1. 開放週期的有效點 **< 30**，或
+2. Theil-Sen 擬合失敗，或 **成本斜率 β ≤ 0**（船體沒在惡化 → `√(2K/β)` 無定義）。
+
+**引用 `t_star_days` / `net_saving_usd` 前先檢查 `status`。**
+
+### 淨節省 (Net Saving, net_saving_usd)
+
+在 T\* 清潔（相對於拖到 8% 觸發門檻才清潔）省下的成本。**僅在 `trigger_eta` 存在且晚於 T\* 時計算**，
+否則 null。
+
+### 傭租成本 (Charter Cost, charter_usd_per_day)
+
+**估計值 45,000 USD/day**（`optimize.py:23`）。它是時間的代價，不是量測到的船舶諸元。
+
+### 經濟航速 (Economical Speed, recommended_speed_kn)
+
+`fact_speed_profile` 在 0.5–1.0 × 設計船速上取 24 個網格點，求 `usd_per_nm` 的最小值點。
+
+⚠️ **`usd_per_nm` 之所以是凸函數 (convex)、有內部最小值，完全來自每日傭租成本。** 拿掉它，
+`fuel_usd_per_nm` 對速度單調遞增，最佳解就退化成「開最慢那一點」。這個結論對租金假設敏感。
 
 ---
 
 ## 13. 統計與分析方法
 
-M3 統計層以穩健迴歸建趨勢基線，再對殘差偵測點異常並分類成因；全程規則+統計，不使用 SageMaker。
+> 本層**全部是規則 + 穩健統計**，不使用機器學習 (machine learning)，不使用 SageMaker。
 
 ### Theil-Sen 穩健迴歸 (Theil-Sen Estimator)
 
-取所有點對斜率中位數的趨勢估計 `slope = median pairwise slope`，對維護造成的階梯變化不敏感。本專案
-用於汙損率趨勢與超額成本率 `c(t)` 的擬合。
+取所有點對斜率的**中位數**作為趨勢估計（`trends.py:13`），對維修造成的階梯變化與離群值不敏感。
+**本專案唯一使用的迴歸方法**，用於：汙損速率、成本率 c(t)、UWI 粗糙度/崩解率外推。
 
-### Huber 迴歸 (Huber Regressor)
+### 穩健 z 分數 (Robust z-score, median / MAD)
 
-對離群值較不敏感的穩健迴歸法。規格 §5.1 列為趨勢法之一，但**實作僅採 Theil-Sen**（此為對規格的
-偏離，已於 `insights.md` 註明）。
+異常偵測的**唯一**方法（`anomaly.py:45`）：
 
-### 分段迴歸 (Piecewise Regression)
+```
+scale = 1.4826 × MAD(中位數絕對偏差)     # MAD = 0 時退回標準差
+scale = max(scale, 下限)                 # 下限: speed_loss 0.5, slip 0.01, sfoc 2.0, excess_foc 0.5
+z     = (x − median) / scale
+```
 
-以維修事件（`hull_cleaning ∪ dry_dock` 重置點）切段，各汙損週期各自擬合斜率與截距，形成
-`Segment`；斜率即該週期的汙損率。
+⚠️ **這是對該船「全部有效歷史」計算的全域 z，不是滾動視窗 (rolling window)。** 每艘船每個指標至少
+需 **20 個點**才評分。
 
-### EWMA 管制圖 (Exponentially Weighted Moving Average Control Chart)
+### 異常偵測 (Anomaly Detection)
 
-指數加權移動平均管制圖（λ=0.3、L=3），對持續性偏移敏感。本專案以固定目標 EWMA 偵測引擎劣化
-（SFOC 殘差，下限 0.045）與螺槳汙損（真滑失殘差，下限 0.025）——一段劣化步階會整段維持失控。
+四個指標各自評分：`speed_loss`（`speed_loss_pct`）· `slip`（`slip_real`）· `sfoc`（`sfoc_g_kwh`）·
+`excess_foc`（`excess_foc_mt`）。**只跑在 `valid_flag = true` 的列上。**
 
-### 滾動 / MAD z 分數 (Rolling / MAD z-score)
+- **旗標門檻：`|z| ≥ 3.5`**。同一天多個指標中選 |z| 最大者為 `metric`（驅動指標），故
+  `fact_anomaly` 是「每船每異常日一列」。
+- **嚴重度分級**（`anomaly.py:94`）：`low` 3.5 ≤ |z| < 4.5 · `medium` 4.5 ≤ |z| < 6.0 ·
+  `high` |z| ≥ 6.0。
 
-以移動視窗（W=30 天）計算的修正 z 分數（改用中位數絕對偏差 MAD 而非標準差，較耐離群）。門檻
-modified-z ≥ 4.5 觸發滾動異常。
+線上 369 列，驅動指標分布：`excess_foc` 203 · `sfoc` 136 · `slip` 24 · `speed_loss` 6。
 
-### 四分位距 (Interquartile Range, IQR)
+### 成因分類 (Cause Classification)
 
-`IQR = Q3 − Q1`。粗大離群偵測界為 `Q1 − 3·IQR … Q3 + 3·IQR`，落於界外即標記（用於 speed_loss/
-slip/sfoc）。
+**首中即取 (first-match)** 的規則鏈（`anomaly.py:56`），順序有意義：
 
-### 孤立森林 (Isolation Forest)
+1. `|z| ≥ 8.0` → **`sensor`**（大到不像物理，先當感測器問題）
+2. `wind_scale ≥ 5` → **`weather`**
+3. `metric = 'sfoc'` → **`engine_degradation`**
+4. `metric = 'slip'` → **`propeller`**
+5. `metric = 'excess_foc'` → `engine_degradation`；`metric = 'speed_loss'` → `propeller`
 
-以隨機切分「孤立」離群點的無監督 ML（scikit-learn，200 棵樹、`contamination='auto'`、需 ≥20 點）。
-本專案僅在全域殘差 z ≥ 3.5 佐證時才採信其標記，以壓低誤報。
+### 天氣成因（不可達）(The Unreachable `weather` Cause) ⚠️
 
-### 自助抽樣信賴區間 (Bootstrap Confidence Interval)
+規則 2 需要 `wind_scale ≥ 5`，但異常只在 `valid_flag` 的列上評分，而 ISO 閘門要求
+`wind_scale ≤ 4`。**兩者不相交 → `cause = 'weather'` 在 `fact_anomaly` 與 `fact_alert` 中永遠是
+0 列。** 它在列舉型別 (enum) 裡，但在資料裡不存在。
 
-以 100 次有種子的重抽樣估斜率的 2.5/97.5 百分位作為信賴區間（僅開放週期計算）。若斜率 CI 跨越 0，
-成本模型視為退化不建議。
-
-### 相關係數 (Spearman / Pearson Correlation)
-
-**Pearson** 衡量線性相關、**Spearman** 衡量單調（秩）相關。用於佐證成因，如速度損失與距上次清潔
-天數、蒲福風級與波高的相關性。
-
-### 精確率 / 召回率 (Precision / Recall)
-
-**precision** = 標記為異常中確為真的比例、**recall** = 真異常中被抓到的比例。C14 驗收要求偵測
-recall ≥ 0.70、precision ≥ 0.60，成因準確率 ≥ 0.75。
-
-### 殘差 / 基線 (Residual / Baseline)
-
-**基線 (baseline)** 為趨勢擬合給出的每日期望值（speed_loss 用分段線、sfoc/slip 用週期穩健中位數）；
-**殘差 (residual)** 為觀測減基線。異常偵測對殘差評分，使漸進汙損不被誤判為點異常。
-
-### 標準分數 (z-score)
-
-觀測值偏離常態的標準差倍數，絕對值越大越異常。`fact_anomaly.z_score` 採全域 MAD 殘差 z。
-
-### 異常 / 嚴重度 / 成因 (Anomaly / Severity / Cause)
-
-- **異常 (anomaly)**：指標偏離預期而被偵測的單日事件（`fact_anomaly` 每筆一列）。
-- **成因 (cause)**：`{engine_degradation, propeller, weather, sensor}`，以首中即取 (first-match)
-  規則分類（不含 biofouling——它是趨勢斜率）。
-- **嚴重度 (severity)**：`low`/`medium`/`high`，依各成因的殘差帶分級。
+線上驗證：`fact_anomaly` 的成因只有 `engine_degradation` 292 · `sensor` 49 · `propeller` 28。
 
 ### 告警事件 (Alert Episode)
 
-`fact_alert` 的粒度單位：把同一成因 (cause) 的連續 `fact_anomaly` 點異常收斂成一則敘事化事件，間隔
-容忍度 (gap tolerance) **7 天**（`_GAP_DAYS`）——超過此間隔視為新事件。記錄開啟日 (opened_date)、
-最近出現日 (last_seen_date)、峰值嚴重度/|z|、峰值驅動指標與窗口內估計燃油損失。另納入**船體生物
-附著 (hull_biofouling)**——唯一的趨勢型成因（不會是點異常），源自汙損成本模型（正汙損率 + 觸發
-預估日 trigger ETA）佐以近 14 天平均速度損失 vs 維修觸發門檻。共 **5 種成因**：
-`engine_degradation`、`propeller`、`weather`、`sensor`、`hull_biofouling`。每列附雙語敘事
-`message_zh`/`message_en`、建議行動與 `status='open'`。
+`fact_alert` 的粒度：把**同一 (船, 成因)** 的連續 `fact_anomaly` 點異常收斂成一則敘事化事件
+（`alerts.py`）。
 
-### 外推 (Extrapolation)
+- **間隔容忍度 (gap tolerance) = 7 天**——相隔超過 7 天視為新事件。
+- `status`：`open` / `closed`。**最後出現日在該船最後一天的 30 天內即為 `open`**。
+- `peak_z` = 該事件內最大 |z|；`excess_cost_usd` = 事件視窗內 `excess_cost_usd` 的總和。
+- 每列附雙語敘事 `message_zh` / `message_en`（f-string 組出，含峰值 z 與估計燃油損失）。
 
-依現有趨勢向未來延伸的預測，用於估計觸發預估日 (trigger ETA)——把開放週期的速度損失線外推到門檻
-（斜率 ≤ 0 則無 ETA）。
+### 船體生物附著告警 (hull_biofouling Alert)
 
-### 趨勢 (Trend)
+**唯一的趨勢型成因**，不來自點異常，而來自 `fact_recommendation`（`alerts.py:139`）：條件是該船
+`status = 'ok'` 且 `fouling_rate_pct_per_day > 0`。
 
-速度損失隨時間的斜率；上升 (↑) 代表持續惡化。Dashboard 以趨勢線 + 95% 區間 + 外推虛線呈現。
+- `peak` = 該週期最後 14 天的平均速度損失
+- 嚴重度：`high` ≥ 8.0% · `medium` ≥ 4.8%（= 8.0 × 0.6）· 其餘 `low`
+- **`peak_z` 恆為 null**（趨勢沒有 z 分數）、`source = 'fouling_model'`、**恆為 `open`**
+
+線上 6 列。
+
+### 外推 / 越界日 (Extrapolation / crossing_day)
+
+以 Theil-Sen 斜率向未來延伸求越過門檻的日子（`trends.py:29`）。**斜率 ≤ 0 時回傳 null**——沒有惡化
+趨勢就沒有觸發預估日。
+
+### 移動平均 (Trailing Mean)
+
+`trends.trailing_mean(series, last_day, window)`——MT 指標（14 天）、生物附著告警（14 天）、UWI 條件化
+（14 天）都用它。
 
 ---
 
 ## 14. 資料與系統概念
 
-資料流與資料表的組織方式，及貫穿全案的一致性與品質概念。
-
 ### 午報 (Noon Report)
 
-每船每日一筆的船上回報（`noon_report`），含航程、航行/推進、燃油、載況、氣海象五群欄位，是效能
-分析的核心來源。本專案為合成資料。
+每船每日一筆的船上回報。`noon_report` 表 = `dataset/vt_fd.csv` **逐字落地 (verbatim)**：21,282 列、
+42 欄，**含 344 筆重複的 `(ship_id, noon_utc)`**，一列未刪、一格未改。唯二的新增是兩個載入器標記
+`masked_flag` / `predict_fuel_type`，它們**保存**了 HIDDEN/PREDICT → null 轉換原本會摧毀的資訊。
 
-### 資料湖 (Data Lake)
+### 資料湖 (Data Lake) 與兩區 (Raw / Curated Zone)
 
-以 S3 為底、Athena 查詢的分區資料存放區（`ym_hackathon`）。分兩區：raw 與 curated。
+Glue 資料庫 `ym_hackathon`，S3 為底、Athena 查詢、JSONL 格式、**20 張表全部未分割**。
 
-### 原始區 / 精煉區 (Raw Zone / Curated Zone)
+- **原始區 (raw zone，6 張)**：`noon_report`、`vessel_master`、`maintenance_event` 是三個**真實來源
+  檔的逐字落地**；`reference_curve`、`uwi`、`fuel_price` 是衍生或合成的，不負保存義務。
+- **精煉區 (curated zone，14 張)**：所有的**變更**（去重、離群裁剪、排水量回填）與所有的**推導**
+  （ISO 15016/19030、CII、地理、經濟）都發生在這裡。
 
-- **原始區 (raw zone，M1)**：合成產生器落地的原始 JSONL（午報、UWI、維修事件、船舶主檔、參考
-  曲線、油價）。
-- **精煉區 (curated zone，M2+M3)**：ETL 套 ISO 15016/19030 + 統計後的分析事實表，以
-  `imo_number/year/month` 分割並上傳 S3。
+### 事實表 / 維度表 / 彙總表 (fact_ / dim_ / agg_)
 
-### 事實表 / 維度表 / 彙總表 (fact_ / dim_ / agg_ Tables)
+- **`fact_`**：逐事件/逐日的量測與指標（`fact_performance_daily` 是分析主幹）。
+- **`dim_`**：靜態屬性（`dim_vessel`、`dim_reference_curve`、`dim_port`）。
+- **`agg_`**：跨船聚合（`agg_fleet_daily`）。
 
-- **fact_**：事實表，逐事件/逐日的量測與指標（如 `fact_performance_daily`、`fact_anomaly`）。
-- **dim_**：維度表，靜態屬性（如 `dim_vessel`、`dim_reference_curve`）。
-- **agg_**：彙總表，跨船/跨日聚合（如 `agg_fleet_daily`）。
+### 船隊 (Fleet, fleet_id) ⚠️
 
-### 營運船隊 (Operational Fleet)
+**船隊就是船殼級**，沒有航線分組維度：
 
-`dim_vessel.fleet_id`/`fleet_name` 定義的航線分組維度：**FL-IA**（Intra-Asia，亞洲區間）、
-**FL-TP**（Trans-Pacific，跨太平洋）、**FL-AE**（Asia-Europe，亞歐）各轄 3 艘船；另有 **`ALL`**
-全船隊彙總（非實際航線分組，供跨船隊比較）。是 `agg_fleet_daily` 的分組粒度（fleet × day，3 個
-子船隊 + `ALL` 共 4 組），也是 Dashboard 船隊篩選器 (fleet picker) 的來源。
+| `fleet_id` | `fleet_name` | 成員 |
+|---|---|---|
+| `FL-W1` | W1 Class | S1 S2 S3 S4 S5 S6 S7 S8 **S21** |
+| `FL-W2` | W2 Class | S9 S10 S11 S12 **S22 S23** |
 
-### 地面實況 (Ground Truth)
+⚠️ **`agg_fleet_daily` 另有一列 `fleet_id = 'ALL'` 的全船隊彙總。** 它與兩個子船隊**併存於同一張
+表**，所以**任何查詢都必須過濾 `fleet_id`**——不過濾就會把 ALL 和它已經包含的兩個子船隊加總在
+一起，全部重複計算。
 
-產生器植入的真實汙損軌跡等（`tmp/truth/`），**永不上傳或編目**，僅供閉環驗證 (C13/C14) 比對；ETL
-本身從不讀取，以模擬正式環境中無真值可用。
+### 訓練船 / 預測船 (role: train / predict)
 
-### 閉環可還原性 (Closed-loop Recoverability, C13)
+`role = 'train'` → **S1–S12**（12 艘）；`role = 'predict'` → **S21–S23**（3 艘）。後者的燃油消耗欄位
+在特定視窗被遮蔽，是本次任務的預測標的。
 
-ETL 反推產生器的完全相同前向物理，套 ISO 15016/19030 後還原的速度損失須與植入真值誤差在容忍區內
-（偏差 ≤ 0.2 pp、平均 ≤ 0.8 pp、≥98% 點在 2 pp 內）。是「資料可被公式驗證」的核心驗收。
+### 遮蔽旗標與預測標的 (masked_flag / predict_fuel_type)
 
-### 一致性檢查 (Consistency Checks, C1–C14)
+- **`masked_flag`**：該列原本含 HIDDEN 或 PREDICT 儲存格（僅 S21–S23）。**做任何油耗統計都要排除**
+  （`WHERE NOT masked_flag`）。線上 `fact_performance_daily` 有 370 列。
+- **`predict_fuel_type`**：標記為 PREDICT 的那一欄的**欄名**。共 **102 格**：
+  **91 個 `ME_FULLSPEED_CONSUMP_HSHFO` + 11 個 `ME_FULLSPEED_CONSUMP_VLSFO`**。這就是交付標的。
 
-合成資料須恆成立的物理/邏輯關係：**C1–C13** 為 M1 產生一致性（速度-功率、能量平衡、航距、對地/對水、
-排水量-吃水、俯仰、滑失、碳排、汙損單調性、UWI 佐證、氣海象相關、量測=真值+雜訊、可還原性）；
-**C14** 為 M3 統計層驗收（偵測 recall/precision、成因準確率、嚴重度、建議與維修效益合理性）。
+### 有效點旗標 (valid_flag) 與資料品質
 
-### 資料品質 / 有效點旗標 (Data Quality / valid_flag)
+ISO 19030 的過濾閘門（`filters.py:54`）。全部條件（**皆須通過**）：
 
-**valid_flag** 為 ISO 19030 過濾閘門：`at_sea 且航行中 且 STW ≥ 0.5·Vdes 且 Beaufort ≤ 6 且
-Δ ∈ [0.5, 1.2]·Δ_ref 且推進欄位有限/為正`。**資料品質 (data quality)** 即通過過濾的有效點占比，
-Dashboard 以此透明化 ISO 19030 篩選。（注意：異常偵測跑在更廣的殘差集上，不限 valid 點，以免海況
-異常被 Beaufort≤6 閘門結構性遮蔽。）
+1. **非** `masked_flag`
+2. STW、`horse_power`、`displacement` 皆有值且非零
+3. **`displacement_source = 'measured'`**（回填值不採信）
+4. 海軍係數 ∈ **[300, 1300]**
+5. `hours_full_speed` **≥ 22** 小時
+6. `wind_scale` **≤ 4**（且不得為 null）
+7. STW **≥ 0.5 × 設計船速**
+8. 排水量 ∈ **[0.5, 1.2] × 設計排水量**
+9. 水深 **≥ max(3√(B·T), 2.75·V²/g)**（且不得為 null）
 
-### 儀表板三頁 (Dashboard: Fleet Overview / Vessel Deep-dive / Alerts)
+**線上通過率：20,938 列中 4,657 列有效 = 22.2%。** 這個比例低是正常的——ISO 19030 本來就是要嚴到只
+留下穩態全速、低風浪、深水、載況正常的日子。**任何速度損失/船體狀況的分析都必須先過這道閘門，
+否則畫出來的是天氣，不是船體。**
 
-- **船隊總覽 (Fleet Overview)**：KPI 卡、船隊表/熱力矩陣、地圖、分布與排行（源：`agg_fleet_daily`、
-  `dim_vessel`、`fact_recommendation`）。
-- **個船深入 (Vessel Deep-dive)**：以 YM WELLNESS 示範速度損失趨勢、速度-功率散點、修正瀑布圖、
-  滑失/SFOC/海軍係數、油耗與累積超額油費、異常時間軸、維修效益、維修建議與最新水下檢查。
-- **異常預警 (Alerts)**：全船隊 active alert 清單（源：`fact_anomaly` + `fact_recommendation`）。
+### 日曆紀元 (Calendar Epoch) ⚠️ 估計值
+
+精煉區的 `report_date` / `event_date` / `inspection_date` 等日曆欄位，由相對日換算而來
+（`epoch.py:23`）：
+
+```
+EPOCH = 2021-07-01        # 第 0 天
+report_date = EPOCH + timedelta(days=noon_utc)
+```
+
+跨度為 **2021-07-01 … 2026-06-30**（第 0–1825 天）。⚠️ **這個紀元是假設的**——來源資料沒有日曆，
+且此處假設 15 艘船共用同一個第 0 天。日曆欄位可以拿來畫易讀的座標軸，**但不要拿具體日期去下任何
+結論**。
+
+### 合成地理 (Synthesized Geography) ⚠️ 估計值
+
+真實午報**沒有**位置、港口與船艏向。精煉區的 `latitude` / `longitude` / `heading_deg` /
+`port_from` / `port_to` 全部是合成的（`geography.py`）：每個船殼級有一條固定的環線
+（W1 = 亞歐線經麻六甲/蘇伊士，W2 = 跨太平洋線），以該航次**真實的累計航距**沿著折線行走定位。
+
+**真實的距離驅動合成的航跡，而不是反過來。** 但港口與座標仍然是虛構的——**本船隊從未靠泊過
+`dim_port` 裡的任何一個港。**
+
+### 資料保存原則 (Preservation)
+
+三個真實來源檔在原始區**逐字保存**：重複列不刪、離群值不改、欄位不動。**所有清理都只發生在精煉
+區**，且 `noon_report` 與 `fact_performance_daily` 併存，任何人都可以回頭比對「來源到底怎麼寫的」。
+維修事件的原子化亦可逆——以 `(ship_id, event_day)` 分組即完全還原 77 筆來源列。
+
+---
+
+## 15. 附錄：本專案「不存在」的術語
+
+以下術語出現在本專案的**早期文件**中。它們**已不存在於程式碼與資料中**，若在任何舊文稿讀到，
+請忽略——它們是舊版合成資料時代的遺跡，會誤導人與 AI 代理 (agent)。
+
+| 舊術語 | 現況 |
+|---|---|
+| **9 艘船 / `9700001`–`9700009`** | 現為 **15 艘**（S1–S12、S21–S23），IMO 為合成的 `9800001`–`9800015` |
+| **`imo_number` 為分割鍵** | **無任何分割**。IMO 只是 `dim_vessel` 上的估計欄位 |
+| **船隊 FL-IA / FL-TP / FL-AE** | 現為 **FL-W1 / FL-W2**，且船隊 == 船殼級 |
+| **`event_type = hull_cleaning` 等** | 原子型別現為 **`UWC` / `PP` / `UWI` / `DD`**（`hull_cleaning` 只是 `fact_maintenance_recommendation.action_type` 的值） |
+| **Rubert 量表 A–F** | **不存在**。螺槳/塗層等級是真實的 **Good / Fair / Poor** |
+| **NSTM 評級、「≥60 就清潔」** | `hull_fouling_rating` 是 0–100，但**不是 NSTM**，也沒有這條規則；它是速度損失的線性重述 |
+| **`coating_condition`** | 欄名是 **`hull_coating_condition`** |
+| **IsolationForest / 孤立森林** | **不存在**，程式碼中無任何 scikit-learn |
+| **EWMA 管制圖** | **不存在** |
+| **IQR 四分位距離群偵測** | **不存在** |
+| **Huber 迴歸** | **不存在**。唯一的迴歸是 Theil-Sen |
+| **Bootstrap 信賴區間** | **不存在**。`trends.py` 全長 45 行，無任何重抽樣 |
+| **滾動視窗 z 分數 (W=30)** | z 分數是對**全部歷史**算的，不是滾動視窗 |
+| **一致性檢查 C1–C14、閉環可還原性 C13** | **不存在**。沒有產生器，就沒有可還原的真值 |
+| **地面實況 (`tmp/truth/`)** | **不存在**。資料是真的，沒有「植入的真值」 |
+| **precision / recall 驗收門檻** | **不存在**。沒有標註，無從計算 |
+| **`valid_flag` 要求 Beaufort ≤ 6** | 現為 **≤ 4** |
+| **`days_since_in_water`** | 三個時鐘是 `days_since_cleaning` / `days_since_polish` / `days_since_dry_dock` |
+| **輔機/鍋爐分項油耗 `ae_foc` / `boiler_foc`** | **不存在**。只有 `total_consump` 與 `me_consumption` |
+| **海流欄位、氣壓、海水密度** | **不存在**。海流只有代理欄位 `diff_stw_sog_slip` |
+| **風/浪方向為「度數」** | 是 **0–15 的十六方位點**，×22.5 才是度數 |
+| **`inspection_type ∈ {diver, ROV}`** | 現為 **`UWI` / `DD`** |
+| **洗滌器 (scrubber) 船 `9700003`/`9700009`** | **不存在**。資料中沒有洗滌器資訊 |
+| **YM WELLNESS、Feeder→ULCV 船級階梯** | **不存在**。船舶已去識別化，只有 W1 / W2 兩個姊妹船級 |
+| **儀表板三頁、`web/glossary.js`** | **不存在**。`web/` 目前是空的 |
+| **`doc/poc-spec.md` / `doc/insights.md` / `doc/table-schema-zh.md`** | **不存在**。資料字典見 [`schema.md`](schema.md) |

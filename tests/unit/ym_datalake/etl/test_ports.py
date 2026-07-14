@@ -14,6 +14,7 @@ import pytest
 
 from ym_datalake.etl import ports
 from ym_datalake.etl.curated.geography import ROTATION_LOOP
+from ym_datalake.schema import DIM_PORT_COLUMNS
 
 # Rectangles drawn STRICTLY INSIDE a continental interior. None of them may clip a navigable
 # water body — not the Malacca Strait, the Red Sea, the Gulf of Suez, Hormuz, the Taiwan
@@ -97,3 +98,74 @@ def test_bent_routes_are_longer_than_the_great_circle() -> None:
             ports.PORTS[a]['lat'], ports.PORTS[a]['lon'], ports.PORTS[b]['lat'], ports.PORTS[b]['lon']
         )
         assert ports.leg_distance_nm(a, b) > direct
+
+
+class TestHaversine:
+    """The metre-stick every other number in this module is measured with."""
+
+    def test_a_point_is_no_distance_from_itself(self) -> None:
+        assert ports.haversine(1.27, 103.83, 1.27, 103.83) == pytest.approx(0.0)
+
+    def test_it_is_symmetric(self) -> None:
+        there = ports.haversine(1.27, 103.83, 51.95, 4.14)
+        back = ports.haversine(51.95, 4.14, 1.27, 103.83)
+        assert there == pytest.approx(back)
+
+    def test_one_degree_of_latitude_is_sixty_nautical_miles(self) -> None:
+        """The definition of the unit — so this pins the earth radius, not a sample."""
+        assert ports.haversine(0.0, 0.0, 1.0, 0.0) == pytest.approx(60.0, rel=1e-3)
+        assert ports.haversine(40.0, 10.0, 41.0, 10.0) == pytest.approx(60.0, rel=1e-3)
+
+    def test_it_crosses_the_antimeridian_the_short_way(self) -> None:
+        """179E to 179W is 2 degrees of longitude, not 358."""
+        assert ports.haversine(0.0, 179.0, 0.0, -179.0) == pytest.approx(120.0, rel=1e-3)
+
+
+class TestWalk:
+    @pytest.fixture
+    def path(self) -> list[tuple[float, float]]:
+        return ports.route_path('JPTYO', 'USLAX')
+
+    def test_zero_distance_leaves_you_at_the_start(self, path) -> None:
+        lat, lon, _heading = ports.walk(path, 0.0)
+        assert (lat, lon) == pytest.approx(path[0])
+
+    def test_the_full_length_puts_you_at_the_destination(self, path) -> None:
+        lat, lon, _heading = ports.walk(path, ports.path_length_nm(path))
+        assert (lat, lon) == pytest.approx(path[-1])
+
+    def test_sailing_past_the_end_holds_at_the_destination(self, path) -> None:
+        """Callers wrap the rotation rather than sail off the end of a leg."""
+        lat, lon, _heading = ports.walk(path, ports.path_length_nm(path) * 2.0)
+        assert (lat, lon) == pytest.approx(path[-1])
+
+    def test_the_heading_is_a_compass_bearing(self, path) -> None:
+        total = ports.path_length_nm(path)
+        for i in range(21):
+            _lat, _lon, heading = ports.walk(path, total * i / 20.0)
+            assert 0.0 <= heading < 360.0
+
+    def test_further_along_the_path_is_further_from_the_start(self, path) -> None:
+        lat0, lon0 = path[0]
+        near_lat, near_lon, _ = ports.walk(path, 100.0)
+        far_lat, far_lon, _ = ports.walk(path, 1000.0)
+        assert ports.haversine(lat0, lon0, near_lat, near_lon) < ports.haversine(lat0, lon0, far_lat, far_lon)
+
+
+class TestNearestPort:
+    @pytest.mark.parametrize('locode', sorted(ports.PORTS))
+    def test_a_port_is_its_own_nearest_port(self, locode) -> None:
+        port = ports.PORTS[locode]
+        assert ports.nearest_port(port['lat'], port['lon']) == locode
+
+    def test_a_position_in_the_north_sea_names_a_north_sea_port(self) -> None:
+        assert ports.nearest_port(53.0, 5.0) in {'NLRTM', 'DEHAM'}
+
+
+def test_dim_port_rows_match_the_catalog() -> None:
+    """The drift guard: dim_port is hand-built here and declared in schema.py."""
+    columns = [name for name, _type in DIM_PORT_COLUMNS]
+    rows = ports.dim_port_rows()
+    assert len(rows) == len(ports.PORTS)
+    for row in rows:
+        assert list(row) == columns

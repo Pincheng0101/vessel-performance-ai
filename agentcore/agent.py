@@ -1,14 +1,12 @@
 """YangMing vessel-performance GenBI agent on Bedrock AgentCore Runtime.
 
-Native in-account port of the LangForge `ym-datalake-genbi-agent`
-(agent-d9f574ccf5a91750): same system prompt, same table-catalog skill
-(``skill.md``, exposed as the ``load_genbi_skill`` tool), and the same
-``athena_query`` tool — here a boto3 call in the runtime's own execution role,
-so no connector / cross-account assume-role is needed.
+Two tools: ``load_genbi_skill`` (the 20-table catalog in ``skill.md``) and
+``athena_query`` (a boto3 call in the runtime's own execution role, so no
+connector / cross-account assume-role is needed).
 
 Environment (all optional):
     ATHENA_DATABASE   Glue database to query        (default ``ym_hackathon``)
-    ATHENA_WORKGROUP  Athena workgroup              (default ``primary``)
+    ATHENA_WORKGROUP  Athena workgroup              (default ``ym-hackathon-workgroup``)
     ATHENA_CATALOG    data source catalog           (default ``AwsDataCatalog``)
     ATHENA_OUTPUT     s3://… query-result location  (default: workgroup default)
     BEDROCK_MODEL_ID  inference profile             (default ``global.anthropic.claude-sonnet-4-6``)
@@ -49,31 +47,47 @@ standard technical terms (speed loss, slip, SFOC, Noon Report, UWI) in their ori
 
 ## Domain background
 
-The lake holds ~5 years of daily Noon Reports (`vt_fd`, 21k rows) and hull/propeller
-inspection & maintenance events (`maintenance`, 77 rows) for a **15-ship container fleet**
-(`S1`–`S12`, `S21`–`S23`):
+The lake is **20 tables** covering ~5 years of a **15-ship container fleet** (`S1`–`S12` train,
+`S21`–`S23` predict): **6 raw** — the source Noon Reports (`noon_report`, 21,282 rows, landed
+verbatim), vessel particulars, maintenance events, plus a fitted reference curve, the UWI
+inspections and a synthesized bunker-price series — and **14 curated**, where the analytics live
+(`fact_performance_daily` is the spine; also voyages, ISO 19030 indicators, anomalies, alerts,
+maintenance economics, CII, speed profiles, fleet rollups).
 
-- Time is a **relative-day integer** (`noon_utc` / `event_day`, day 0 … 1825) — there are no
-  calendar dates; answer time questions in relative days.
-- Rising **slip** (`me_slip`) and rising **SFOC** at comparable speed/weather are the fouling /
-  degradation proxies; cleaning events (DD / UWC / PP / UWI+PP / UWC+PP) reset them, `UWI` alone
-  is inspection-only.
-- `masked_flag = true` rows are the **hackathon prediction targets** (fuel consumption masked;
-  `predict_fuel_type` names the target column) — exclude them from consumption statistics.
-- Raw data has outliers (speeds up to 97.8 kn) — filter to plausible ranges for trends.
+You have two jobs, equally weighted:
+
+1. **Fleet-performance BI** over the curated zone — ISO 19030 speed loss, hull fouling,
+   maintenance effect & payback, CII rating, excess fuel cost, alerts, recommendations, and
+   slow-steaming speed profiles.
+2. **The hackathon fuel-prediction task** — `masked_flag` rows on `noon_report` (S21–S23) have
+   their fuel consumption blanked; `predict_fuel_type` names the target column. Exclude them from
+   any consumption statistic.
+
+Cross-cutting facts:
+
+- **Nothing is partitioned.** `ship_id` is an ordinary column; never write a partition predicate.
+- Time is a **relative-day integer** (`noon_utc` / `event_day` / `inspection_day`, day 0 … 1825).
+  The curated zone adds a calendar (`report_date`, epoch day 0 = 2021-07-01) — but that epoch is
+  itself an **estimate**.
+- **Estimated ≠ fact.** The calendar epoch, all geography (lat/lon/ports), all USD figures, the
+  IMO numbers and the UWI numeric signals are **synthesized**. Present them as modelled figures;
+  never quote them as fact. The skill tags them `(est.)`.
+- Raw `noon_report` is verbatim — duplicates and speed outliers included. Prefer the curated
+  `fact_performance_daily` (deduped, clipped) for analytics.
 
 ## Tools
 
-- **`load_genbi_skill` tool** — the table catalog: both tables, their columns, partition-pruning
-  rules, join keys, and sample queries. **Load it before writing any SQL.**
+- **`load_genbi_skill` tool** — the table catalog: all 20 tables, every column, the traps, the
+  enums, and worked queries. **Load it before writing any SQL.**
 - **`athena_query` tool** — runs one SQL statement: pass the SELECT as `query`. The database,
   workgroup, and catalog are pre-configured; reference tables by bare name.
 
 ## Process
 
 1. **Load the skill**, identify the right table(s) and columns for the question.
-2. **Write one SELECT** following the skill's rules — most importantly, always add the partition
-   predicate (`ship_id='S1'` etc.) on `vt_fd`, and `NOT masked_flag` on consumption statistics.
+2. **Write one SELECT** following the skill's traps — most importantly: filter `fleet_id` on
+   `agg_fleet_daily` (it carries an `'ALL'` rollup row), filter `valid_flag` for any speed-loss /
+   hull-condition work, and `NOT masked_flag` on consumption statistics.
 3. **Run it** with `athena_query`. If it errors, read the message, fix the SQL, retry (≤3 attempts).
 4. **Answer** in the user's language: a short conclusion first, then the key numbers (small Markdown
    table when helpful), then a one-line interpretation (e.g. what a rising slip/SFOC trend means).
@@ -91,9 +105,9 @@ inspection & maintenance events (`maintenance`, 77 rows) for a **15-ship contain
 
 @tool
 def load_genbi_skill() -> str:
-    """Load the ym-datalake GenBI skill: the full table catalog (all 20 tables, columns,
-    partition-pruning rules, join keys) plus the exact SQL behind every YM Fleet Performance
-    Dashboard panel and ad-hoc query patterns. Call this before writing any SQL."""
+    """Load the ym-datalake GenBI skill: the full table catalog (all 20 tables, every column,
+    grain and row count), the traps that turn into wrong answers, the enum reference, and worked
+    queries. Call this before writing any SQL."""
     return SKILL_MD
 
 
@@ -102,7 +116,7 @@ def athena_query(query: str) -> str:
     """Run one read-only SQL query against the vessel-performance data lake (Athena).
     Pass a single SELECT statement as `query`. The database, workgroup, and catalog are
     pre-configured; reference tables by bare name. Load the GenBI skill first for the
-    table catalog, partition-pruning rules, and sample queries.
+    table catalog, the traps, and sample queries.
 
     Args:
         query: One SELECT (or WITH … SELECT) statement.

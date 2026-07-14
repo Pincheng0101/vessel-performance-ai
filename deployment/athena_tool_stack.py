@@ -329,53 +329,6 @@ class AthenaToolStack(Stack):
         usage_plan.add_api_stage(stage=api.deployment_stage)
         usage_plan.add_api_key(api_key)
 
-        # 7.5 GenBI Athena role — assumed (sts:AssumeRole) by the LangForge GenBI agent's
-        # athena_client connector (lfe_resource/connector/ym-datalake-aws-connector.json).
-        # Same query grants as the Lambdas above, but trusts the account (the LFE
-        # deployment runs in this account) instead of lambda.amazonaws.com.
-        genbi_role = aws_iam.Role(
-            self,
-            'GenBiAthenaRole',
-            role_name='ym-hackathon-genbi-athena',
-            assumed_by=aws_iam.AccountRootPrincipal(),
-            description='Assumed by the LangForge GenBI agent athena_client connector to query ym_hackathon.',
-        )
-        genbi_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=['athena:StartQueryExecution', 'athena:StopQueryExecution', 'athena:GetWorkGroup'],
-                resources=[workgroup_arn],
-            )
-        )
-        genbi_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=['athena:GetQueryExecution', 'athena:GetQueryResults'],
-                resources=['*'],
-            )
-        )
-        genbi_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    'glue:GetCatalog',
-                    'glue:GetDatabase',
-                    'glue:GetDatabases',
-                    'glue:GetTable',
-                    'glue:GetTables',
-                    'glue:GetPartition',
-                    'glue:GetPartitions',
-                ],
-                resources=glue_resources,
-            )
-        )
-        if source_bucket_arns:
-            genbi_role.add_to_policy(
-                aws_iam.PolicyStatement(
-                    actions=['s3:GetObject', 's3:ListBucket', 's3:GetBucketLocation'],
-                    resources=[arn for b in source_bucket_arns for arn in (b, f'{b}/*')],
-                )
-            )
-        results_bucket.grant_read_write(genbi_role)
-        data_bucket.grant_read(genbi_role)
-
         # 8. Outputs.
         CfnOutput(self, 'AthenaQueryFunctionArn', value=fn.function_arn)
         CfnOutput(self, 'AthenaResultsBucketName', value=results_bucket.bucket_name)
@@ -383,7 +336,6 @@ class AthenaToolStack(Stack):
         CfnOutput(self, 'AsyncQueryApiUrl', value=api.url)
         CfnOutput(self, 'AsyncQueryApiKeyId', value=api_key.key_id)
         CfnOutput(self, 'QueryRegistryTableName', value=registry_table.table_name)
-        CfnOutput(self, 'GenBiAthenaRoleName', value=genbi_role.role_name)
 
     def _glue_table(self, database: str, name: str, columns: list[tuple[str, str]], location: str) -> aws_glue.CfnTable:
         """Create one flat, unpartitioned EXTERNAL JSON-SerDe table in the Glue catalog."""
