@@ -46,7 +46,7 @@ class TestCatalogDrift:
                     'longitude',
                     'heading_deg',
                     'speed_loss_pct',
-                    'cii_rating_aer',
+                    'cii_rating_imo',
                     'port_from',
                     'port_to',
                     'voyage',

@@ -358,7 +358,7 @@ AGG_FLEET_DAILY_COLUMNS = [
     ('n_vessels', 'int'),
     ('avg_speed_loss_pct', 'double'),  # mean of valid daily speed_loss_pct
     ('total_excess_cost_usd', 'double'),  # estimated (USD)
-    ('cii_count_a', 'int'),
+    ('cii_count_a', 'int'),  # ships at each cii_rating_imo (the regulatory grade) that day
     ('cii_count_b', 'int'),
     ('cii_count_c', 'int'),
     ('cii_count_d', 'int'),

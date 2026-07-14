@@ -17,8 +17,8 @@ const fmtUsdCompact = (v) => {
   return `$${Math.round(v)}`;
 };
 
-// agg_fleet_daily carries this tab's fleet-wide *rates* (mean speed loss, D/E share, daily alert
-// count), one row per day. useFleetDaily carries what those rows cannot: the counts and sums,
+// agg_fleet_daily carries this tab's fleet-wide *rates* (mean speed loss, A-rated share, daily
+// alert count), one row per day. useFleetDaily carries what those rows cannot: the counts and sums,
 // folded from each ship's own latest report. fact_recommendation is one row per ship (15 rows,
 // no ship_id filter) — the savings-potential total.
 //
@@ -42,11 +42,16 @@ const [{ data: overviewRows }, { data: recommendations }] = fetched;
 const speedLossDaily = computed(() => (overviewRows.value ?? []).filter(r => r.avg_speed_loss_pct != null));
 
 // Daily rows augmented with the two fleet-wide figures the raw row can't give:
-//   cii_risk_pct   — a *share*, so it survives partial reporting.
+//   cii_a_pct      — a *share*, so it survives partial reporting.
 //   excess_fleet_usd — a sum, so it does not: scale that day's reporters up to the full roster.
+//
+// The D/E share would be the regulatory risk definition, but this fleet has no D or E vessel in
+// the whole window: the tile would be a permanent 0.0% with a flat sparkline. The A-rated share
+// carries the same story and actually moves (~80% → ~15% as the required line tightens); the D/E
+// compliance trigger lives in the tooltip instead.
 const series = computed(() => (overviewRows.value ?? []).map(r => ({
   ...r,
-  cii_risk_pct: r.n_vessels ? ((r.cii_count_d || 0) + (r.cii_count_e || 0)) / r.n_vessels * 100 : null,
+  cii_a_pct: r.n_vessels ? (r.cii_count_a || 0) / r.n_vessels * 100 : null,
   excess_fleet_usd: r.n_vessels && r.total_excess_cost_usd != null
     ? r.total_excess_cost_usd / r.n_vessels * roster.length
     : null,
@@ -63,10 +68,16 @@ const mean = (rows, key) => {
   return xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null;
 };
 
-// All metrics are up-bad, so a rising 30-day delta is a worsening signal (↑ / red).
+// The arrow is the direction of the 30-day delta; the color is whether that direction is good.
+// Most metrics are up-bad (more speed loss, cost, alerts), so rising is red — but `upIsGood`
+// metrics like the CII A-rated share invert that.
 const deltaArrow = d => (d == null ? '' : d === 0 ? '→' : d > 0 ? '↑' : '↓');
-const deltaColor = d => (d == null || d === 0 ? undefined : d > 0 ? 'error' : 'success');
-const deltaTextClass = d => (d == null || d === 0 ? 'text-medium-emphasis' : d > 0 ? 'text-error' : 'text-success');
+const deltaTone = (m) => {
+  if (m.deltaSign == null || m.deltaSign === 0) return null;
+  return (m.deltaSign > 0) === Boolean(m.upIsGood) ? 'success' : 'error';
+};
+const deltaColor = m => deltaTone(m) ?? undefined;
+const deltaTextClass = m => (deltaTone(m) ? `text-${deltaTone(m)}` : 'text-medium-emphasis');
 
 // Sparklines share the muted speed-loss color, matching the fleet speed-loss trend line.
 const SPEED_LOSS_COLOR = FleetChartConstant.SpeedLossColor;
@@ -82,7 +93,13 @@ const METRICS = [
     tooltip: FleetGlossaryConstant.Term.excessFuelCost,
   },
   { key: 'n_alerts', label: 'Active alerts', fmt: fmtInt, tooltip: FleetGlossaryConstant.Term.activeAlerts },
-  { key: 'cii_risk_pct', label: 'CII risk (D/E share)', fmt: fmtPct, tooltip: FleetGlossaryConstant.Term.ciiRisk },
+  {
+    key: 'cii_a_pct',
+    label: 'CII A-rated share',
+    fmt: fmtPct,
+    upIsGood: true,
+    tooltip: FleetGlossaryConstant.Term.ciiARated,
+  },
 ];
 
 const buildTile = (dailyRows, sparkRows, m) => {
@@ -208,10 +225,10 @@ const savingsByShipOption = computed(() => {
           <v-chip
             size="x-small"
             variant="tonal"
-            :color="deltaColor(m.deltaSign)"
+            :color="deltaColor(m)"
             class="px-2"
           >
-            <span :class="deltaTextClass(m.deltaSign)">
+            <span :class="deltaTextClass(m)">
               <template v-if="deltaArrow(m.deltaSign)">{{ deltaArrow(m.deltaSign) }} </template>{{ fmtDeltaMag(m) }}
             </span>
           </v-chip>

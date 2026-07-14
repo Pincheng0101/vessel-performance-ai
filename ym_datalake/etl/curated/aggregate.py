@@ -35,10 +35,13 @@ def build(daily_rows: list[dict], anomalies: list[dict]) -> list[dict]:
     for (fleet_id, day), rows in sorted(groups.items()):
         losses = [r['speed_loss_pct'] for r in rows if r['valid_flag'] and r.get('speed_loss_pct') is not None]
         excess = [r['excess_cost_usd'] for r in rows if r.get('excess_cost_usd') is not None]
+        # The IMO rating, not the AER one: only ``cii_rating_imo`` grades against the year's
+        # reduced ``required`` line, so it is the regulatory grade. The AER rating is against the
+        # un-reduced 2019 base line and pins the whole fleet into A/B.
         ratings = defaultdict(int)
         for row in rows:
-            if row.get('cii_rating_aer'):
-                ratings[row['cii_rating_aer']] += 1
+            if row.get('cii_rating_imo'):
+                ratings[row['cii_rating_imo']] += 1
 
         out.append(
             {

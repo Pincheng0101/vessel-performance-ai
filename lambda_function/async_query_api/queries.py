@@ -169,7 +169,7 @@ def _table_builder(table: str, spec: _Spec):
 # Latest daily row per ship, for the fleet map (one dot each).
 _POSITION_COLUMNS = (
     'ship_id, noon_utc, report_date, latitude, longitude, heading_deg, speed_loss_pct, '
-    'cii_rating_aer, port_from, port_to, voyage'
+    'cii_rating_imo, port_from, port_to, voyage'
 )
 
 

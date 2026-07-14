@@ -63,7 +63,7 @@ const speedLossColor = (v) => {
   return FleetChartConstant.SemanticRamp.critical;
 };
 const ciiColor = c => FleetChartConstant.CiiColor[c] || FleetChartConstant.FallbackColor;
-const dotColor = row => (colorBy.value === 'cii' ? ciiColor(row.cii_rating_aer) : speedLossColor(row.speed_loss_pct));
+const dotColor = row => (colorBy.value === 'cii' ? ciiColor(row.cii_rating_imo) : speedLossColor(row.speed_loss_pct));
 
 const legend = computed(() => (colorBy.value === 'cii'
   ? ['A', 'B', 'C', 'D', 'E'].map(g => ({ label: g, color: FleetChartConstant.CiiColor[g] }))
@@ -104,7 +104,7 @@ const vesselDots = computed(() => filteredPositions.value.map(r => ({
   ship: r.ship_id,
   itemStyle: { color: dotColor(r) },
   slPct: r.speed_loss_pct,
-  cii: r.cii_rating_aer,
+  cii: r.cii_rating_imo,
   portFrom: r.port_from,
   portTo: r.port_to,
   voyage: r.voyage,

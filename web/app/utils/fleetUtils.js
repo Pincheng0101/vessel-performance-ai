@@ -19,8 +19,10 @@ class fleetUtils {
     const ciiCounts = Object.fromEntries(CII_RATINGS.map(r => [r, 0]));
     let excessCostUsd = 0;
     rows.forEach((row) => {
-      // agg_fleet_daily's cii_count_* are the AER rating; the IMO one is a separate column.
-      if (row.cii_rating_aer in ciiCounts) ciiCounts[row.cii_rating_aer] += 1;
+      // cii_rating_imo is the regulatory grade — it is scored against the year's reduced required
+      // line. cii_rating_aer scores against the un-reduced 2019 base line, which pins the fleet
+      // into A/B and hides the year-on-year migration the regulation is designed to force.
+      if (row.cii_rating_imo in ciiCounts) ciiCounts[row.cii_rating_imo] += 1;
       // excess_cost_usd is the speed-loss (fouling) penalty. The weather/operational columns
       // are burned *on top of* it, not a partition of it (ym_datalake/etl/curated/daily.py),
       // so they must not be summed in.

@@ -4,8 +4,8 @@ import fleetUtils from './fleetUtils';
 const row = (shipId, reportDate, rating, excess) => ({
   ship_id: shipId,
   report_date: reportDate,
-  cii_rating_aer: rating,
-  cii_rating_imo: 'E',
+  cii_rating_imo: rating,
+  cii_rating_aer: 'E',
   excess_cost_usd: excess,
   excess_cost_fouling_usd: excess,
   excess_cost_weather_usd: 4000,

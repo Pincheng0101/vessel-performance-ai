@@ -112,7 +112,7 @@ class TestHappyPath:
     def test_fleet_positions_one_row_per_ship(self, api_client):
         page = api_client.run('fleet_positions', {})
         _assert_result_shape(page)
-        for col in ('ship_id', 'latitude', 'longitude', 'speed_loss_pct', 'cii_rating_aer'):
+        for col in ('ship_id', 'latitude', 'longitude', 'speed_loss_pct', 'cii_rating_imo'):
             assert col in page['columns']
         ships = [row[page['columns'].index('ship_id')] for row in page['rows']]
         assert len(ships) == len(set(ships)), 'fleet_positions must be one row per ship'

@@ -23,7 +23,7 @@ const Term = Object.freeze({
   daysSinceInWater: '自最近一次水下船體清潔起算的天數。',
 
   // Emissions
-  cii: '船舶每載重噸·海里的 CO₂ 排放量評級（A–E），A 最佳。',
+  cii: '船舶每載重噸·海里的 CO₂ 排放量評級（A–E），A 最佳。此處顯示的是 IMO 規定值（required line）評級：規定值以 2019 年基準線逐年折減（Z% = 5／7／9／11%，對應 2023–2026 年），故同一碳強度在越晚的年份評級越差。C 級以上為合規。',
   aer: '年度效率比：每載重噸·海里的 CO₂ 排放量（gCO₂/dwt·nm），越低越佳。',
 
   // Alerts / anomalies
@@ -69,7 +69,7 @@ const Term = Object.freeze({
   maintenanceAction: '建議的維修項目：船體清潔、螺旋槳拋光／修理、船體塗層更新、主機檢查。',
 
   // Executive
-  ciiRisk: 'D 或 E 級船舶占全隊的比例（%）；越高代表越多船碳效不佳。',
+  ciiARated: '以 IMO 規定值（required line）評級計，A 級船舶占全隊的比例（%）；越高代表船隊碳強度表現越好。合規風險另看 D／E 級：連續三年 D 級或單年 E 級須提出矯正行動計畫（corrective action plan）。',
   savingsByShip: '各船的清潔／維修建議淨節省（USD），由高到低排序；僅列出目前有建議的船舶。',
 
   // Fleet overview

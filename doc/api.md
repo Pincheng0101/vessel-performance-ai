@@ -173,7 +173,7 @@ SQL that is not a single filtered table scan:
 
 | `query_type` | params | Returns |
 |---|---|---|
-| `fleet_positions` | *(none)* | The latest `fact_performance_daily` row per ship — one dot each for the fleet map. `ship_id`, `noon_utc`, `report_date`, `latitude`, `longitude`, `heading_deg`, `speed_loss_pct`, `cii_rating_aer`, `port_from`, `port_to`, `voyage`. |
+| `fleet_positions` | *(none)* | The latest `fact_performance_daily` row per ship — one dot each for the fleet map. `ship_id`, `noon_utc`, `report_date`, `latitude`, `longitude`, `heading_deg`, `speed_loss_pct`, `cii_rating_imo`, `port_from`, `port_to`, `voyage`. |
 | `ship_speed_power` | `ship_id` **required** | One ship's measured (ISO-corrected, `valid_flag`-gated) points `UNION ALL` its clean-hull reference curve, aligned to `series` (`measured`/`reference`), `speed_kn`, `power_kw`, `days_since_cleaning`. |
 | `predict_targets` | `ship_id` *(optional)* | The hackathon **PREDICT** cells — `noon_report WHERE predict_fuel_type IS NOT NULL`. These exist only in raw, and only for the prediction ships `S21`–`S23`. |
 
