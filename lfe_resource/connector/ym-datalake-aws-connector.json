@@ -1,0 +1,7 @@
+{
+    "connector_name": "ym-datalake-aws-connector",
+    "connector_type": "aws",
+    "region_name": "us-west-2",
+    "account_id": "${env:YM_DATALAKE_AWS_ACCOUNT_ID}",
+    "role_name": "${env:YM_DATALAKE_ATHENA_ROLE_NAME}"
+}

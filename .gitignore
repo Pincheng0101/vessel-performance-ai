@@ -1,0 +1,48 @@
+# Project
+plan.md
+.serena
+.claude
+tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# uv
+.venv/
+
+# Node / CDK CLI
+node_modules/
+
+# CDK
+cdk.out/
+*.js
+*.d.ts
+!jest.config.js
+
+# Dashboard frontend (M6) — static ES modules, served (not compiled); keep them tracked.
+!web/**/*.js
+# ...but never commit the user-filled config (holds the api key).
+web/config.js
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Env
+.env
+.env.*
+!.env.example

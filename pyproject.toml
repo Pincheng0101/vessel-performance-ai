@@ -1,0 +1,49 @@
+[project]
+name = "ym-datalake-poc"
+version = "0.1.0"
+description = "Template CDK project deploying a Lambda that queries AWS Athena via boto3."
+requires-python = ">=3.13, <3.14"
+dependencies = [
+    "aws-cdk-lib>=2.222.0,<3.0.0",
+    "constructs>=10.0.0,<11.0.0",
+    "pyhocon>=0.3.60,<1.0.0",
+    "aws-lambda-powertools",
+    "pydantic>=2.0.0,<3.0.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["lambda_function/athena_query", "lambda_function/async_query_api"]
+
+[dependency-groups]
+dev = [
+    "boto3>=1.42.78",
+    "numpy>=2.0.0,<3.0.0",
+    "scikit-learn>=1.5.0,<2.0.0",
+    "pytest>=8.2.0,<9.0.0",
+    "ruff>=0.15.4,<1.0.0",
+    "xgboost>=2.1,<4",
+    "torch>=2.4",
+]
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+pythonpath = ["."]
+markers = [
+    "e2e: live end-to-end tests against a deployed AthenaToolStack (needs AWS creds; auto-skips otherwise)",
+]
+
+[tool.ruff]
+line-length = 120
+lint.select = ["E", "F", "G", "I", "UP", "W"]
+lint.ignore = ["E501", "UP007"]
+target-version = "py313"
+
+[tool.ruff.format]
+quote-style = "single"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

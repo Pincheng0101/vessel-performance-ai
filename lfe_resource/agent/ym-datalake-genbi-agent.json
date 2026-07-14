@@ -1,0 +1,32 @@
+{
+    "agent_name": "ym-datalake-genbi-agent",
+    "agent_prompt": "${file:agent/prompts/ym-datalake-genbi-agent.md}",
+    "description": "YangMing Vessel-Performance GenBI Agent (text-to-SQL over the ym_datalake_poc Athena data lake)",
+    "llm_id": "${llm:ym-datalake-genbi-llm}",
+    "builtin_tools": {
+        "skill": {
+            "enable": true
+        }
+    },
+    "tools": [
+        {
+            "tool_type": "skill",
+            "skill_id": "${skill:ym-datalake-genbi-skill}"
+        },
+        {
+            "tool_type": "athena_client",
+            "name": "athena_query",
+            "description": "Run one read-only SQL query against the ym_datalake_poc vessel-performance data lake (Athena, us-west-2). Pass a single SELECT statement as `query`. Load the ym-datalake-genbi-skill skill first for the table catalog, partition-pruning rules, and sample queries.",
+            "connector_id": "${connector:ym-datalake-aws-connector}",
+            "database": "ym_datalake_poc",
+            "workgroup": "ym-datalake-poc",
+            "output_location": null,
+            "catalog": "AwsDataCatalog",
+            "read_only": true
+        }
+    ],
+    "ui_config": {
+        "title": "您好，我是船舶效能分析助理",
+        "description": "可以用自然語言查詢船隊效能資料湖：速度損失 (speed loss) 趨勢、CII 評級、異常預警、維修建議與成本效益等。例如：「YM WELLNESS 最近一年的 speed loss 趨勢如何？」"
+    }
+}
