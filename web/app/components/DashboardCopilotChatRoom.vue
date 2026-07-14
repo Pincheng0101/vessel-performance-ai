@@ -122,19 +122,27 @@ const getAccessToken = async () => {
   if (tokenCache.token && Date.now() < tokenCache.expiresAt - 60_000) {
     return tokenCache.token;
   }
-  if (!agentcoreClientId || !agentcoreClientSecret) {
-    throw new Error('Missing AGENTCORE_CLIENT_ID / AGENTCORE_CLIENT_SECRET');
+  if (!agentcoreTokenEndpoint || !agentcoreClientId || !agentcoreClientSecret) {
+    throw new Error('Missing AGENTCORE_TOKEN_ENDPOINT / AGENTCORE_CLIENT_ID / AGENTCORE_CLIENT_SECRET');
   }
-  const response = await $fetch(agentcoreTokenEndpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: agentcoreClientId,
-      client_secret: agentcoreClientSecret,
-      scope: agentcoreTokenScope,
-    }).toString(),
-  });
+  let response;
+  try {
+    response = await $fetch(agentcoreTokenEndpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: agentcoreClientId,
+        client_secret: agentcoreClientSecret,
+        scope: agentcoreTokenScope,
+      }).toString(),
+    });
+  } catch (error) {
+    // ofetch's message is only `[POST] "<url>": 400` — Cognito puts the actual
+    // reason (invalid_client, invalid_scope) in the JSON body.
+    const reason = error?.data?.error_description ?? error?.data?.error ?? error.message;
+    throw new Error(`Cognito token request failed (${error?.status ?? '?'}): ${reason}`);
+  }
   tokenCache.token = response.access_token;
   tokenCache.expiresAt = Date.now() + response.expires_in * 1000;
   return tokenCache.token;
