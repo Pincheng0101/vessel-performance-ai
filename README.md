@@ -277,29 +277,25 @@ comment, not code — so the charts render offline, with no `.env` and no deploy
 
 ### `.env` — only for the copilot chat
 
-The one live feature is the GenBI copilot chat, which throws without credentials. Copy
-`.env.example` and fill it; only the six `AGENTCORE_*` keys are read (`SERVER_API_URL` /
-`SERVER_API_KEY` are inert leftovers). Derive the values from the deployed stacks — reusing the
-same `out()` helper as §5:
+The one live feature is the GenBI copilot chat, which throws without credentials. Only the six
+`AGENTCORE_*` keys of `.env.example` are read (`SERVER_API_URL` / `SERVER_API_KEY` are inert
+leftovers). Generate the file from the deployed stacks:
 
 ```bash
-AUTH=YmHackathonGenbiAgentAuthStack; RT=YmHackathonGenbiAgentRuntimeStack
-CID=$(out $AUTH ClientId)
-
-cat > web/.env <<EOF
-AGENTCORE_RUNTIME_ARN=$(out $RT RuntimeArn)
-AGENTCORE_REGION=us-west-2
-AGENTCORE_TOKEN_ENDPOINT=$(out $AUTH TokenEndpoint)
-AGENTCORE_CLIENT_ID=$CID
-AGENTCORE_CLIENT_SECRET=$(aws cognito-idp describe-user-pool-client \
-  --user-pool-id "$(out $AUTH UserPoolId)" --client-id "$CID" \
-  --query 'UserPoolClient.ClientSecret' --output text)
-AGENTCORE_TOKEN_SCOPE=$(out $AUTH TokenScope)
-EOF
+./scripts/generate-web-env.sh    # writes web/.env (backs up any existing one to web/.env.bak)
 ```
 
-In GitLab this same file is the file-type CI variable `ENV_DEV`. Prefer the stack outputs over
-copying the CI variables — the CI copy's API endpoint is stale.
+It reads the auth/runtime stack outputs, fetches the Cognito client secret, and ends with a live
+token POST — `token endpoint check: HTTP 200` means the credentials work.
+
+**Re-run it after every `YmHackathonGenbiAgentAuthStack` deploy.** The stack is
+`RemovalPolicy.DESTROY`, so recreating it regenerates the Cognito app client and rotates the
+client secret; a stale `web/.env` then fails the token request with a bare 400.
+
+Nuxt reads `.env` only at startup — restart `npm run dev` after regenerating.
+
+In GitLab this same file is the file-type CI variable `ENV_DEV`; update it with the regenerated
+`.env` or deployed builds keep shipping the rotated secret.
 
 ### Regenerating the fixtures
 
