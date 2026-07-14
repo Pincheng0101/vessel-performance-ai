@@ -8,6 +8,13 @@
 
 const CII_RATINGS = ['A', 'B', 'C', 'D', 'E'];
 
+// The lake stores every date as an offset from one fleet-shared epoch — noon_utc, opened_day,
+// due_day, event_day, trigger_eta_day are all day indices off the same day 0, so a single formula
+// puts any of them on the calendar. Verified against every day/date pair in the demo fixtures
+// (24,398 pairs, 0 mismatches): day 0 = 2021-07-01, day 1825 = 2026-06-30 (the last data day).
+const EPOCH_MS = Date.UTC(2021, 6, 1);
+const DAY_MS = 86400000;
+
 class fleetUtils {
   // A mean over one or two points is that point wearing the window's name — the same floor the
   // ETL applies (MIN_WINDOW_POINTS in indicators.py, MIN_SPEED_LOSS_SHIPS in aggregate.py).
@@ -119,6 +126,98 @@ class fleetUtils {
     const valued = (rows ?? []).filter(row => row[key] != null).slice(-window);
     if (valued.length < fleetUtils.MIN_TRAILING_POINTS) return null;
     return valued.reduce((sum, row) => sum + row[key], 0) / valued.length;
+  }
+
+  /**
+   * Day index → epoch milliseconds. The only place a chart coordinate leaves day space.
+   *
+   * @param {number | null} day
+   * @returns {number | null}
+   */
+  static dayToMs(day) {
+    return day == null ? null : EPOCH_MS + day * DAY_MS;
+  }
+
+  /**
+   * Epoch milliseconds → day index. The inverse, for reading a time axis back (tooltips).
+   *
+   * @param {number | null} ms
+   * @returns {number | null}
+   */
+  static msToDay(ms) {
+    return ms == null ? null : Math.round((ms - EPOCH_MS) / DAY_MS);
+  }
+
+  /**
+   * Epoch milliseconds → 'YYYY-MM-DD'. A date is a property of the datum, so it is read in UTC —
+   * local getters would render the previous day for any reader west of UTC.
+   *
+   * @param {number | null} ms
+   * @returns {string | null}
+   */
+  static formatDate(ms) {
+    return ms == null ? null : new Date(ms).toISOString().slice(0, 10);
+  }
+
+  /**
+   * Day index → 'YYYY-MM-DD'.
+   *
+   * @param {number | null} day
+   * @returns {string | null}
+   */
+  static dayDate(day) {
+    return fleetUtils.formatDate(fleetUtils.dayToMs(day));
+  }
+
+  /**
+   * The reader's *local* calendar day as a day index — the one clock read in this file, and the
+   * one place a local getter belongs: "N days ago" is a statement about the reader, not the datum.
+   * The local Y/M/D is reprojected onto the UTC grid the day index lives on.
+   *
+   * @param {Date} [now]
+   * @returns {number}
+   */
+  static todayDay(now = new Date()) {
+    return fleetUtils.msToDay(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  }
+
+  /**
+   * Day index → how far it sits from today, in the reader's words.
+   *
+   * @param {number | null} day
+   * @param {number} [today] - injectable so callers (and tests) never depend on the clock
+   * @returns {string | null} '今天' | 'N 天前' | 'N 天後'
+   */
+  static relativeDay(day, today = fleetUtils.todayDay()) {
+    if (day == null) return null;
+    const diff = today - day;
+    if (diff === 0) return '今天';
+    return diff > 0 ? `${diff} 天前` : `${-diff} 天後`;
+  }
+
+  /**
+   * Day index → the date plus where it sits relative to today, e.g. '2026-06-30（14 天前）'.
+   *
+   * @param {number | null} day
+   * @param {number} [today]
+   * @returns {string | null}
+   */
+  static dayLabel(day, today = fleetUtils.todayDay()) {
+    return day == null ? null : `${fleetUtils.dayDate(day)}（${fleetUtils.relativeDay(day, today)}）`;
+  }
+
+  /**
+   * A day-index span, e.g. '2021-07-01 – 2026-06-30（14 天前）'. ONE parenthetical, anchored on the
+   * END day: the question a reader asks of a range is how stale it is, not how old it started.
+   *
+   * @param {number | null} from
+   * @param {number | null} to
+   * @param {number} [today]
+   * @returns {string | null}
+   */
+  static dayRangeLabel(from, to, today = fleetUtils.todayDay()) {
+    if (from == null || to == null) return null;
+    return `${fleetUtils.dayDate(from)} – ${fleetUtils.dayDate(to)}（${fleetUtils.relativeDay(to, today)}）`;
   }
 }
 

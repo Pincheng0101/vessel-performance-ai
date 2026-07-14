@@ -60,6 +60,10 @@ const buildTheme = () => {
   return {
     color: [...FleetChartConstant.CategoricalPalette],
     backgroundColor: 'transparent',
+    // Every date in the lake is a UTC calendar day (day 0 = 2021-07-01, 1:1 with report_date), so
+    // a time axis has to place its ticks in UTC. ECharts defaults to local time, which west of UTC
+    // would put an axis tick on the 5th under a tooltip reading the 6th for the very same point.
+    useUTC: true,
     textStyle: { fontFamily: FleetChartConstant.Font.FAMILY, color: c.text },
     title: { textStyle: { color: c.text } },
     // Legend fixed top-right for cross-chart consistency (callers may override).

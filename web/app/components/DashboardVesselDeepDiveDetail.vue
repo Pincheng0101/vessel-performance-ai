@@ -96,13 +96,13 @@ const specs = computed(() => {
   const v = props.vessel;
   const rows = daily.value ?? [];
   const kind = v.role === 'predict' ? '預測船' : '訓練船';
-  const range = rows.length ? `第 ${rows[0].noon_utc}–${rows.at(-1).noon_utc} 天` : '–';
+  const range = (rows.length ? fleetUtils.dayRangeLabel(rows[0].noon_utc, rows.at(-1).noon_utc) : null) ?? '–';
   const c = coverage.value;
   return [
     { label: 'Type', value: `${kind} · ${v.hull_class ?? '–'}` },
     { label: 'TEU', value: v.teu_nominal == null ? '–' : v.teu_nominal.toLocaleString() },
     { label: 'Design speed', value: v.design_speed_kn == null ? '–' : `${v.design_speed_kn.toFixed(1)} kn` },
-    { label: 'Last dry-dock', value: v.last_dry_dock_day == null ? '無紀錄' : `第 ${v.last_dry_dock_day} 天` },
+    { label: 'Last dry-dock', value: fleetUtils.dayLabel(v.last_dry_dock_day) ?? '無紀錄' },
     { label: 'Data range', value: range },
     {
       label: 'ISO data coverage',
@@ -183,16 +183,11 @@ const MAINT_ZH = {
   UWC: '水下清潔',
   DD: '乾塢',
 };
-// Used by the calendar-axis charts (excess cost, CII), which key off report_date rather than the
-// day-index axis every other chart here uses.
-const fmtDate = (ts) => {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
-
 // --- Speed-loss trend (main visual) ---
 // noon_utc / event_day / trigger_eta_day are day indices into the fleet's shared window (day 0 =
-// 2021-07-01 for every ship, 1:1 with report_date), so this axis is a day count, not a time axis.
+// 2021-07-01 for every ship, 1:1 with report_date). Everything below — the Theil-Sen fit, the
+// degradation-rate extrapolation (a %/day rate), the pad math — stays in DAY space; the indices
+// are converted to milliseconds only where a coordinate is handed to ECharts.
 const speedLossTrendOption = computed(() => {
   const pts = (daily.value ?? [])
     .map(d => ({
@@ -251,16 +246,18 @@ const speedLossTrendOption = computed(() => {
       // Legend icon uses the series color (itemStyle), not lineStyle — set it so the icon
       // matches the amber line instead of falling back to the auto palette.
       itemStyle: { color: FleetChartConstant.SemanticRamp.warning },
-      data: [[x0, yAt(x0)], [x1, yAt(x1)]],
+      data: [[fleetUtils.dayToMs(x0), yAt(x0)], [fleetUtils.dayToMs(x1), yAt(x1)]],
     });
     if (triggerDay != null && r.degradation_rate != null) {
       const y1 = seg.at(-1).sl;
+      // degradation_rate is a %/DAY rate, so it multiplies a span of days. Extrapolating over a
+      // span of milliseconds would scale the slope by 86.4M and flatten the line to nothing.
       const yEnd = y1 + r.degradation_rate * (triggerDay - x1);
       fitSeries.push({
         name: '預測', type: 'line', showSymbol: false, symbol: 'none', silent: true,
         lineStyle: { color: FleetChartConstant.SemanticRamp.warning, width: 1.8, type: [5, 4] },
         itemStyle: { color: FleetChartConstant.SemanticRamp.warning },
-        data: [[x1, y1], [triggerDay, yEnd]],
+        data: [[fleetUtils.dayToMs(x1), y1], [fleetUtils.dayToMs(triggerDay), yEnd]],
       });
     }
   }
@@ -277,17 +274,17 @@ const speedLossTrendOption = computed(() => {
   (events.value ?? []).forEach((e) => {
     const day = e.event_day;
     if (day == null) return;
-    guides.push({ xAxis: day, lineStyle: { color: 'rgba(71, 85, 105, 0.3)', type: 'dashed', width: 1 } });
+    guides.push({ xAxis: fleetUtils.dayToMs(day), lineStyle: { color: 'rgba(71, 85, 105, 0.3)', type: 'dashed', width: 1 } });
     const label = MAINT_ZH[e.event_type] || e.event_type;
     maintMarks.push({
-      value: [day, yMax],
-      tip: `${label} · 第 ${day} 天`,
+      value: [fleetUtils.dayToMs(day), yMax],
+      tip: `${label} · ${fleetUtils.dayLabel(day)}`,
     });
   });
   const triggerMarks = [];
   if (triggerDay != null) {
-    guides.push({ xAxis: triggerDay, lineStyle: { color: 'rgba(190, 64, 55, 0.35)', type: 'dashed', width: 1 } }); // SemanticRamp.critical at 35% opacity
-    triggerMarks.push({ value: [triggerDay, yMax], tip: `預測觸發 · 第 ${triggerDay} 天` });
+    guides.push({ xAxis: fleetUtils.dayToMs(triggerDay), lineStyle: { color: 'rgba(190, 64, 55, 0.35)', type: 'dashed', width: 1 } }); // SemanticRamp.critical at 35% opacity
+    triggerMarks.push({ value: [fleetUtils.dayToMs(triggerDay), yMax], tip: `預測觸發 · ${fleetUtils.dayLabel(triggerDay)}` });
   }
   // Downward-triangle path so the legend icon matches the ▼ drawn on the chart (built-in
   // 'triangle' points up and legend ignores symbolRotate).
@@ -312,12 +309,13 @@ const speedLossTrendOption = computed(() => {
       formatter: (p) => {
         if (p.data?.tip) return p.data.tip;
         if (Array.isArray(p.value)) {
-          return `第 ${p.value[0]} 天 · 速度損失 ${p.value[1] == null ? '–' : `${(+p.value[1]).toFixed(1)}%`}`;
+          const label = fleetUtils.dayLabel(fleetUtils.msToDay(p.value[0]));
+          return `${label} · 速度損失 ${p.value[1] == null ? '–' : `${(+p.value[1]).toFixed(1)}%`}`;
         }
         return '';
       },
     },
-    xAxis: { type: 'value', name: 'day' },
+    xAxis: { type: 'time' },
     yAxis: { type: 'value', name: 'speed loss %', nameLocation: 'middle', nameGap: 36, min: yMin, max: yMax, axisLabel: { formatter: '{value}%' } },
     series: [
       {
@@ -325,7 +323,7 @@ const speedLossTrendOption = computed(() => {
         symbol: 'circle',
         lineStyle: { color: FleetChartConstant.SpeedLossColor, width: 1.5 },
         itemStyle: { color: FleetChartConstant.SpeedLossColor },
-        data: drawPts.map(d => [d.day, d.plotSl]),
+        data: drawPts.map(d => [fleetUtils.dayToMs(d.day), d.plotSl]),
         markLine: {
           symbol: 'none', silent: true,
           // Guide lines carry no label (their meaning is the top marker); the two rules are
@@ -352,7 +350,7 @@ const speedLossTrendOption = computed(() => {
         name: '速度損失', type: 'scatter', symbolSize: 22, z: 3,
         itemStyle: { color: FleetChartConstant.SpeedLossColor, opacity: 0.01 },
         emphasis: { disabled: true },
-        data: drawPts.map(d => [d.day, d.plotSl]),
+        data: drawPts.map(d => [fleetUtils.dayToMs(d.day), d.plotSl]),
       },
       {
         // Not silent any more: 78% of days fail the ISO gate, and the user is entitled to ask
@@ -366,8 +364,8 @@ const speedLossTrendOption = computed(() => {
         // Clamped to the axis so an impossible reading stays visible at the edge instead of
         // stretching the scale; the tooltip always reports the value the row actually carries.
         data: drawn.filter(d => !d.valid).map(d => ({
-          value: [d.day, clamp(d.plotSl, yMin, yMax)],
-          tip: `第 ${d.day} 天 · 速度損失 ${d.sl.toFixed(1)}%<br/><b>未通過 ISO 19030 篩選</b><br/>原因：${rejectReasonLabel(d.reason)}`,
+          value: [fleetUtils.dayToMs(d.day), clamp(d.plotSl, yMin, yMax)],
+          tip: `${fleetUtils.dayLabel(d.day)} · 速度損失 ${d.sl.toFixed(1)}%<br/><b>未通過 ISO 19030 篩選</b><br/>原因：${rejectReasonLabel(d.reason)}`,
         })),
       },
       ...fitSeries,
@@ -474,7 +472,7 @@ const excessCostOption = computed(() => {
         const ts = list[0]?.value?.[0];
         const total = list.reduce((sum, p) => sum + (Array.isArray(p.value) ? p.value[1] : 0), 0);
         const body = list.map(p => `${p.marker}${p.seriesName}: ${fmtUsd(p.value[1])}/day`).join('<br/>');
-        return `${ts == null ? '' : fmtDate(ts)}<br/>${body}<br/>合計: ${fmtUsd(total)}/day`;
+        return `${fleetUtils.formatDate(ts) ?? ''}<br/>${body}<br/>合計: ${fmtUsd(total)}/day`;
       },
     },
     xAxis: { type: 'time' },
@@ -545,7 +543,7 @@ const ciiTrendSummary = computed(() => {
   const risk = worst && CII_RANK[worst] <= 2
     ? `期間曾掉至 ${worst} 級，須留意合規風險`
     : worst ? '期間維持 C 級以上，合規良好' : '尚無評級資料';
-  return `最新一日 ${fmtDate(last.ts)}：AER ${fmtNum(last.cii_aer, 2)}（${last.cii_rating_aer || '–'} 級）、IMO ${fmtNum(last.cii_imo, 2)}（${last.cii_rating_imo || '–'} 級）—— ${risk}。`;
+  return `最新一日 ${fleetUtils.formatDate(last.ts)}：AER ${fmtNum(last.cii_aer, 2)}（${last.cii_rating_aer || '–'} 級）、IMO ${fmtNum(last.cii_imo, 2)}（${last.cii_rating_imo || '–'} 級）—— ${risk}。`;
 });
 const nearestCiiRow = (rows, ts) => {
   let lo = 0;
@@ -600,7 +598,7 @@ const ciiTrendOption = computed(() => {
           .filter(s => row[s.key] != null)
           .map(s => `${s.label}: ${fmtNum(row[s.key], 2)} · rating ${row[s.ratingKey] || '–'}`)
           .join('<br/>');
-        return `${fmtDate(ts)}<br/>${body}`;
+        return `${fleetUtils.formatDate(ts)}<br/>${body}`;
       },
     },
     xAxis: { type: 'time' },
@@ -698,7 +696,9 @@ const maintenanceSummary = computed(() => {
   const list = maintenanceRecommendations.value;
   if (!list.length) return '目前沒有待處理的維修建議。';
   const top = list[0];
-  return `共 ${list.length} 項維修建議 —— 最高優先：${top.title}（建議第 ${top.dueDay} 天前處理）。`;
+  // Composed from the parts, not dayLabel: this reads "handle BEFORE day N", so a date-plus-
+  // parenthetical substituted whole would garble to `…（76 天後）天前處理`.
+  return `共 ${list.length} 項維修建議 —— 最高優先：${top.title}（建議於 ${fleetUtils.dayDate(top.dueDay)} 前處理，${fleetUtils.relativeDay(top.dueDay)}）。`;
 });
 
 // --- Underwater inspection (physical ground-truth for the fouling story) ---
@@ -893,12 +893,16 @@ const anomalyTimelineOption = computed(() => {
   const episodes = (alerts.value ?? [])
     .map((d) => {
       if (d.opened_day == null || d.last_seen_day == null) return null;
+      const start = d.opened_day;
+      const end = Math.max(d.opened_day, d.last_seen_day);
       return {
         ...d,
         metric: d.driver_metric || 'unknown',
         severity: d.severity || 'unknown',
-        start: d.opened_day,
-        end: Math.max(d.opened_day, d.last_seen_day),
+        start,
+        end,
+        startTs: fleetUtils.dayToMs(start),
+        endTs: fleetUtils.dayToMs(end),
         durationDays: Math.max(1, d.last_seen_day - d.opened_day + 1),
       };
     })
@@ -921,8 +925,8 @@ const anomalyTimelineOption = computed(() => {
   const maxDay = Math.max(...episodes.map(d => d.end));
   const xPad = Math.max(14, (maxDay - minDay) * 0.02);
   const c = themeColors.value;
-  const xMin = minDay - xPad;
-  const xMax = maxDay + xPad;
+  const xMin = fleetUtils.dayToMs(minDay - xPad);
+  const xMax = fleetUtils.dayToMs(maxDay + xPad);
   const laneBandColors = [c.backgroundScale1, c.backgroundScale2];
 
   return {
@@ -937,7 +941,10 @@ const anomalyTimelineOption = computed(() => {
       formatter: (p) => {
         const d = p.data.row;
         const peak = d.peak_z == null ? '' : `<br/>峰值 z=${d.peak_z.toFixed(1)}`;
-        return `${metricTitle(d.metric)} · ${SEVERITY_LABEL[d.severity] || d.severity}<br/>第 ${d.opened_day}–${d.last_seen_day} 天 · ${d.durationDays} 天${peak}<br/>${d.message_zh || ''}`;
+        // "持續" prefixes the duration: the range beside it is now a pair of dates, and a bare
+        // `N 天` next to them would read as a fourth date rather than as how long the episode ran.
+        const span = `${fleetUtils.dayRangeLabel(d.opened_day, d.last_seen_day)} · 持續 ${d.durationDays} 天`;
+        return `${metricTitle(d.metric)} · ${SEVERITY_LABEL[d.severity] || d.severity}<br/>${span}${peak}<br/>${d.message_zh || ''}`;
       },
     },
     dataZoom: [
@@ -963,7 +970,7 @@ const anomalyTimelineOption = computed(() => {
         },
       },
     ],
-    xAxis: { type: 'value', name: 'day', min: xMin, max: xMax },
+    xAxis: { type: 'time', min: xMin, max: xMax },
     yAxis: {
       type: 'category', data: laneLabels, boundaryGap: true, inverse: true,
       axisTick: { show: false },
@@ -991,7 +998,7 @@ const anomalyTimelineOption = computed(() => {
         data: episodes
           .filter(d => d.severity === severity)
           .map(d => ({
-            value: [laneIndex.get(d.metric), d.start, d.end],
+            value: [laneIndex.get(d.metric), d.startTs, d.endTs],
             row: d,
           })),
       })),
@@ -1267,9 +1274,10 @@ const metricExtent = (stats) => {
 const metricRawData = (stat, extent) => stat.points
   .map((p) => {
     const index = toBaselineIndex(p.value, stat.baseline);
+    // Slot 0 is the chart coordinate, so it converts; slots 2-4 stay raw for the tooltip to read.
     return p.value == null
       ? null
-      : { value: [p.day, clamp(p.value, extent.min, extent.max), p.value, stat.baseline, index] };
+      : { value: [fleetUtils.dayToMs(p.day), clamp(p.value, extent.min, extent.max), p.value, stat.baseline, index] };
   })
   .filter(Boolean);
 const diagnosticLineSeries = ({ color, extent, gridIndex, key, name, stat }) => ({
@@ -1301,8 +1309,8 @@ const causeDiagnosticsOption = computed(() => {
 
   if (!series.some(s => s.data.length)) return {};
 
-  const xMin = diagnosticRows.value.at(0)?.day;
-  const xMax = diagnosticRows.value.at(-1)?.day;
+  const xMin = fleetUtils.dayToMs(diagnosticRows.value.at(0)?.day);
+  const xMax = fleetUtils.dayToMs(diagnosticRows.value.at(-1)?.day);
 
   return {
     grid: DIAGNOSTIC_GRIDS.map(g => ({ left: 86, right: 24, top: g.top, height: g.height })),
@@ -1315,7 +1323,7 @@ const causeDiagnosticsOption = computed(() => {
       axisPointer: { type: 'line' },
       formatter: (params) => {
         const list = Array.isArray(params) ? params : [params];
-        const day = list[0]?.value?.[0];
+        const ts = list[0]?.value?.[0];
         const rows = list
           .filter(p => Array.isArray(p.value))
           .map((p) => {
@@ -1324,12 +1332,12 @@ const causeDiagnosticsOption = computed(() => {
             return `${p.marker}${p.seriesName}: ${raw}（vs 基準 ${delta}）`;
           })
           .join('<br/>');
-        return `${day == null ? '' : `第 ${day} 天`}<br/>${rows}`;
+        return `${fleetUtils.dayLabel(fleetUtils.msToDay(ts)) ?? ''}<br/>${rows}`;
       },
     },
     axisPointer: { link: [{ xAxisIndex: [0, 1, 2, 3] }] },
     xAxis: DIAGNOSTIC_GRIDS.map((_, i) => ({
-      type: 'value',
+      type: 'time',
       gridIndex: i,
       min: xMin,
       max: xMax,
@@ -1354,8 +1362,8 @@ const causeDiagnosticsOption = computed(() => {
 });
 
 // --- Alert feed (newest first, paged) ---
-// Alerts carry day indices, not dates, so there is nothing for a date-range picker to bind to
-// without a join — this just paginates every alert, newest last-seen-day first.
+// Sorting stays on the raw day index — it is the same order as the dates the rows render, and it
+// needs no conversion. This just paginates every alert, newest last-seen-day first.
 const sortedAlerts = computed(() =>
   [...(alerts.value ?? [])].sort((a, b) => (b.last_seen_day ?? 0) - (a.last_seen_day ?? 0)),
 );
@@ -1470,7 +1478,7 @@ watch(alertPageCount, (n) => {
                       :text="SEVERITY_LABEL[a.severity] || a.severity"
                       :color="severityColor(a.severity)"
                     />
-                    <span class="text-caption text-medium-emphasis">第 {{ a.opened_day }}–{{ a.last_seen_day }} 天</span>
+                    <span class="text-caption text-medium-emphasis">{{ fleetUtils.dayRangeLabel(a.opened_day, a.last_seen_day) ?? '–' }}</span>
                   </div>
                   <div class="text-caption mt-1">
                     {{ a.message_zh }}
@@ -1840,8 +1848,11 @@ watch(alertPageCount, (n) => {
                     >
                       {{ r.priority }}
                     </v-chip>
-                    <span class="text-caption text-medium-emphasis">
-                      建議第 {{ r.dueDay }} 天前處理
+                    <span
+                      v-if="r.dueDay != null"
+                      class="text-caption text-medium-emphasis"
+                    >
+                      建議於 {{ fleetUtils.dayDate(r.dueDay) }} 前處理（{{ fleetUtils.relativeDay(r.dueDay) }}）
                     </span>
                     <span
                       v-if="r.netSaving != null"

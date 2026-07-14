@@ -165,7 +165,8 @@ const tableState = reactive({
 const matchesQuery = (row, q) => {
   if (!q) return true;
   const needle = q.toLowerCase();
-  return [row.shipId, ACTION_LABEL[row.action] || row.action, PRIORITY_LABEL[row.priority], SERVICE_LABEL[row.serviceType], row.planDate, row.rationale]
+  return [row.shipId, ACTION_LABEL[row.action] || row.action, PRIORITY_LABEL[row.priority], SERVICE_LABEL[row.serviceType],
+    row.planDate, fleetUtils.dayDate(row.dueDay), row.rationale]
     .some(v => String(v ?? '').toLowerCase().includes(needle));
 };
 const matchesFilters = (row, filters) => filters.every((f) => {
@@ -201,6 +202,14 @@ const hasNextPage = computed(() => tableState.page * tableState.perPage < sorted
 // in this mode, so the query has to be read from the second argument here instead.
 const handleFiltersChange = (filters, query) => {
   tableState.filters = filters ?? [];
+  tableState.query = query ?? '';
+  tableState.page = 1;
+};
+// Declaring onQueryChange is what tells AppTable the caller owns the free-text query, so it stops
+// handing that query to Vuetify's own row filter as well. That filter matches the RAW column
+// values — dueDay is a day index — so now the Due cell renders a date it would reject every date
+// query before matchesQuery ever saw the row.
+const handleQueryChange = (query) => {
   tableState.query = query ?? '';
   tableState.page = 1;
 };
@@ -445,6 +454,7 @@ const savingByQuarterOption = computed(() => {
           :sort-order="tableState.sortOrder"
           :on-row-click="openShipDetail"
           :on-filters-change="handleFiltersChange"
+          :on-query-change="handleQueryChange"
           :on-sort-by-change="handleSortByChange"
           :on-page-change="handlePageChange"
           :on-per-page-change="handlePerPageChange"
@@ -495,7 +505,7 @@ const savingByQuarterOption = computed(() => {
             >–</span>
           </template>
           <template #item.dueDay="{ item }">
-            {{ item.dueDay == null ? '–' : `第 ${item.dueDay} 天` }}
+            {{ fleetUtils.dayLabel(item.dueDay) ?? '–' }}
           </template>
           <template #item.netSaving="{ item }">
             <span :class="item.netSaving > 0 ? 'text-success font-weight-medium' : 'text-medium-emphasis'">

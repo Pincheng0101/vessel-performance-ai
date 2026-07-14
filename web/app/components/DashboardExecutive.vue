@@ -39,8 +39,9 @@ const [{ data: overviewRows }, { data: recommendations }] = fetched;
 // per-ship readings, so it already excludes weather-spoiled days. A mean is unbiased at any n but
 // its variance is not, so the ETL nulls the day out below MIN_SPEED_LOSS_SHIPS (aggregate.py) —
 // a null here means too few ships cleared the gate to call it a fleet, not that nothing was
-// measured. n_speed_loss_ships is the day's contributor count. noon_utc is a shared calendar index
-// (day 0 = 2021-07-01 for every ship, 1:1 with report_date), so the axis is calendar-aligned.
+// measured. n_speed_loss_ships is the day's contributor count. noon_utc is a shared day index
+// (day 0 = 2021-07-01 for every ship, 1:1 with report_date), converted to a real date by
+// fleetUtils where the chart needs a coordinate.
 const speedLossDaily = computed(() => (overviewRows.value ?? []).filter(r => r.avg_speed_loss_pct != null));
 
 // Daily rows augmented with the two fleet-wide figures the raw row can't give:
@@ -188,10 +189,10 @@ const speedLossTrendOption = computed(() => ({
         const shipLabel = ships == null ? '' : ` · ${ships} ${ships === 1 ? 'ship' : 'ships'}`;
         return `${p.marker}${p.seriesName} <b>${fmtPct(p.value[1])}</b>${shipLabel}`;
       });
-      return [`Day ${params[0]?.axisValue}`, ...lines].join('<br/>');
+      return [fleetUtils.dayLabel(fleetUtils.msToDay(params[0]?.axisValue)), ...lines].join('<br/>');
     },
   },
-  xAxis: { type: 'value', name: 'day' },
+  xAxis: { type: 'time' },
   yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
   series: [
     {
@@ -202,7 +203,7 @@ const speedLossTrendOption = computed(() => ({
       lineStyle: { width: 1, color: SPEED_LOSS_COLOR, opacity: 0.25 },
       itemStyle: { color: SPEED_LOSS_COLOR, opacity: 0.25 },
       data: speedLossDaily.value.map(r => ({
-        value: [r.noon_utc, r.avg_speed_loss_pct],
+        value: [fleetUtils.dayToMs(r.noon_utc), r.avg_speed_loss_pct],
         ships: r.n_speed_loss_ships,
       })),
     },
@@ -214,7 +215,7 @@ const speedLossTrendOption = computed(() => ({
       lineStyle: { width: 2, color: SPEED_LOSS_COLOR },
       itemStyle: { color: SPEED_LOSS_COLOR },
       emphasis: { itemStyle: { color: SPEED_LOSS_COLOR } },
-      data: speedLossRolling.value.map(r => [r.noon_utc, r.value]),
+      data: speedLossRolling.value.map(r => [fleetUtils.dayToMs(r.noon_utc), r.value]),
     },
   ],
 }));

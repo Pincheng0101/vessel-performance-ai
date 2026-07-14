@@ -152,10 +152,13 @@ const tableState = reactive({
   sortField: 'openedDay',
   sortOrder: 'DESC',
 });
+// Searches the rendered dates as well as the raw day indices the cells no longer show — without
+// them, "2024-01" would match nothing while every visible cell reads as a date.
 const matchesQuery = (row, q) => {
   if (!q) return true;
   const needle = q.toLowerCase();
-  return [row.shipId, metricTitle(row.metric), SEVERITY_LABEL[row.severity], STATUS_LABEL[row.status], row.openedDay, row.lastSeenDay, row.message]
+  return [row.shipId, metricTitle(row.metric), SEVERITY_LABEL[row.severity], STATUS_LABEL[row.status],
+    row.openedDay, row.lastSeenDay, fleetUtils.dayDate(row.openedDay), fleetUtils.dayDate(row.lastSeenDay), row.message]
     .some(v => String(v ?? '').toLowerCase().includes(needle));
 };
 const matchesFilters = (row, filters) => filters.every((f) => {
@@ -190,6 +193,16 @@ const hasNextPage = computed(() => tableState.page * tableState.perPage < sorted
 // together) — onQueryChange is never invoked once filterOptions is set.
 const handleFiltersChange = (filters, query) => {
   tableState.filters = filters ?? [];
+  tableState.query = query ?? '';
+  tableState.page = 1;
+};
+// Declaring onQueryChange is what tells AppTable the caller owns the free-text query, so it stops
+// handing that query to Vuetify's own row filter as well. That filter matches the RAW column
+// values — openedDay/lastSeenDay are day indices — so now the cells render dates it would reject
+// every date query before matchesQuery ever saw the row. matchesQuery searches what is displayed;
+// it should be the only filter. (AppFilterInput routes the query through onFiltersChange, so this
+// stays in sync even though AppTable never calls it while filterOptions is set.)
+const handleQueryChange = (query) => {
   tableState.query = query ?? '';
   tableState.page = 1;
 };
@@ -268,6 +281,7 @@ const openVesselDetail = async (item) => {
           :sort-order="tableState.sortOrder"
           :on-row-click="openVesselDetail"
           :on-filters-change="handleFiltersChange"
+          :on-query-change="handleQueryChange"
           :on-sort-by-change="handleSortByChange"
           :on-page-change="handlePageChange"
           :on-per-page-change="handlePerPageChange"
@@ -317,10 +331,10 @@ const openVesselDetail = async (item) => {
             </span>
           </template>
           <template #item.openedDay="{ item }">
-            第 {{ item.openedDay }} 天
+            {{ fleetUtils.dayLabel(item.openedDay) ?? '–' }}
           </template>
           <template #item.lastSeenDay="{ item }">
-            第 {{ item.lastSeenDay }} 天
+            {{ fleetUtils.dayLabel(item.lastSeenDay) ?? '–' }}
           </template>
         </AppTable>
       </UsageResultCard>

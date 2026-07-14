@@ -227,3 +227,135 @@ describe('fleetUtils.trailingMean', () => {
     expect(fleetUtils.trailingMean(rows, 'speed_loss_pct')).toBeNull();
   });
 });
+
+const LAST_DATA_DAY = 1825;
+
+describe('fleetUtils.dayToMs', () => {
+  test('places day 0 on the fleet epoch', () => {
+    expect(fleetUtils.dayToMs(0)).toBe(Date.UTC(2021, 6, 1));
+  });
+
+  test('advances one day per index', () => {
+    expect(fleetUtils.dayToMs(1) - fleetUtils.dayToMs(0)).toBe(86400000);
+  });
+
+  test.each([
+    [null],
+    [undefined],
+  ])('returns null for a %j day', (day) => {
+    expect(fleetUtils.dayToMs(day)).toBeNull();
+  });
+});
+
+describe('fleetUtils.msToDay', () => {
+  test('inverts dayToMs', () => {
+    expect(fleetUtils.msToDay(fleetUtils.dayToMs(LAST_DATA_DAY))).toBe(LAST_DATA_DAY);
+  });
+
+  test('rounds a timestamp inside the day to that day', () => {
+    expect(fleetUtils.msToDay(fleetUtils.dayToMs(920) + 6 * 3600000)).toBe(920);
+  });
+
+  test.each([
+    [null],
+    [undefined],
+  ])('returns null for a %j timestamp', (ms) => {
+    expect(fleetUtils.msToDay(ms)).toBeNull();
+  });
+});
+
+describe('fleetUtils.formatDate', () => {
+  test('formats a timestamp as a UTC calendar date', () => {
+    expect(fleetUtils.formatDate(Date.UTC(2026, 5, 30))).toBe('2026-06-30');
+  });
+
+  test('keeps the UTC day for a timestamp late in it', () => {
+    expect(fleetUtils.formatDate(Date.UTC(2026, 5, 30, 23, 59))).toBe('2026-06-30');
+  });
+
+  test.each([
+    [null],
+    [undefined],
+  ])('returns null for a %j timestamp', (ms) => {
+    expect(fleetUtils.formatDate(ms)).toBeNull();
+  });
+});
+
+describe('fleetUtils.dayDate', () => {
+  test.each([
+    [0, '2021-07-01'],
+    [920, '2024-01-07'],
+    [LAST_DATA_DAY, '2026-06-30'],
+    [2949, '2029-07-28'],
+  ])('dates day %j as %j', (day, expected) => {
+    expect(fleetUtils.dayDate(day)).toBe(expected);
+  });
+
+  test.each([
+    [null],
+    [undefined],
+  ])('returns null for a %j day', (day) => {
+    expect(fleetUtils.dayDate(day)).toBeNull();
+  });
+});
+
+describe('fleetUtils.todayDay', () => {
+  test('reads the reader’s own local calendar day, in any timezone', () => {
+    expect(fleetUtils.dayDate(fleetUtils.todayDay(new Date(2026, 6, 14)))).toBe('2026-07-14');
+  });
+
+  test('keeps the local day for a time late in it', () => {
+    expect(fleetUtils.dayDate(fleetUtils.todayDay(new Date(2026, 6, 14, 23, 30)))).toBe('2026-07-14');
+  });
+});
+
+describe('fleetUtils.relativeDay', () => {
+  test.each([
+    [1825, '14 天前'],
+    [1839, '今天'],
+    [1901, '62 天後'],
+  ])('places day %j at %j', (day, expected) => {
+    expect(fleetUtils.relativeDay(day, 1839)).toBe(expected);
+  });
+
+  test.each([
+    [null],
+    [undefined],
+  ])('returns null for a %j day', (day) => {
+    expect(fleetUtils.relativeDay(day, 1839)).toBeNull();
+  });
+});
+
+describe('fleetUtils.dayLabel', () => {
+  test('pairs the date with its offset from today', () => {
+    expect(fleetUtils.dayLabel(LAST_DATA_DAY, 1839)).toBe('2026-06-30（14 天前）');
+  });
+
+  test('labels a day past the data window as still to come', () => {
+    expect(fleetUtils.dayLabel(2949, 1839)).toBe('2029-07-28（1110 天後）');
+  });
+
+  test.each([
+    [null],
+    [undefined],
+  ])('returns null for a %j day', (day) => {
+    expect(fleetUtils.dayLabel(day, 1839)).toBeNull();
+  });
+});
+
+describe('fleetUtils.dayRangeLabel', () => {
+  test('anchors the single parenthetical on the end day', () => {
+    expect(fleetUtils.dayRangeLabel(0, LAST_DATA_DAY, 1839)).toBe('2021-07-01 – 2026-06-30（14 天前）');
+  });
+
+  test('labels a one-day range as that day', () => {
+    expect(fleetUtils.dayRangeLabel(1839, 1839, 1839)).toBe('2026-07-14 – 2026-07-14（今天）');
+  });
+
+  test.each([
+    [null, LAST_DATA_DAY],
+    [0, null],
+  ])('returns null for the range %j–%j', (from, to) => {
+    expect(fleetUtils.dayRangeLabel(from, to, 1839)).toBeNull();
+  });
+});
