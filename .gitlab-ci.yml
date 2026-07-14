@@ -16,7 +16,7 @@ stages:
 
 deploy:
   stage: deploy
-  image: node:22-bookworm
+  image: node:24-bookworm
   # Docker-in-Docker: CDK bundles the Lambdas by running a container.
   services:
     - name: docker:27-dind
