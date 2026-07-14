@@ -117,6 +117,48 @@ FACT_SHIP_MAINTENANCE_RECOMMENDATION_COLUMNS = [
     ('rationale', 'string'),
 ]
 
+# vessel columns — flat table, ship_id stays a body column (15 rows). One row per
+# ship: the hull/engine/propeller particulars reverse-engineered from vt_fd, since
+# the hackathon dataset ships no vessel master. Provenance is tagged per column:
+#   measured  — derived from vt_fd/maintenance (reproducible from the data)
+#   class     — W-class sister-ship design values, identical across the fleet
+#   estimated — NOT derivable from the data; an assumption. Do not quote as fact.
+# See doc/vessel.md for the derivations and the caveats.
+VESSEL_COLUMNS = [
+    ('imo_number', 'string'),  # estimated: SYNTHETIC (9800001-9800015), not a real IMO
+    ('ship_id', 'string'),  # measured: joins vt_fd.ship_id / maintenance.ship_id
+    ('hull_class', 'string'),  # class: W1 / W2, per the dataset README grouping
+    ('role', 'string'),  # measured: train (S1-S12) / predict (S21-S23)
+    ('vessel_type', 'string'),  # class: container
+    ('teu_nominal', 'int'),  # class: 14000
+    ('loa_m', 'double'),  # class
+    ('lpp_m', 'double'),  # class
+    ('breadth_m', 'double'),  # class
+    ('design_draft_m', 'double'),  # class
+    ('scantling_draft_m', 'double'),  # class
+    ('displacement_design_t', 'double'),  # measured: displacement-draft fit over vt_fd
+    ('displacement_scantling_t', 'double'),  # measured: same fit, at scantling draft
+    ('cb_design', 'double'),  # measured: from the fitted displacement and hull dims
+    ('cb_scantling', 'double'),  # measured: same
+    ('cw', 'double'),  # measured: waterplane coefficient from the displacement-draft slope
+    ('tpc_t_per_cm', 'double'),  # measured: tonnes-per-cm from the same slope
+    ('dwt', 'double'),  # estimated: scantling displacement minus estimated lightship
+    ('gross_tonnage', 'double'),  # class
+    ('lightship_t', 'double'),  # estimated: NOT derivable from the data
+    ('mcr_kw', 'double'),  # measured: from the calm-water power curve at design speed
+    ('ncr_kw', 'double'),  # measured: ~85% MCR, consistent with observed load_pct
+    ('mcr_rpm', 'double'),  # measured: upper envelope of me_avg_rpm
+    ('design_speed_kn', 'double'),  # measured: STW at the knee of the calm-water curve
+    ('propeller_type', 'string'),  # class: FPP (fixed-pitch; pitch is constant per ship)
+    ('propeller_variant', 'string'),  # measured: P1 (pitch 9.886 m) / P2 (9.556 m)
+    ('n_blades', 'int'),  # class
+    ('diameter_m', 'double'),  # class
+    ('pitch_m', 'double'),  # measured: propeller_speed * 1852 / (60 * me_avg_rpm), median
+    ('pitch_diameter_ratio', 'double'),  # measured: pitch_m / diameter_m
+    ('transverse_area_m2', 'double'),  # estimated: NOT derivable from the data (windage area)
+    ('build_year', 'int'),  # estimated: NOT derivable from the data
+]
+
 # maintenance columns — flat table, ship_id stays a body column (77 rows).
 MAINTENANCE_COLUMNS = [
     ('ship_id', 'string'),

@@ -1,4 +1,4 @@
-"""Load the real hackathon source files (dataset/) into the raw JSONL tree.
+"""Load the real hackathon CSVs (data/*.csv) into the raw JSONL tree.
 
 Schemas come from ``table.real_data`` (the same lists the Glue tables are
 built from), so loader output and catalog stay in lockstep. ``HIDDEN`` /
@@ -6,20 +6,15 @@ built from), so loader output and catalog stay in lockstep. ``HIDDEN`` /
 ``predict_fuel_type`` records the PREDICT cell's column in submission
 (uppercase) form, e.g. ``ME_FULLSPEED_CONSUMP_HSHFO``. Duplicate source rows
 are kept verbatim — dedup is a downstream concern.
-
-``vessel`` is the odd one out: its source (``vessel.jsonl``) is already JSONL,
-hand-derived rather than computed, and is re-validated against ``VESSEL_COLUMNS``
-on load rather than trusted.
 """
 
 from __future__ import annotations
 
 import csv
-import json
 from pathlib import Path
 
-from table.real_data import MAINTENANCE_COLUMNS, VESSEL_COLUMNS, VT_FD_COLUMNS
-from ym_datalake.etl.jsonl import _write_jsonl
+from table.real_data import MAINTENANCE_COLUMNS, VT_FD_COLUMNS
+from ym_datalake.synthetic_data.writer import _write_jsonl
 
 _SHIP_ID_HEADER = 'De-identification Name'
 _MARKER_COLUMNS = ('masked_flag', 'predict_fuel_type')
@@ -69,34 +64,8 @@ def load_maintenance(csv_path: str | Path) -> list[dict]:
         ]
 
 
-def load_vessel(jsonl_path: str | Path) -> list[dict]:
-    """Parse vessel.jsonl into typed records keyed by the vessel table columns.
-
-    The file is committed, hand-derived source data, so it is re-validated against
-    the schema rather than trusted: a missing column or an uncoercible cell raises.
-    """
-    rows: list[dict] = []
-    with Path(jsonl_path).open(encoding='utf-8') as fh:
-        for line in fh:
-            if not line.strip():
-                continue
-            src = json.loads(line)
-            missing = [name for name, _ in VESSEL_COLUMNS if name not in src]
-            if missing:
-                raise ValueError(f'{jsonl_path}: ship {src.get("ship_id")!r} is missing columns {missing}')
-            rows.append(
-                {
-                    name: _convert('' if src[name] is None else str(src[name]), glue_type)
-                    for name, glue_type in VESSEL_COLUMNS
-                }
-            )
-    return rows
-
-
-def write_real_data(
-    vt_fd_rows: list[dict], maintenance_rows: list[dict], vessel_rows: list[dict], out_dir: str | Path
-) -> dict[str, int]:
-    """Write the three tables under ``out_dir/raw`` (vt_fd Hive-partitioned by ship_id); return row counts."""
+def write_real_data(vt_fd_rows: list[dict], maintenance_rows: list[dict], out_dir: str | Path) -> dict[str, int]:
+    """Write both tables under ``out_dir/raw`` (vt_fd Hive-partitioned by ship_id); return row counts."""
     raw_dir = Path(out_dir) / 'raw'
 
     groups: dict[str, list[dict]] = {}
@@ -106,6 +75,5 @@ def write_real_data(
         _write_jsonl(raw_dir / 'vt_fd' / f'ship_id={ship_id}' / 'data.jsonl', group)
 
     _write_jsonl(raw_dir / 'maintenance' / 'maintenance.jsonl', maintenance_rows)
-    _write_jsonl(raw_dir / 'vessel' / 'vessel.jsonl', vessel_rows)
 
-    return {'vt_fd': len(vt_fd_rows), 'maintenance': len(maintenance_rows), 'vessel': len(vessel_rows)}
+    return {'vt_fd': len(vt_fd_rows), 'maintenance': len(maintenance_rows)}

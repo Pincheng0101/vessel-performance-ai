@@ -17,7 +17,7 @@ import math
 from collections import defaultdict
 from pathlib import Path
 
-from ym_datalake.etl.jsonl import _write_jsonl
+from ym_datalake.synthetic_data.writer import _write_jsonl
 
 # Steady-state gate (README: PREDICT days are >=22h full speed, wind <=4).
 MIN_FULL_SPEED_HOURS = 20.0

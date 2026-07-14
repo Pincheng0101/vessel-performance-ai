@@ -3,10 +3,15 @@
 import json
 from pathlib import Path
 
-from table.real_data import MAINTENANCE_COLUMNS
-from ym_datalake.etl.real_data import load_maintenance, load_vt_fd, write_real_data
+import pytest
+
+from table.real_data import MAINTENANCE_COLUMNS, SHIP_IDS, VESSEL_COLUMNS
+from ym_datalake.etl.real_data import load_maintenance, load_vessel, load_vt_fd, write_real_data
 
 DATA_DIR = Path(__file__).resolve().parents[4] / 'data'
+# The committed source files live in dataset/ (DATA_DIR above is the empty, gitignored
+# working dir the CSV-reading tests still point at).
+DATASET_DIR = Path(__file__).resolve().parents[4] / 'dataset'
 
 VT_FD_HEADER = (
     'De-identification Name,VOYAGE,NOON_UTC,AVG_SPEED,SPEED_THROUGH_WATER,ME_AVG_RPM,PROPELLER_SPEED,'
@@ -93,17 +98,48 @@ def test_load_maintenance_types_and_nulls(tmp_path):
     assert rows[1]['draft_aft_m'] == 13.8
 
 
+def test_load_vessel_from_dataset():
+    rows = load_vessel(DATASET_DIR / 'vessel.jsonl')
+
+    assert len(rows) == 15
+    assert all(set(r) == {k for k, _ in VESSEL_COLUMNS} for r in rows)
+    assert {r['ship_id'] for r in rows} == set(SHIP_IDS)
+    # Synthetic IMOs, disjoint from the legacy lake's 9700001-9700009.
+    assert {r['imo_number'] for r in rows} == {f'98000{i:02d}' for i in range(1, 16)}
+
+    by_ship = {r['ship_id']: r for r in rows}
+    assert isinstance(by_ship['S1']['teu_nominal'], int)  # int column stays int
+    assert isinstance(by_ship['S1']['mcr_kw'], float)  # double column stays double
+
+    # The load-bearing finding: S22 is grouped W2 by the README, but carries a W1
+    # propeller (pitch 9.886 m, vs 9.556 m on its W2 sisters). Pin it.
+    assert by_ship['S22']['hull_class'] == 'W2'
+    assert by_ship['S22']['propeller_variant'] == 'P1'
+    assert by_ship['S22']['pitch_m'] == pytest.approx(9.886, abs=1e-3)
+    assert by_ship['S23']['propeller_variant'] == 'P2'
+    assert by_ship['S23']['pitch_m'] == pytest.approx(9.556, abs=1e-3)
+
+
+def test_load_vessel_rejects_missing_column(tmp_path):
+    path = tmp_path / 'vessel.jsonl'
+    path.write_text(json.dumps({'ship_id': 'S1', 'imo_number': '9800001'}) + '\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='missing columns'):
+        load_vessel(path)
+
+
 def test_write_real_data_partition_layout(tmp_path):
     vt_rows = load_vt_fd(_vt_fd_csv(tmp_path, _PLAIN_ROW, _PREDICT_ROW))
     mnt_rows = [dict.fromkeys((k for k, _ in MAINTENANCE_COLUMNS)) | {'ship_id': 'S1'}]
+    vsl_rows = [dict.fromkeys((k for k, _ in VESSEL_COLUMNS)) | {'ship_id': 'S1'}]
 
-    counts = write_real_data(vt_rows, mnt_rows, tmp_path)
+    counts = write_real_data(vt_rows, mnt_rows, vsl_rows, tmp_path)
 
-    assert counts == {'vt_fd': 2, 'maintenance': 1}
+    assert counts == {'vt_fd': 2, 'maintenance': 1, 'vessel': 1}
     s1 = tmp_path / 'raw' / 'vt_fd' / 'ship_id=S1' / 'data.jsonl'
     s21 = tmp_path / 'raw' / 'vt_fd' / 'ship_id=S21' / 'data.jsonl'
     mnt = tmp_path / 'raw' / 'maintenance' / 'maintenance.jsonl'
-    assert s1.is_file() and s21.is_file() and mnt.is_file()
+    vsl = tmp_path / 'raw' / 'vessel' / 'vessel.jsonl'
+    assert s1.is_file() and s21.is_file() and mnt.is_file() and vsl.is_file()
 
     record = json.loads(s21.read_text().splitlines()[0])
     assert record['masked_flag'] is True

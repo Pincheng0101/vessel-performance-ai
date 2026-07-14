@@ -25,6 +25,7 @@ from table.real_data import (
     FACT_SHIP_MAINTENANCE_RECOMMENDATION_COLUMNS,
     MAINTENANCE_COLUMNS,
     SHIP_IDS,
+    VESSEL_COLUMNS,
     VT_FD_COLUMNS,
 )
 
@@ -213,6 +214,7 @@ class AthenaToolStack(Stack):
                 # Raw zone — real hackathon dataset (data/*.csv, landed as JSONL).
                 self._vt_fd_table(database, bucket_name),
                 self._glue_table(database, 'maintenance', MAINTENANCE_COLUMNS, f'{raw}/maintenance/'),
+                self._glue_table(database, 'vessel', VESSEL_COLUMNS, f'{raw}/vessel/'),
                 # Curated zone — ym_datalake.etl.real_compute output.
                 self._curated_by_ship_table(database, 'fact_ship_daily', FACT_SHIP_DAILY_COLUMNS, bucket_name),
                 self._glue_table(

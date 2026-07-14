@@ -32,17 +32,12 @@ def upload_curated(bucket: str, out_dir: str | Path = './tmp') -> list[str]:
 
 
 def upload_real_data(bucket: str, out_dir: str | Path = './tmp') -> list[str]:
-    """Put the real-dataset tables (``raw/vt_fd/**``, ``raw/maintenance/**``, ``raw/vessel/**``) to S3; return keys.
+    """Put the real-dataset tables (``raw/vt_fd/**``, ``raw/maintenance/**``) to S3; return keys.
 
-    This list is an allowlist, not a scan: only these real-data prefixes are
-    walked, so a shared ``out_dir`` never re-uploads synthetic raw tables — and a
-    new table stays on the floor until it is added here.
+    Only the two real-data prefixes are walked, so a shared ``out_dir`` never
+    re-uploads synthetic raw tables.
     """
-    table_dirs = [
-        Path(out_dir) / 'raw' / 'vt_fd',
-        Path(out_dir) / 'raw' / 'maintenance',
-        Path(out_dir) / 'raw' / 'vessel',
-    ]
+    table_dirs = [Path(out_dir) / 'raw' / 'vt_fd', Path(out_dir) / 'raw' / 'maintenance']
     return _upload_dirs(bucket, out_dir, table_dirs, hint='run load-real first')
 
 

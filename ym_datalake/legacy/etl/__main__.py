@@ -6,12 +6,20 @@ import argparse
 import os
 import sys
 
-_DEFAULT_REGION = 'us-west-2'
+from ym_datalake.etl.compute import compute_curated
+from ym_datalake.etl.validate import (
+    check_c13,
+    check_c13_from_disk,
+    check_c14,
+    check_c18,
+    check_c19,
+    check_c20,
+    print_report,
+)
+from ym_datalake.etl.writer import write_all
+from ym_datalake.synthetic_data.validate import load_result
 
-# The synthetic-lake modules (etl.compute / etl.writer / etl.validate) are imported
-# inside the handlers that need them, not at module level — the same lazy idiom this
-# file already uses for uploader/real_data. Keeps the real-data commands (load-real,
-# compute-real) importable while the synthetic modules are mid-move to legacy/.
+_DEFAULT_REGION = 'us-west-2'
 
 
 def _resolve_bucket(args: argparse.Namespace) -> str | None:
@@ -27,11 +35,6 @@ def _resolve_bucket(args: argparse.Namespace) -> str | None:
 
 
 def _cmd_compute(args: argparse.Namespace) -> int:
-    from ym_datalake.etl.compute import compute_curated  # lazy: synthetic lake only
-    from ym_datalake.etl.validate import check_c13, check_c14, check_c18, check_c19, check_c20, print_report
-    from ym_datalake.etl.writer import write_all
-    from ym_datalake.synthetic_data.validate import load_result
-
     raw = load_result(args.in_dir)
     if not raw.noon_report:
         print(
@@ -82,13 +85,12 @@ def _cmd_compute(args: argparse.Namespace) -> int:
 
 
 def _cmd_load_real(args: argparse.Namespace) -> int:
-    from ym_datalake.etl.real_data import load_maintenance, load_vessel, load_vt_fd, write_real_data
+    from ym_datalake.etl.real_data import load_maintenance, load_vt_fd, write_real_data
 
     data_dir = args.data_dir
     vt_fd_rows = load_vt_fd(f'{data_dir}/vt_fd.csv')
     maintenance_rows = load_maintenance(f'{data_dir}/maintenance.csv')
-    vessel_rows = load_vessel(f'{data_dir}/vessel.jsonl')
-    counts = write_real_data(vt_fd_rows, maintenance_rows, vessel_rows, args.out)
+    counts = write_real_data(vt_fd_rows, maintenance_rows, args.out)
 
     n_predict = sum(1 for r in vt_fd_rows if r['predict_fuel_type'])
     n_masked = sum(1 for r in vt_fd_rows if r['masked_flag'])
@@ -142,8 +144,6 @@ def _cmd_compute_real(args: argparse.Namespace) -> int:
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
-    from ym_datalake.etl.validate import check_c13_from_disk, print_report  # lazy: synthetic lake only
-
     results = check_c13_from_disk(args.dir)
     print(f'Validating {args.dir}/curated against ground truth (C13):')
     return 0 if print_report(results) else 1
@@ -163,12 +163,10 @@ def build_parser() -> argparse.ArgumentParser:
     comp.add_argument('--region', default=_DEFAULT_REGION, help=f'AWS region (default: {_DEFAULT_REGION})')
     comp.set_defaults(func=_cmd_compute)
 
-    real = sub.add_parser('load-real', help='load the real hackathon source files into the raw JSONL tree')
-    real.add_argument(
-        '--data', dest='data_dir', default='./data', help='directory with vt_fd/maintenance.csv + vessel.jsonl'
-    )
+    real = sub.add_parser('load-real', help='load the real hackathon CSVs into the raw JSONL tree')
+    real.add_argument('--data', dest='data_dir', default='./data', help='directory with the CSVs (default: ./data)')
     real.add_argument('--out', default='./tmp', help='output directory (default: ./tmp)')
-    real.add_argument('--upload', action='store_true', help='upload raw/vt_fd + raw/maintenance + raw/vessel to S3')
+    real.add_argument('--upload', action='store_true', help='upload raw/vt_fd + raw/maintenance to S3')
     real.add_argument('--bucket', help='target S3 bucket (default: app.datalake.bucket_name from conf/<env>.conf)')
     real.add_argument('--env', default='dev', help='conf env used to resolve the bucket (default: dev)')
     real.add_argument('--region', default=_DEFAULT_REGION, help=f'AWS region (default: {_DEFAULT_REGION})')
