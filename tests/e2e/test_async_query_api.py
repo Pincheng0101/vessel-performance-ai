@@ -1,7 +1,7 @@
 """Live end-to-end tests for the M5 async query API (submit → poll → page results).
 
 These hit the deployed API Gateway endpoint and run real Athena queries against the
-uploaded data lake, so they need AWS creds + a populated ``AthenaToolStack`` (they
+uploaded data lake, so they need AWS creds + a populated ``YmHackathonAthenaToolStack`` (they
 auto-skip otherwise — see ``conftest.py``). The strong SQL/handler assertions live in the
 unit tests; here we verify the wire contract of the real deployment.
 """

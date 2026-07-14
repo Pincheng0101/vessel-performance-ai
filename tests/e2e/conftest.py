@@ -2,14 +2,14 @@
 
 Unlike the unit tests (which mock ``config``), these drive the *deployed* API Gateway
 endpoint over HTTPS: submit → poll → page results. They therefore need AWS credentials
-and a deployed ``AthenaToolStack`` whose data lake has been populated (M1/M2/M3 upload).
+and a deployed ``YmHackathonAthenaToolStack`` whose data lake has been populated (M1/M2/M3 upload).
 
 The whole suite is marked ``e2e`` and **auto-skips** when the stack, its M5 outputs, or
 AWS credentials are unavailable — so a bare ``pytest`` stays green without AWS. Run it:
 
     AWS_PROFILE=rdc-sso pytest -s -m e2e tests/e2e/
 
-Overridable via env: ``E2E_STACK_NAME`` (default ``AthenaToolStack``) and the standard
+Overridable via env: ``E2E_STACK_NAME`` (default ``YmHackathonAthenaToolStack``) and the standard
 AWS region vars (default ``us-west-2``).
 """
 
@@ -22,7 +22,7 @@ import urllib.request
 
 import pytest
 
-STACK_NAME = os.environ.get('E2E_STACK_NAME', 'AthenaToolStack')
+STACK_NAME = os.environ.get('E2E_STACK_NAME', 'YmHackathonAthenaToolStack')
 REGION = (
     os.environ.get('AWS_REGION')
     or os.environ.get('AWS_DEFAULT_REGION')

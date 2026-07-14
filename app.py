@@ -20,7 +20,9 @@ env = aws_cdk.Environment(
     region=os.environ.get('CDK_DEPLOY_REGION', os.environ.get('CDK_DEFAULT_REGION')),
 )
 
-AthenaToolStack(app, 'AthenaToolStack', conf=conf, env=env)
-YmDatalakeUiStack(app, 'YmDatalakeUiStack', conf=conf, env=env)
+project_name = conf.get_string('app.project_name')
+
+AthenaToolStack(app, f'{project_name}AthenaToolStack', conf=conf, env=env)
+YmDatalakeUiStack(app, f'{project_name}UiStack', conf=conf, env=env)
 
 app.synth()

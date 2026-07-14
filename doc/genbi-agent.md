@@ -21,7 +21,7 @@ dependency order — connector → llm → skill → agent — and prints their 
 resources are matched by name (`list-*`), existing ones are updated in place, ids are stable.
 Re-run after editing any file under `lfe_resource/`.
 
-Prerequisite: the `AthenaToolStack` must be deployed (`ym-datalake-poc-genbi-athena` IAM role —
+Prerequisite: the `YmHackathonAthenaToolStack` must be deployed (`ym-datalake-poc-genbi-athena` IAM role —
 CfnOutput `GenBiAthenaRoleName`) with M1–M3 data uploaded, else the agent's queries return
 empty results.
 
@@ -70,7 +70,7 @@ in the repo.
 
 | Symptom | Check |
 |---|---|
-| Queries fail with Athena access error | role trust policy (LFE runtime must be able to assume `ym-datalake-poc-genbi-athena`); role exists (deploy `AthenaToolStack`) |
+| Queries fail with Athena access error | role trust policy (LFE runtime must be able to assume `ym-datalake-poc-genbi-athena`); role exists (deploy `YmHackathonAthenaToolStack`) |
 | Queries succeed but return no rows | M1–M3 data uploaded to the lake? (README §2–3) |
 | `PlaceholderError: ${env:…}` | key missing from `.env` / environment |
 | Register creates a duplicate instead of updating | remote resource was renamed/deleted — align names, delete strays in the LFE console |

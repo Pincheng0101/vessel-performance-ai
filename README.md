@@ -27,7 +27,7 @@ API, and a no-build web Dashboard.
 | **M6** | Dashboard — Fleet Overview, Fleet Map, Vessel Deep-dive, Optimizer, Planner, Alerts | `web/` |
 | **M7** | ML forecasting — speed-loss / FOC point forecasts, health score, ML maintenance plan | `ym_datalake/ml/` |
 
-Region is **`us-west-2`**; the CDK stack is **`AthenaToolStack`**.
+Region is **`us-west-2`**; the CDK stack is **`YmHackathonAthenaToolStack`**.
 
 ## Contents
 
@@ -68,7 +68,7 @@ uv sync                                                        # install deps
 # 1. Deploy — note the CfnOutputs (bucket name, API url/key ids)
 bash scripts/export-requirements.sh
 AWS_PROFILE=rdc-sso npx aws-cdk@latest deploy -c env=dev
-BUCKET=$(AWS_PROFILE=rdc-sso aws cloudformation describe-stacks --stack-name AthenaToolStack \
+BUCKET=$(AWS_PROFILE=rdc-sso aws cloudformation describe-stacks --stack-name YmHackathonAthenaToolStack \
   --query "Stacks[0].Outputs[?OutputKey=='DataLakeBucketName'].OutputValue" --output text)
 
 # 2. Generate raw data (M1) + upload raw/ → s3://$BUCKET/raw/
@@ -367,9 +367,9 @@ with a 24h TTL that auto-cleans old records.
 Deploy ([§1](#1-deploy-cdk)), upload M1/M2/M3 data, then grab the URL + key from the outputs:
 
 ```bash
-URL=$(AWS_PROFILE=rdc-sso aws cloudformation describe-stacks --stack-name AthenaToolStack \
+URL=$(AWS_PROFILE=rdc-sso aws cloudformation describe-stacks --stack-name YmHackathonAthenaToolStack \
   --query "Stacks[0].Outputs[?OutputKey=='AsyncQueryApiUrl'].OutputValue" --output text)
-KEY_ID=$(AWS_PROFILE=rdc-sso aws cloudformation describe-stacks --stack-name AthenaToolStack \
+KEY_ID=$(AWS_PROFILE=rdc-sso aws cloudformation describe-stacks --stack-name YmHackathonAthenaToolStack \
   --query "Stacks[0].Outputs[?OutputKey=='AsyncQueryApiKeyId'].OutputValue" --output text)
 KEY=$(AWS_PROFILE=rdc-sso aws apigateway get-api-key --api-key "$KEY_ID" \
   --include-value --query value --output text)
@@ -401,7 +401,7 @@ Unit tests live under `tests/unit/lambda_function/async_query_api/`.
 `tests/e2e/` exercises the **live** deployed API — submit → poll → page results —
 across every `query_type`, plus pagination (`next_page_token`) and the 400 / 403 /
 404 / 409 error paths. The suite resolves the API URL + key straight from the
-`AthenaToolStack` CloudFormation outputs (via boto3 — no manual copying), so it needs
+`YmHackathonAthenaToolStack` CloudFormation outputs (via boto3 — no manual copying), so it needs
 AWS credentials and a deployed stack **with M1/M2/M3 data uploaded** (otherwise
 queries succeed but return no rows). It is marked `e2e` and **auto-skips** when the
 stack or credentials are unavailable, so a plain `pytest` stays green offline.
@@ -410,7 +410,7 @@ stack or credentials are unavailable, so a plain `pytest` stays green offline.
 AWS_PROFILE=rdc-sso uv run pytest -s -m e2e tests/e2e/
 ```
 
-Overridable via env: `E2E_STACK_NAME` (default `AthenaToolStack`) and the standard
+Overridable via env: `E2E_STACK_NAME` (default `YmHackathonAthenaToolStack`) and the standard
 AWS region vars (default `us-west-2`). The suite uses only the Python stdlib HTTP
 client (`urllib`) plus boto3 (already a dev dep) for output discovery.
 

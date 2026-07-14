@@ -38,7 +38,7 @@ the live values from the stack outputs:
 
 ```bash
 AWS_PROFILE=rdc-sso aws cloudformation describe-stacks \
-  --stack-name AthenaToolStack \
+  --stack-name YmHackathonAthenaToolStack \
   --query "Stacks[0].Outputs[?OutputKey=='AsyncQueryApiUrl' || OutputKey=='AsyncQueryApiKeyId']"
 ```
 

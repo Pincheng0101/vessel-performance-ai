@@ -38,7 +38,7 @@ DynamoDB 往返，絕不在 Lambda 內輪詢。
 
 ```bash
 AWS_PROFILE=rdc-sso aws cloudformation describe-stacks \
-  --stack-name AthenaToolStack \
+  --stack-name YmHackathonAthenaToolStack \
   --query "Stacks[0].Outputs[?OutputKey=='AsyncQueryApiUrl' || OutputKey=='AsyncQueryApiKeyId']"
 ```
 
