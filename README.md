@@ -33,6 +33,7 @@ Region is **`us-west-2`**; the CDK stack is **`YmHackathonAthenaToolStack`**.
 
 - [Prerequisites](#prerequisites)
 - [Quick start (end-to-end)](#quick-start-end-to-end)
+- [Real dataset pipeline (hackathon data)](#real-dataset-pipeline-hackathon-data)
 - [Repository layout](#repository-layout)
 - [Configuration](#configuration)
 - [Develop & test](#develop--test)
@@ -90,6 +91,45 @@ python -m http.server 8000 -d web        # open http://localhost:8000
 
 Drop `--upload --bucket` from steps 2–3 to build the dataset **fully offline** under
 `./tmp/` without touching AWS.
+
+## Real dataset pipeline (hackathon data)
+
+The Glue catalog now serves the **real hackathon dataset** (`data/vt_fd.csv` +
+`data/maintenance.csv` — git-ignored, place them under `data/` first), not the
+synthetic lake above. Two commands, in order, after deploy ([§1](#1-deploy-cdk)):
+
+```bash
+# 1. Land the raw CSVs: parse → typed JSONL under ./tmp/raw/{vt_fd,maintenance}/ →
+#    upload to s3://<bucket>/raw/... (HIDDEN/PREDICT cells → null + masked_flag /
+#    predict_fuel_type marker columns; duplicate source rows kept verbatim)
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl load-real --upload
+
+# 2. Compute the curated layer: baseline power-curve fit → ISO-style speed loss,
+#    robust-z anomalies, alert episodes, maintenance recommendations. Writes
+#    ./tmp/curated/fact_ship_*/ and uploads to s3://<bucket>/curated/...
+AWS_PROFILE=ym-hackathon uv run python -m ym_datalake.etl compute-real --upload
+```
+
+Side effects: both write locally under `--out` (default `./tmp`) and, with
+`--upload`, put objects to the data-lake bucket. Re-running is safe — the same
+S3 keys are overwritten. Neither touches the synthetic tables or `truth/`.
+
+The bucket resolves from `app.datalake.bucket_name` in `conf/<env>.conf`
+(`--env`, default `dev`); `--bucket` overrides it. Other flags: `--data`
+(CSV directory, default `./data`), `--out`, `--region`.
+
+Tables produced (schemas: `table/real_data.py`; dictionary:
+[`doc/table-schema.md`](doc/table-schema.md) "Real-dataset tables"):
+
+| Command | Tables | Grain |
+|---|---|---|
+| `load-real` | `vt_fd` (partitioned by `ship_id`), `maintenance` (flat) | noon-report row; maintenance event |
+| `compute-real` | `fact_ship_daily` (partitioned by `ship_id`), `fact_ship_anomaly`, `fact_ship_alert`, `fact_ship_maintenance_recommendation` (flat) | daily; anomaly; episode; action |
+
+Analytics thresholds (steady-state gate, 8 % cleaning trigger, z-score bands)
+are constants in `ym_datalake/etl/real_compute.py`. The data is served to
+clients via **`/v2/queries`** — see [`doc/api_v2.md`](doc/api_v2.md); the v1
+types below target the synthetic tables, which are currently not registered.
 
 ## Repository layout
 
@@ -497,7 +537,8 @@ documented follow-up (`doc/ml-pipeline-zh.md` §7, §10).
 | [`doc/curated-dataset.md`](doc/curated-dataset.md) | M2 curated field design + C13 closed loop. |
 | [`doc/insights.md`](doc/insights.md) | M3 statistical-insight field design + C14 checks. |
 | [`doc/table-schema.md`](doc/table-schema.md) | Per-table Athena/Glue column dictionary (20 tables). |
-| [`doc/api.md`](doc/api.md) | Async query API (M5) reference. |
+| [`doc/api.md`](doc/api.md) | Async query API (M5) reference — v1, legacy synthetic catalog. |
+| [`doc/api_v2.md`](doc/api_v2.md) | Async query API **v2** — real-dataset catalog (`/v2/queries`), data provenance, v1↔v2 mapping. |
 | [`doc/ml-pipeline-zh.md`](doc/ml-pipeline-zh.md) | M7 ML training & inference pipeline design + C21–C23 checks (Chinese). |
 | [`doc/skill/`](doc/skill/README.md) | One self-contained skill file per table (text→SQL reference), mirroring `table-schema.md`. |
 | [`doc/genbi-agent.md`](doc/genbi-agent.md) | GenBI agent (LangForge): what it is, how to create/update (`lfe_resource/` + `scripts/lfe_register.py`). |
