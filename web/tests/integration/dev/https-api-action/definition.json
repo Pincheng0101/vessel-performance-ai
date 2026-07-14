@@ -1,0 +1,56 @@
+{
+  "test_action": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Catch": [],
+    "Retry": [],
+    "Comment": "test_comment",
+    "InputPath": "$",
+    "ResultSelector": {
+      "external_memory_id.$": "$.Payload.external_memory_id",
+      "output.$": "$.Payload.state_memory.output"
+    },
+    "ResultPath": "$.undefinedResult",
+    "OutputPath": "$",
+    "Parameters": {
+      "FunctionName": "LFEActionFunction",
+      "Payload": {
+        "action_type": "https_api_action",
+        "body": {
+          "data": {
+            "message": "hello world"
+          }
+        },
+        "default_output": {
+          "action_type": "https_api_action",
+          "errors": [],
+          "output": {
+            "test": "test_default_output"
+          }
+        },
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "POST",
+        "params": {
+          "test": "test_parameters"
+        },
+        "url": "https://postman-echo.com/post",
+        "use_external_memory_output": true,
+        "state_memory_output_selector": {
+          "output": "$.output"
+        },
+        "streaming_config": {
+          "before_action": {
+            "name": "test_action_Start",
+            "output_selector": null
+          },
+          "after_action": {
+            "name": "test_action_End",
+            "output_selector": null
+          }
+        }
+      }
+    }
+  }
+}

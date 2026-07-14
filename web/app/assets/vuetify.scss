@@ -1,0 +1,353 @@
+@use 'vuetify/settings' with (
+  $button-disabled-opacity: 0.5,
+  $card-actions-padding: 20px,
+  $card-background: rgba(var(--v-theme-backgroundScale2)),
+  $card-border-radius: 8px,
+  $card-elevation: 2,
+  $card-text-padding: 20px,
+  $card-title-padding: 20px,
+  $dialog-border-radius: 12px,
+  $expansion-panel-background-color: rgba(var(--v-theme-backgroundScale2)),
+  $list-border-radius: 8px,
+  $menu-elevation: 1,
+  $tab-slider-size: 4px,
+);
+
+%persistent-scrollbar {
+  &::-webkit-scrollbar {
+    appearance: none;
+    &:vertical {
+      width: 12px;
+    }
+    &:horizontal {
+      height: 12px;
+    }
+  }
+  &::-webkit-scrollbar-thumb {
+    border-radius: 8px;
+    border: 2px solid rgba(var(--v-theme-background));
+    background-color: rgba(var(--v-theme-backgroundScale4));
+  }
+}
+
+body {
+  background-color: rgba(var(--v-theme-background));
+}
+
+// Backup for $dialog-border-radius (Vuetify @use settings need a full dev server
+// restart to take effect; this rule applies via normal HMR). Forces both the
+// .v-overlay__content container and any direct/nested v-sheet/v-card.
+.v-dialog > .v-overlay__content {
+  border-radius: 12px !important;
+  overflow: hidden !important;
+
+  > .v-sheet,
+  > .v-card,
+  > form > .v-sheet,
+  > form > .v-card,
+  > .v-sheet > .v-card,
+  > .v-sheet > form > .v-card {
+    border-radius: 12px !important;
+  }
+}
+
+a {
+  color: rgba(var(--v-theme-primary));
+}
+
+@mixin text-truncate($lines) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: $lines;
+  overflow: hidden;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.text-truncate-2 {
+  @include text-truncate(2);
+}
+.text-truncate-3 {
+  @include text-truncate(3);
+}
+
+.user-select-none {
+  user-select: none;
+}
+
+.v-container {
+  padding: 24px;
+}
+
+p,
+span,
+td,
+.v-list-item-title,
+.v-card-title {
+  color: rgba(var(--v-theme-text));
+}
+
+.v-card-item {
+  padding: 16px;
+}
+
+.v-list-item-subtitle {
+  color: rgba(var(--v-theme-text)) !important;
+  display: block !important;
+  margin-top: 4px;
+}
+
+.white-space-pre-line {
+  white-space: pre-line;
+}
+
+.v-list,
+.v-menu > .v-overlay__content > .v-card,
+.v-menu > .v-overlay__content > .v-sheet,
+.v-menu > .v-overlay__content > .v-list {
+  background-color: rgba(var(--v-theme-background)) !important;
+}
+
+.v-menu > .v-overlay__content > .v-list {
+  @extend %persistent-scrollbar;
+}
+
+.v-overlay__content.v-combobox__content {
+  width: min-content;
+}
+
+.bg-critical,
+.bg-success,
+.bg-primary,
+.primary-gradient {
+  .v-btn__content,
+  svg,
+  i {
+    color: white !important;
+  }
+}
+
+.primary-gradient {
+  background: linear-gradient(75deg, rgba(var(--v-theme-primaryLight)) 25%, rgba(var(--v-theme-primary)) 75%);
+}
+
+.v-field--variant-outlined.v-field--focused .v-field__outline {
+  --v-field-border-width: 1px;
+}
+
+.v-text-field .v-input__details,
+.v-input__details {
+  padding-inline-start: 8px !important;
+  padding-inline-end: 8px !important;
+  padding-top: calc((24px - 14px) / 2) !important;
+  padding-bottom: calc((24px - 14px) / 2) !important;
+}
+
+.v-field__append-inner > .v-icon {
+  margin-inline-start: 4px;
+}
+
+.v-input--disabled {
+  .v-field,
+  .v-field__input,
+  i,
+  input {
+    cursor: not-allowed !important;
+    pointer-events: auto !important;
+  }
+}
+
+.v-input--readonly {
+  .v-field,
+  .v-field__input,
+  i,
+  input,
+  textarea {
+    cursor: not-allowed !important;
+  }
+}
+
+.v-btn--disabled {
+  cursor: not-allowed !important;
+  pointer-events: auto !important;
+}
+
+.v-input--horizontal .v-input__append {
+  margin-left: 8px;
+}
+
+.v-messages__message, .v-counter {
+  line-height: 14px;
+  i {
+    font-size: 14px;
+  }
+}
+
+.v-date-picker {
+  background-color: rgba(var(--v-theme-background)) !important;
+  .v-date-picker-month__day-btn {
+    background-color: rgba(var(--v-theme-backgroundScale1));
+  }
+}
+
+.v-file-input {
+  input[type=file] {
+    cursor: pointer;
+  }
+}
+
+.clickable {
+  .cm-editor,
+  textarea,
+  input,
+  .v-field__input {
+    cursor: pointer !important;
+  }
+}
+
+.v-list-item__prepend > .v-icon {
+  opacity: 1;
+}
+
+.v-list-item__prepend > .v-icon ~ .v-list-item__spacer {
+  width: 12px;
+}
+
+@for $i from 1 through 10 {
+  .z-index-#{$i} {
+    z-index: $i;
+  }
+}
+
+.v-checkbox.v-input {
+  min-width: 28px;
+}
+
+.v-chip__content {
+  width: 100%;
+}
+
+.v-slider.v-input--horizontal > .v-input__control {
+  min-height: 40px;
+}
+.v-slider-thumb__label {
+  background-color: rgba(var(--v-theme-backgroundTooltip));
+  color: rgba(var(--v-theme-text)) !important;
+  &::before {
+    color: rgba(var(--v-theme-backgroundTooltip));
+  }
+}
+
+.v-field__input {
+  .v-chip {
+    border-radius: 4px;
+    font-size: 16px !important;
+    padding: 4px 8px !important;
+    .v-chip__close {
+      margin-inline-start: 4px !important;
+      margin-inline-end: -4px !important;
+    }
+  }
+}
+
+.v-expansion-panel-title {
+  min-height: 40px;
+  padding: 0;
+  transition: background-color 0.25s ease-in-out, min-height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  &:hover {
+    background-color: rgba(var(--v-theme-backgroundScale1));
+  }
+}
+.v-expansion-panel-title:hover > .v-expansion-panel-title__overlay {
+  opacity: 0;
+}
+.v-expansion-panel-title--active {
+  min-height: 56px !important;
+  background-color: rgba(var(--v-theme-backgroundScale1));
+}
+.v-expansion-panel--active {
+  + .v-expansion-panel,
+  &:not(:first-child) {
+    margin-top: 0 !important;
+  }
+}
+
+.toolbar-wrapper {
+  .toolbar {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    button {
+      background-color: rgba(var(--v-theme-backgroundScale2)) !important;
+      border-radius: 8px !important;
+      border: 1px solid rgba(var(--v-theme-backgroundScale3));
+      width: 28px;
+      height: 28px;
+      i {
+        font-size: 16px;
+      }
+      .v-btn__prepend {
+        margin-right: 4px;
+      }
+    }
+  }
+}
+
+.transition-opacity {
+  transition: opacity 0.25s;
+}
+
+.v-card-title {
+  height: 60px;
+  font-size: 18px !important;
+  display: flex !important;
+  align-items: center;
+  background-color: rgba(var(--v-theme-backgroundScale1)) !important;
+}
+
+.v-skeleton-loader {
+  background-color: transparent;
+}
+.v-skeleton-loader__bone::after {
+  background: linear-gradient(90deg, rgba(var(--v-theme-backgroundScale2), 0), rgba(var(--v-theme-backgroundScale2), 0.3), rgba(var(--v-theme-backgroundScale2), 0));
+}
+
+.fullscreen {
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: calc(1005 + 1) !important; // Header index + 1
+}
+
+.gradient-button-border {
+  position: relative;
+  display: inline-block;
+  isolation: isolate;
+}
+.gradient-button-border::before {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 9.5px;
+  background: linear-gradient(
+    90deg,
+    rgba(var(--v-theme-gradientButtonBorderColor2)),
+    rgba(var(--v-theme-gradientButtonBorderColor1)),
+    rgba(var(--v-theme-gradientButtonBorderColor2)),
+    rgba(var(--v-theme-gradientButtonBorderColor1)),
+    rgba(var(--v-theme-gradientButtonBorderColor2)),
+  );
+  background-size: 300% 100%;
+  animation: gradientButtonBorderFlow 4s linear infinite;
+  z-index: -1;
+  pointer-events: none;
+}
+
+@keyframes gradientButtonBorderFlow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 300% 50%;
+  }
+}

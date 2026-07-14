@@ -1,0 +1,18 @@
+{
+  "errors": null,
+  "action_type": "start_sync_workflow_execution_action",
+  "execution_arn": "arn:aws:states:us-west-2:191395820281:execution:workflow-dbdd3e7ffdc7b481:dynamic_execution_id",
+  "status": "SUCCEEDED",
+  "output": {
+    "external_memory_id": "1756183418-ycym3kbd",
+    "state_memory": {
+      "message": "e2e_testing_text"
+    },
+    "_id": "action-f99f0dc5-822b-4ea2-9fd7-f059da6a0666",
+    "TextActionResult": {
+      "text": "e2e_testing_text"
+    }
+  },
+  "error": null,
+  "cause": null
+}

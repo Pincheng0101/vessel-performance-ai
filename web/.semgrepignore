@@ -1,0 +1,31 @@
+# Administrative folder or file used by popular version control systems
+.git
+
+# Package managers
+build/
+vendor/
+dist/
+*.min.js
+.env
+.env.*
+.env/
+.tox/
+
+# Nuxt dev/build outputs
+.output
+.data
+.nuxt
+.nitro
+.cache
+
+# Package managers
+node_modules/
+
+# Common test paths
+tests/
+test-results/
+playwright-report/
+blob-report/
+
+# Misc
+.vscode/

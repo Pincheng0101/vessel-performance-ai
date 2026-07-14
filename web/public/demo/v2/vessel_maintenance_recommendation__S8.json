@@ -1,0 +1,1 @@
+[{"action_type":"hull_cleaning","priority":"medium","due_day":1864,"current_value":6.05,"threshold_value":8,"rate_per_day":0.0433,"trigger_eta_day":1864,"rationale":"speed loss trend crosses trigger in ~45 days"}]

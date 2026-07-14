@@ -1,0 +1,9 @@
+{
+  "errors": null,
+  "action_type": "structured_llm_action",
+  "response": {
+    "answer": "Yes."
+  },
+  "request": null,
+  "source_llm_id": "llm-abcbe5504730f792"
+}

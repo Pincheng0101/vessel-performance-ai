@@ -1,0 +1,67 @@
+{
+  "test_action": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Catch": [],
+    "Retry": [],
+    "Comment": "test_comment",
+    "InputPath": "$",
+    "ResultSelector": {
+      "external_memory_id.$": "$.Payload.external_memory_id",
+      "docs.$": "$.Payload.state_memory.docs"
+    },
+    "ResultPath": "$.undefinedResult",
+    "OutputPath": "$",
+    "Parameters": {
+      "FunctionName": "LFEActionFunction",
+      "Payload": {
+        "action_type": "ranker_action",
+        "default_output": {
+          "action_type": "ranker_action",
+          "errors": [],
+          "docs": [
+            {
+              "test": "test_default_output"
+            }
+          ]
+        },
+        "ranker": {
+          "docs": [
+            {
+              "dish": "Tofu Salad Bowl",
+              "ingredients": "tofu, lettuce, sesame dressing, cucumber, healthy"
+            },
+            {
+              "dish": "Beef Noodle Soup",
+              "ingredients": "beef, noodle, soy sauce, bok choy"
+            },
+            {
+              "dish": "Taiwanese Fried Chicken",
+              "ingredients": "chicken, flour, pepper, garlic, crispy"
+            }
+          ],
+          "limit": 15,
+          "query_string": "vegan healthy no-meat tofu salad",
+          "ranker_id": "ranker-73d4bb3a0e33b2c2",
+          "ranker_type": "jaccard_similarity",
+          "ranking_fields": ["ingredients"],
+          "threshold": 0
+        },
+        "use_external_memory_output": true,
+        "state_memory_output_selector": {
+          "docs": "$.docs"
+        },
+        "streaming_config": {
+          "before_action": {
+            "name": "test_action_Start",
+            "output_selector": null
+          },
+          "after_action": {
+            "name": "test_action_End",
+            "output_selector": null
+          }
+        }
+      }
+    }
+  }
+}

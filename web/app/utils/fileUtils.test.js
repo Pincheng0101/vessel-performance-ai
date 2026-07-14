@@ -1,0 +1,118 @@
+// @vitest-environment jsdom
+import { describe, expect, test, vi } from 'vitest';
+import fileUtils from './fileUtils';
+
+const PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgo=';
+
+describe('fileUtils.toBase64', () => {
+  test('reads a Blob into a data URL string', async () => {
+    const blob = new Blob(['hello'], { type: 'text/plain' });
+    const result = await fileUtils.toBase64(blob);
+    expect(result.startsWith('data:text/plain;base64,')).toBe(true);
+  });
+});
+
+describe('fileUtils.parseFromBase64', () => {
+  test('extracts the media type and data from a valid data URL', () => {
+    expect(fileUtils.parseFromBase64(PNG_DATA_URL)).toEqual({
+      mediaType: 'image/png',
+      data: 'iVBORw0KGgo=',
+    });
+  });
+
+  test('returns null for non-data-URL strings', () => {
+    expect(fileUtils.parseFromBase64('not a data url')).toBeNull();
+  });
+
+  test('returns null for non-string input', () => {
+    expect(fileUtils.parseFromBase64(123)).toBeNull();
+  });
+});
+
+describe('fileUtils.getDataUrlByteLength', () => {
+  test('returns the decoded byte length, subtracting padding', () => {
+    expect(fileUtils.getDataUrlByteLength(PNG_DATA_URL)).toBe(8);
+  });
+
+  test('returns 0 when the data URL cannot be parsed', () => {
+    expect(fileUtils.getDataUrlByteLength('not a data url')).toBe(0);
+  });
+});
+
+describe('fileUtils.createFromBase64', () => {
+  test('creates a File whose name includes the extension derived from the media type', () => {
+    const file = fileUtils.createFromBase64(PNG_DATA_URL, 'avatar');
+    expect(file).toBeInstanceOf(File);
+    expect(file.name).toBe('avatar.png');
+    expect(file.type).toBe('image/png');
+  });
+
+  test('returns null when the input is not a data URL', () => {
+    expect(fileUtils.createFromBase64('not a data url')).toBeNull();
+  });
+});
+
+describe('fileUtils.formatBytes', () => {
+  test.each([
+    [0, '0 Byte'],
+    [1, '1 Byte'],
+    [1024, '1 KB'],
+    [1048576, '1 MB'],
+    [1500, '1.5 KB'],
+  ])('formats %j as %j', (input, expected) => {
+    expect(fileUtils.formatBytes(input)).toBe(expected);
+  });
+});
+
+describe('fileUtils.rename', () => {
+  test('returns a new File with the requested name and the original type', () => {
+    const original = new File(['x'], 'old.txt', { type: 'text/plain', lastModified: 1234 });
+    const renamed = fileUtils.rename(original, 'new.txt');
+    expect(renamed.name).toBe('new.txt');
+    expect(renamed.type).toBe('text/plain');
+  });
+});
+
+describe('fileUtils.download', () => {
+  test('creates a downloadable blob for empty string data', () => {
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test');
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    fileUtils.download({
+      data: '',
+      fileName: 'empty.txt',
+      type: 'text/plain',
+    });
+
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+    expect(click).toHaveBeenCalled();
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:test');
+
+    createObjectUrl.mockRestore();
+    revokeObjectUrl.mockRestore();
+    click.mockRestore();
+  });
+});
+
+describe('fileUtils.setRelativePath', () => {
+  test('attaches the webkitRelativePath property to a File copy', () => {
+    const original = new File(['x'], 'a.txt');
+    const result = fileUtils.setRelativePath(original, 'folder/a.txt');
+    expect(result.webkitRelativePath).toBe('folder/a.txt');
+  });
+});
+
+describe('fileUtils.getFileType', () => {
+  test('returns the file.type when present', () => {
+    expect(fileUtils.getFileType({ name: 'a.txt', type: 'text/plain' })).toBe('text/plain');
+  });
+
+  test('falls back to contentType when type is missing', () => {
+    expect(fileUtils.getFileType({ name: 'a.txt', contentType: 'text/markdown' })).toBe('text/markdown');
+  });
+
+  test('returns an empty string when both type and extension are absent', () => {
+    expect(fileUtils.getFileType({ name: 'no-extension' })).toBe('');
+  });
+});

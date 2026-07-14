@@ -1,0 +1,7 @@
+import TemplateRenderBlockActionExecutionPayload from './TemplateRenderBlockActionExecutionPayload';
+import TemplateRenderBlockActionExecutionPayloadResponse from './TemplateRenderBlockActionExecutionPayloadResponse';
+
+export {
+  TemplateRenderBlockActionExecutionPayload,
+  TemplateRenderBlockActionExecutionPayloadResponse,
+};
