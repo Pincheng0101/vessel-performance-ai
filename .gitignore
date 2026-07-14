@@ -39,8 +39,9 @@ web/config.js
 
 # AgentCore agent — frontend example is source, not CDK build output.
 !agentcore/**/*.js
-# Local starter-toolkit config (retired; CLI regenerates it) and playwright artifacts.
+# Local starter-toolkit config/cache (retired; CLI regenerates them) and playwright artifacts.
 .bedrock_agentcore.yaml
+.bedrock_agentcore/
 .playwright-mcp/
 
 # IDE
