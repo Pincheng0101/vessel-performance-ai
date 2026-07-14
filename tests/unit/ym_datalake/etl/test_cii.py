@@ -21,7 +21,7 @@ def _reference() -> float:
     return cii._REF_A * DWT ** (-cii._REF_C)
 
 
-def _daily(ship_id: str, year: int, co2_mt: float, distance: float) -> dict:
+def _daily(ship_id: str, year: int, co2_mt: float | None, distance: float) -> dict:
     return {'ship_id': ship_id, 'year': year, 'co2_mt': co2_mt, 'total_distance': distance}
 
 
@@ -67,6 +67,19 @@ class TestApply:
         rows = [_daily('S1', 2023, 50.0, 400.0), _daily('S2', 2023, 500.0, 400.0)]
         cii.apply(rows, {'S1': {'dwt': DWT}, 'S2': {'dwt': DWT}})
         assert rows[0]['cii_aer'] < rows[1]['cii_aer']
+
+    def test_a_day_with_distance_but_no_co2_lands_in_neither_sum(self):
+        """daily.py leaves co2_mt None when TOTAL_CONSUMP is missing or masked. That day's distance
+        must not reach the denominator on its own — it would dilute attained CII into a flattering
+        rating out of nothing but a data hole."""
+        with_hole = [_daily('S1', 2023, 50.0, 400.0), _daily('S1', 2023, None, 300.0)]
+        without = [_daily('S1', 2023, 50.0, 400.0)]
+        cii.apply(with_hole, {'S1': {'dwt': DWT}})
+        cii.apply(without, {'S1': {'dwt': DWT}})
+
+        assert with_hole[0]['cii_aer'] == pytest.approx(without[0]['cii_aer'])
+        # The masked day still carries the year's rating — it is broadcast onto every row.
+        assert with_hole[1]['cii_rating_imo'] == with_hole[0]['cii_rating_imo']
 
     def test_a_year_that_sailed_nowhere_gets_no_rating_at_all(self):
         """gCO2/dwt.nm over zero nm is not a large number, it is not a number."""

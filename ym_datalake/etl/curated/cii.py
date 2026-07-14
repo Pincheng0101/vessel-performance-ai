@@ -47,8 +47,13 @@ def apply(daily_rows: list[dict], vessels: dict[str, dict]) -> None:
     co2: dict[tuple[str, int], float] = defaultdict(float)
     distance: dict[tuple[str, int], float] = defaultdict(float)
     for row in daily_rows:
+        # Both sums gate on the same condition. daily.py leaves co2_mt None whenever TOTAL_CONSUMP
+        # is missing or masked, and a day whose distance lands in the denominator without its CO2
+        # in the numerator drags the attained value down — a flattering rating out of a data hole.
+        if row.get('co2_mt') is None:
+            continue
         key = (row['ship_id'], row['year'])
-        co2[key] += row.get('co2_mt') or 0.0
+        co2[key] += row['co2_mt']
         distance[key] += row.get('total_distance') or 0.0
 
     ratings: dict[tuple[str, int], dict] = {}
