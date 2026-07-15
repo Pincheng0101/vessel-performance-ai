@@ -62,18 +62,5 @@ export default defineNuxtPlugin((nuxtApp) => {
     window.removeEventListener('unhandledrejection', onRejection);
     buffer.forEach(({ error, payload }) => rollbar.error(error, payload));
     buffer.length = 0;
-
-    const authStore = useAuthStore();
-    watch(
-      () => authStore.parsedToken,
-      (token) => {
-        rollbar.configure({
-          payload: {
-            person: token ? { id: token.sub, email: token.username } : undefined,
-          },
-        });
-      },
-      { immediate: true },
-    );
   });
 });

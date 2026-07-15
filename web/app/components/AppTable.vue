@@ -55,10 +55,6 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
-  enableAddToFavorite: {
-    type: Boolean,
-    default: false,
-  },
   enableExpand: {
     type: Boolean,
     default: false,
@@ -363,7 +359,6 @@ if (props.restoredObjects) {
 const columnCount = computed(() => {
   return props.headers.length
     + Number(props.draggable)
-    + Number(props.enableAddToFavorite)
     + Number(props.enableExpand)
     + Number(!!props.onSelect)
     + Number(!!slots.actions)
@@ -376,14 +371,21 @@ const headersByKey = computed(() => new Map(
 // identity comparator so VDataTable keeps the server's order (stable sort)
 // instead of re-sorting the current page client-side, which would diverge from
 // the backend collation (e.g. mixed CJK/ASCII names).
+//
+// In client-side mode, a header can opt into its own comparator via `sortComparator` — e.g. a
+// "S1"/"S2"/"S10" column, where VDataTable's default string compare would sort "S10" before
+// "S2". Columns without one keep VDataTable's default.
 const customKeySort = computed(() => {
-  if (!props.serverSide) return undefined;
-  return props.headers.reduce((acc, header) => {
-    if (header.sortable && header.key) {
+  const entries = props.headers.reduce((acc, header) => {
+    if (!header.sortable || !header.key) return acc;
+    if (props.serverSide) {
       acc[header.key] = () => 0;
+    } else if (header.sortComparator) {
+      acc[header.key] = header.sortComparator;
     }
     return acc;
   }, {});
+  return Object.keys(entries).length ? entries : undefined;
 });
 const getRowColumns = columns => columns.map((column) => {
   const header = headersByKey.value.get(column.key ?? column.value);
@@ -599,23 +601,6 @@ const handleFiltersChange = () => {
   props.onFiltersChange(state.filters, state.query);
 };
 
-const handleCategoryChange = (value) => {
-  router.replace({
-    query: {
-      ...route.query,
-      category: value === ListConstant.DefaultParams.CATEGORY ? undefined : value,
-      q: undefined,
-      filters: undefined,
-      page: undefined,
-      pageToken: undefined,
-    },
-  });
-  state.page = ListConstant.DefaultParams.PAGE;
-  state.query = ListConstant.DefaultParams.QUERY;
-  state.filters = [];
-  props.onCategoryChange(value);
-};
-
 const handleClientSideCurrentItemsChange = (v) => {
   state.currentItems = v;
   props.onClientSideCurrentItemsChange(v);
@@ -703,12 +688,6 @@ const handleClientSideCurrentItemsChange = (v) => {
                 sm="auto"
                 class="d-flex align-center ga-2"
               >
-                <template v-if="props.enableAddToFavorite">
-                  <AppTableCategorySelect
-                    v-model="state.category"
-                    @update:model-value="handleCategoryChange"
-                  />
-                </template>
                 <slot name="header-actions" />
               </v-col>
             </template>
@@ -730,7 +709,6 @@ const handleClientSideCurrentItemsChange = (v) => {
         :draggable="props.draggable"
         :headers="[
           ...(props.draggable ? [{ text: '', value: TableConstant.ColumnKey.DRAG }] : []),
-          ...(props.enableAddToFavorite ? [{ text: '', value: TableConstant.ColumnKey.ADD_TO_FAVORITES }] : []),
           ...(props.enableExpand ? [{ text: '', value: TableConstant.ColumnKey.EXPAND }] : []),
           ...(props.onSelect ? [{ text: '', value: TableConstant.ColumnKey.SELECT, width: SELECT_COLUMN_WIDTH }] : []),
           ...props.headers.map(header => ({

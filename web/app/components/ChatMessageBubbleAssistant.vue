@@ -230,20 +230,6 @@ onBeforeUnmount(() => {
                   </template>
                 </template>
               </template>
-              <template v-else-if="content.contentBlockType === StreamingConstant.ContentBlockType.TOOL_USE.value">
-                <ChatRoomMessageThinkingStepsToolUse
-                  :loading="!props.message.askUserQuestionSubmitted && !props.message.isStatusAborted && !props.message.isStatusFailed"
-                  :item="content"
-                  class="pb-6"
-                />
-              </template>
-              <template v-else-if="content.contentBlockType === StreamingConstant.ContentBlockType.TOOL_RESULT.value">
-                <ChatRoomMessageThinkingStepsToolResult
-                  :loading="!props.message.askUserQuestionSubmitted && !props.message.isStatusAborted && !props.message.isStatusFailed"
-                  :item="content"
-                  class="pb-6"
-                />
-              </template>
             </template>
             <template v-if="props.message.isStatusAborted">
               <span class="text-failed">

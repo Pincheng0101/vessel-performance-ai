@@ -92,15 +92,6 @@ const ServiceTypeColor = Object.freeze({
 const SpeedLossIsoTrigger = 8;
 const SpeedLossThreshold = 10;
 
-// Speed-loss color bands (mirror the deep-dive gauge: threshold 10%, amber from 6%).
-// Shaped as ECharts visualMap pieces so a map/scatter can both color and legend by them.
-const SpeedLossBand = Object.freeze([
-  { lt: 0, label: 'n/a', color: '#cbd5e1' },
-  { gte: 0, lt: 6, label: '< 6%', color: SemanticRamp.good },
-  { gte: 6, lt: SpeedLossThreshold, label: '6–10%', color: SemanticRamp.warning },
-  { gte: SpeedLossThreshold, label: '≥ 10%', color: SemanticRamp.critical },
-]);
-
 export {
   CategoricalPalette,
   CauseColor,
@@ -110,7 +101,6 @@ export {
   SemanticRamp,
   ServiceTypeColor,
   SeverityColor,
-  SpeedLossBand,
   SpeedLossColor,
   SpeedLossIsoTrigger,
   SpeedLossThreshold,

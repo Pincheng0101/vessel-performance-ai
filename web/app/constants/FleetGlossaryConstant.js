@@ -38,6 +38,7 @@ const Term = Object.freeze({
   recentAlerts: '近 30 天內新開啟的預警數（以資料期間最新日期為基準）。',
 
   // Vessel specs
+  teu: 'TEU（Twenty-foot Equivalent Unit，20 呎標準貨櫃當量）：以此為單位換算的船舶額定貨櫃裝載容量。',
   dwt: '載重噸（Deadweight Tonnage）：船舶可裝載的最大總重量（公噸），含貨物、燃油、淡水等。',
   lpp: '垂線間長（Length Between Perpendiculars）：船艏艉垂線間的船長（m），常用於船體性能計算。',
   breadth: '船寬（Breadth）：船舶的最大寬度（m）。',
@@ -64,10 +65,13 @@ const Term = Object.freeze({
 
   // Maintenance planner (fleet-wide; definitions aligned with the PoC's Planner.js / glossary.js)
   dryDockWindow: '需進乾塢施作（塗層更新或螺旋槳修理）的服務窗口數；乾塢須上架，是排程與預算中最受限的事件。',
+  nextWindow: '船隊維修待辦清單中，最早排定的一個服務窗口（乾塢／水下）計畫日期；同船同日同服務型態的行動已合併計算。',
   maintenanceGantt: '每艘船的維修服務窗口排程；同船同日同服務型態的行動會合併成一個窗口。長條顏色代表服務型態（乾塢／水下），深淺代表優先度；長條長度為乾塢 12 天／水下 2 天的示意工期，非實際量測。',
   savingByQuarter: '依服務窗口的計畫日期分季彙總淨節省，並依服務型態（乾塢／水下）堆疊，呈現船隊維修效益的季度分布。非經濟型行動（如主機檢查）無淨節省，計為 0。',
   maintenanceBacklog: '所有船舶的待辦維修行動，依淨節省由高到低排序；點擊任一列可查看該船的個船分析。',
   maintenanceAction: '建議的維修項目：船體清潔、螺旋槳拋光／修理、船體塗層更新、主機檢查。',
+  planDate: '此行動實際排定執行的日期。維修規劃會將同一艘船、時間相近的待辦行動整併進同一次服務窗口，因此可能早於或晚於右方的到期預估（Due），非該行動單獨的到期日。',
+  dueEta: '此行動自身的到期預估（ETA）：依該項劣化指標的趨勢外推，預測其單獨跨越門檻的日期，未考慮與其他行動整併排程——實際排定日期見左方的 Plan date。',
 
   // Executive
   ciiARated: '以 IMO 規定值（required line）評級計，A 級船舶占全隊的比例（%）；越高代表船隊碳強度表現越好。合規風險另看 D／E 級：連續三年 D 級或單年 E 級須提出矯正行動計畫（corrective action plan）。',

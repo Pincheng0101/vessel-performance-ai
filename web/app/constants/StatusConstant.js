@@ -1,18 +1,3 @@
-const Resource = Object.freeze({
-  DELETING: {
-    i18nTitle: '__fieldStatusDeleting',
-    value: 'DELETING',
-  },
-  PENDING: {
-    i18nTitle: '__fieldStatusPending',
-    value: 'PENDING',
-  },
-  READY: {
-    i18nTitle: '__fieldStatusReady',
-    value: 'READY',
-  },
-});
-
 const Runtime = Object.freeze({
   ABORTED: {
     i18nTitle: '__fieldStatusAborted',
@@ -86,27 +71,6 @@ const Runtime = Object.freeze({
   },
 });
 
-const MarketplaceOnboarding = Object.freeze({
-  ACTIVE: {
-    value: 'ACTIVE',
-  },
-  NOT_SUBSCRIBED: {
-    value: 'NOT_SUBSCRIBED',
-  },
-  INSUFFICIENT: {
-    value: 'INSUFFICIENT',
-  },
-});
-
-const StatusCode = Object.freeze({
-  NOT_FOUND: 400,
-  FORBIDDEN: 403,
-  INTERNAL_SERVER_ERROR: 500,
-});
-
 export {
-  MarketplaceOnboarding,
-  Resource,
   Runtime,
-  StatusCode,
 };

@@ -1,6 +1,5 @@
 <script setup>
 import * as ChatConstant from '~/constants/ChatConstant';
-import * as IconConstant from '~/constants/IconConstant';
 import { TextContentBlock } from '~/models/server/contentBlock';
 import { AssistantChatRoomMessage, UserChatRoomMessage } from '~/models/ui/chatRoom';
 import chatUtils from '~/utils/chatUtils';
@@ -29,7 +28,7 @@ const props = defineProps({
   },
   assistantIcon: {
     type: String,
-    default: IconConstant.Base.ASSISTANT,
+    default: 'mdi-face-agent',
   },
   assistantImage: {
     type: String,

@@ -17,7 +17,7 @@ const model = defineModel({
     variant="text"
     @click="model = true"
   >
-    YM Copilot
+    Fleet Copilot
   </v-btn>
 </template>
 

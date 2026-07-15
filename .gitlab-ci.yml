@@ -34,9 +34,6 @@ deploy-cdk:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
   before_script:
-    # Tolerate a lowercase `aws_session_token` variable — the AWS SDK only reads
-    # the uppercase name, so normalize it here.
-    - export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-$aws_session_token}"
     # uv + Python 3.13 (project pins >=3.13,<3.14)
     - curl -LsSf https://astral.sh/uv/install.sh | sh
     - export PATH="$HOME/.local/bin:$PATH"
@@ -67,9 +64,6 @@ deploy-web:
       changes:
         - web/**/*
   before_script:
-    # Tolerate a lowercase `aws_session_token` variable — the AWS SDK/CLI only
-    # reads the uppercase name, so normalize it here.
-    - export AWS_SESSION_TOKEN="${AWS_SESSION_TOKEN:-$aws_session_token}"
     - apk add --no-cache git aws-cli
     - corepack enable npm
     - cd web

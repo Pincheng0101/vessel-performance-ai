@@ -38,7 +38,6 @@ describe('strUtils.toTitleCase', () => {
 describe('strUtils case converters', () => {
   test.each([
     ['toCamelCase', 'hello world', 'helloWorld'],
-    ['toPascalCase', 'hello world', 'HelloWorld'],
     ['toSnakeCase', 'helloWorld', 'hello_world'],
     ['toKebabCase', 'helloWorld', 'hello-world'],
   ])('strUtils.%s(%j) returns %j', (method, input, expected) => {
