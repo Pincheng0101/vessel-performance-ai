@@ -121,7 +121,7 @@ const Title = Object.freeze({
   ciiTrend: 'CII rating trend',
   fleetSpeedLossTrend: 'Fleet speed-loss trend',
   savingsPotential: 'Savings potential',
-  fleetTable: 'Fleet vessels',
+  fleetTable: 'Fleet ships',
   speedLossDistribution: 'Speed-loss distribution',
 
   // Vessel deep-dive

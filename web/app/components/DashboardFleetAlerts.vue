@@ -97,7 +97,7 @@ const kpis = computed(() => [
     sub: windowStartDate.value ? `opened since ${windowStartDate.value}` : 'opened recently',
     tooltip: T.recentAlerts,
   },
-  { label: 'Vessels affected', value: `${vesselsAffected.value}`, sub: `of ${ships.value?.length ?? 0} ships`, tooltip: T.vesselsWithAlerts },
+  { label: 'Ships affected', value: `${vesselsAffected.value}`, sub: `of ${ships.value?.length ?? 0} ships`, tooltip: T.vesselsWithAlerts },
   { label: 'Total episodes', value: `${rows.value.length}`, sub: 'incl. closed', tooltip: T.anomaly },
 ]);
 

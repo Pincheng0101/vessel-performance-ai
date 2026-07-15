@@ -15,7 +15,7 @@ const model = defineModel({
   default: null,
 });
 
-const title = computed(() => props.vessel.ship_id || model.value || 'Select vessel');
+const title = computed(() => props.vessel.ship_id || model.value || 'Select ship');
 const isPrediction = computed(() => props.vessel.isPrediction ?? /^S2[1-3]$/.test(model.value || ''));
 const ariaLabel = computed(() => `切換船舶，目前 ${title.value}`);
 const menuItems = computed(() => props.items.map(item => ({
