@@ -46,6 +46,10 @@ const COPILOT_DESCRIPTION = '可以用自然語言查詢船隊效能資料湖：
 // Rendered by ChatRoom as clickable suggestion chips (joined to its
 // newline-separated prop format below).
 const COPILOT_STARTER_PROMPTS = [
+  '過去一年船隊因船體污損多花了多少燃油成本？',
+  '全船隊目前速度損失最嚴重的是哪三艘船？',
+  '哪些維修建議的淨節省最高？該優先安排哪幾艘？',
+  '有哪些船的 CII 評級有退步到 D 或 E 的風險？',
   'S1 的 slip 趨勢如何？最近一次維修後有改善嗎？',
 ];
 
