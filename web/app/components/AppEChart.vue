@@ -72,6 +72,12 @@ const buildTheme = () => {
     valueAxis: axisCommon,
     timeAxis: axisCommon,
     logAxis: axisCommon,
+    // A bar series that doesn't set label.color falls back to ECharts' hardcoded '#333' default
+    // (tuned for light backgrounds) while it also auto-picks a contrasting fill for the same
+    // label — the two overlap a pixel or two apart, which reads as ghosted/doubled text. Nearly
+    // invisible in light theme (dark-on-dark), glaring in dark theme (white-on-#333). Pin bar
+    // labels to the theme's text color so there's only one color to draw.
+    bar: { label: { color: c.text } },
     tooltip: {
       backgroundColor: c.backgroundScale1,
       borderColor: c.backgroundScale3,

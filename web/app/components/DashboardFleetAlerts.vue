@@ -131,7 +131,11 @@ const causeSeverityOption = computed(() => {
 // no real backend, so filter/sort/paginate happens locally and only the current page is handed
 // to AppTable.
 const tableHeaders = [
-  { title: 'Ship', key: 'shipId', sortable: true, minWidth: 90 },
+  // sortKey pins what AppTable sends back on header click. Without it, AppTable snake_cases the
+  // multi-word key ('shipId' → 'ship_id') for the caller's benefit in real server-side mode — but
+  // this table's rows are plain camelCase JS objects (`row.shipId`), so the snake_cased key
+  // would come back and match nothing, silently no-op'ing the sort.
+  { title: 'Ship', key: 'shipId', sortKey: 'shipId', sortable: true, minWidth: 90 },
   { title: 'Metric', key: 'metric', sortable: true, minWidth: 150, tooltip: T.cause },
   { title: 'Severity', key: 'severity', sortable: true, width: 100, minWidth: 100, tooltip: T.severity },
   { title: 'Status', key: 'status', sortable: true, width: 100, minWidth: 100 },
@@ -179,7 +183,10 @@ const sortedRows = computed(() => {
     const bv = b[sortField];
     if (av == null) return 1;
     if (bv == null) return -1;
-    const cmp = typeof av === 'string' ? av.localeCompare(bv) : av - bv;
+    // { numeric: true } so shipId ("S1", "S2", ... "S10") sorts as S1, S2, ..., S10 instead of
+    // S1, S10, S2, ... — harmless for the other string columns (metric/status labels), which
+    // have no digit runs for it to act on.
+    const cmp = typeof av === 'string' ? av.localeCompare(bv, undefined, { numeric: true }) : av - bv;
     return sortOrder === 'DESC' ? -cmp : cmp;
   });
   return list;

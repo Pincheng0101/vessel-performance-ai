@@ -8,6 +8,7 @@ import * as FleetChartConstant from '~/constants/FleetChartConstant';
 import * as FleetGlossaryConstant from '~/constants/FleetGlossaryConstant';
 
 const server = useServer();
+const { isDarkTheme, themeColors } = useCustomTheme();
 
 const fmtPct = v => (v == null ? '–' : `${v.toFixed(1)}%`);
 const fmtInt = v => (v == null ? '–' : Math.round(v).toLocaleString());
@@ -86,9 +87,19 @@ const deltaTextClass = m => (deltaTone(m) ? `text-${deltaTone(m)}` : 'text-mediu
 // Sparklines share the muted speed-loss color, matching the fleet speed-loss trend line.
 const SPEED_LOSS_COLOR = FleetChartConstant.SpeedLossColor;
 // `latest` overrides the tile's headline where the last daily row is not the fleet's current
-// state — the excess-cost sum is folded from each ship's own latest report instead.
+// state — the excess-cost sum is folded from each ship's own latest report instead. Speed loss
+// has the same problem for a different reason: a single day's fleet mean only pools whichever
+// handful of ships cleared the ISO gate that day (as few as 5 of 15), so the headline uses the
+// 30-day mean already computed for the delta chip, matching the glossary term and the Fleet
+// Overview tab's KPI instead of the raw last row.
 const METRICS = [
-  { key: 'avg_speed_loss_pct', label: 'Avg speed loss', fmt: fmtPct, tooltip: FleetGlossaryConstant.Term.avgSpeedLoss },
+  {
+    key: 'avg_speed_loss_pct',
+    label: 'Avg speed loss',
+    fmt: fmtPct,
+    latest: cur => cur,
+    tooltip: FleetGlossaryConstant.Term.avgSpeedLoss,
+  },
   {
     key: 'excess_fleet_usd',
     label: 'Excess fuel cost',
@@ -116,7 +127,7 @@ const buildTile = (dailyRows, sparkRows, m) => {
   const deltaSign = delta == null ? null : (m.fmt(Math.abs(delta)) === m.fmt(0) ? 0 : delta);
   return {
     ...m,
-    latest: m.latest ? m.latest() : (vals.length ? vals[vals.length - 1] : null),
+    latest: m.latest ? m.latest(cur) : (vals.length ? vals[vals.length - 1] : null),
     delta,
     deltaSign,
     sparkOption: {
@@ -171,14 +182,48 @@ const ciiTrendOption = computed(() => ({
 const SPEED_LOSS_WINDOW = 30;
 const ROLLING_NAME = `${SPEED_LOSS_WINDOW}-day mean`;
 const RAW_NAME = 'Daily';
+// The unit lives on the right axis's own name now, not repeated in the series label.
+const COVERAGE_NAME = 'Coverage';
+// Same two rules as the vessel deep-dive chart (FleetChartConstant.js: the 8% is the ISO
+// 19030 maintenance trigger the lake itself fires on; the 10% is this dashboard's own
+// cleaning-action policy). Drawn here too so the fleet-wide read carries the same reference
+// lines as the per-ship one.
+const ISO_TRIGGER = FleetChartConstant.SpeedLossIsoTrigger;
+const ACTION_THRESHOLD = FleetChartConstant.SpeedLossThreshold;
+// Theme-derived, not a fixed hex: a light-mode gray reads as a near-black smudge once alpha-
+// blended over the dark theme's card background. backgroundScale3/4 are Vuetify's own
+// light/dark pair for "structural, not data" chart decoration (see AppEChart's axis/gridlines),
+// so these stay the same subtle contrast in both themes instead of just in light mode.
+const GAP_COLOR = computed(() => themeColors.value.backgroundScale3);
+// A different tone from GAP_COLOR so the "no data at all" pre-2023 rectangle and the "some
+// days thin, some thick" coverage band don't read as the same kind of shading.
+const COVERAGE_COLOR = computed(() => themeColors.value.backgroundScale4);
+// Same nominal color, but backgroundScale3 sits much closer to the dark theme's own card
+// background in relative lightness than to the light theme's — the identical alpha reads as
+// a barely-there tint in light mode and a heavy, attention-grabbing block in dark mode.
+const GAP_OPACITY = computed(() => (isDarkTheme.value ? 0.18 : 0.3));
 const speedLossRolling = computed(
   () => fleetUtils.rollingMean(speedLossDaily.value, 'avg_speed_loss_pct', SPEED_LOSS_WINDOW),
 );
+// Smoothed so the ramp-up in fleet coverage reads as a trend, not the day-to-day noise of which
+// handful of ships happened to report.
+const coverageRolling = computed(
+  () => fleetUtils.rollingMean(speedLossDaily.value, 'n_speed_loss_ships', SPEED_LOSS_WINDOW),
+);
+// Every ship's displacement was a draft-backfilled estimate (not measured) until ~2023-02 —
+// the ISO gate rejects that as unreliable (doubles the speed-loss dispersion, per the glossary
+// term), so the whole fleet fails it for the data lake's first ~19 months. Shaded so a viewer
+// sees *why* the trend starts mid-window instead of asking whether data before it went missing.
+const dataGapArea = computed(() => {
+  const firstValidDay = speedLossDaily.value[0]?.noon_utc;
+  if (!firstValidDay) return [];
+  return [[{ xAxis: fleetUtils.dayToMs(0) }, { xAxis: fleetUtils.dayToMs(firstValidDay) }]];
+});
 
 const speedLossTrendOption = computed(() => ({
-  legend: { top: 0, right: 8, data: [ROLLING_NAME, RAW_NAME] },
+  legend: { top: 0, left: 'center', data: [ROLLING_NAME, RAW_NAME, COVERAGE_NAME] },
   grid: {
-    left: 44, right: 16, top: 32, bottom: 28,
+    left: 56, right: 68, top: 32, bottom: 28,
   },
   tooltip: {
     trigger: 'axis',
@@ -186,37 +231,125 @@ const speedLossTrendOption = computed(() => ({
     // which is the only thing that says how much of a fleet that point actually is.
     formatter: (params) => {
       const lines = params.map((p) => {
+        // Coverage is a headcount, not a %, and shares no marker convention with the other
+        // two — keep its line separate rather than forcing it through fmtPct.
+        if (p.seriesName === COVERAGE_NAME) {
+          const marker = `<span style="display:inline-block;margin-right:4px;border-radius:10px;width:10px;height:10px;background-color:${COVERAGE_COLOR.value};"></span>`;
+          return `${marker}${p.seriesName} <b>${Math.round(p.value[1])}</b> / ${roster.length} vessels`;
+        }
         const ships = p.data?.ships;
-        const shipLabel = ships == null ? '' : ` · ${ships} ${ships === 1 ? 'ship' : 'ships'}`;
-        return `${p.marker}${p.seriesName} <b>${fmtPct(p.value[1])}</b>${shipLabel}`;
+        const shipLabel = ships == null ? '' : ` · ${ships} ${ships === 1 ? 'vessel' : 'vessels'}`;
+        // p.marker ignores itemStyle.opacity, so the Daily dot would render fully saturated —
+        // out of step with its 25%-opacity line on the chart. Bake the opacity into the color instead.
+        const markerColor = p.seriesName === RAW_NAME ? `${SPEED_LOSS_COLOR}40` : SPEED_LOSS_COLOR;
+        const marker = `<span style="display:inline-block;margin-right:4px;border-radius:10px;width:10px;height:10px;background-color:${markerColor};"></span>`;
+        return `${marker}${p.seriesName} <b>${fmtPct(p.value[1])}</b>${shipLabel}`;
       });
-      return [fleetUtils.dayLabel(fleetUtils.msToDay(params[0]?.axisValue)), ...lines].join('<br/>');
+      // Plain date, not fleetUtils.dayLabel's "(N days ago)" — that framing fits a due-date
+      // countdown, not a point on a multi-year historical trend.
+      return [fleetUtils.dayDate(fleetUtils.msToDay(params[0]?.axisValue)), ...lines].join('<br/>');
     },
   },
-  xAxis: { type: 'time' },
-  yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
+  // Extended back to day 0 (the data lake's actual start) rather than letting the axis
+  // auto-fit to the first non-null point — otherwise the chart silently starts mid-window
+  // and invites "where did 2021-2022 go?" instead of showing the answer.
+  xAxis: { type: 'time', min: fleetUtils.dayToMs(0) },
+  yAxis: [
+    {
+      type: 'value',
+      name: 'speed loss %',
+      nameLocation: 'middle',
+      nameGap: 36,
+      nameRotate: 90,
+      axisLabel: { formatter: '{value}%' },
+    },
+    // Own scale for the coverage band — a ship headcount, not a %. Shown (not hidden) so its
+    // reading doesn't only exist on hover; splitLine off so its gridlines don't cross-hatch
+    // against the left axis's, which sits on an unrelated scale.
+    {
+      type: 'value',
+      position: 'right',
+      min: 0,
+      max: roster.length,
+      name: 'vessels',
+      nameLocation: 'middle',
+      nameGap: 36,
+      nameRotate: -90,
+      splitLine: { show: false },
+    },
+  ],
+  // Ordered to match the legend (and so the tooltip lists in the same order): 30-day mean,
+  // Daily, Coverage. z pins the actual draw stacking instead, so reordering this array for the
+  // tooltip doesn't flip which line paints over which.
   series: [
+    {
+      name: ROLLING_NAME,
+      type: 'line',
+      smooth: true,
+      showSymbol: false,
+      z: 2,
+      lineStyle: { width: 2, color: SPEED_LOSS_COLOR },
+      itemStyle: { color: SPEED_LOSS_COLOR },
+      emphasis: { itemStyle: { color: SPEED_LOSS_COLOR } },
+      data: speedLossRolling.value.map(r => [fleetUtils.dayToMs(r.noon_utc), r.value]),
+      markLine: {
+        symbol: 'none',
+        silent: true,
+        label: { show: false },
+        data: [
+          {
+            yAxis: ISO_TRIGGER,
+            lineStyle: { color: FleetChartConstant.SemanticRamp.warning, type: 'dashed', width: 1 },
+            label: {
+              show: true, formatter: `ISO 19030 維修觸發 ${ISO_TRIGGER}%`, position: 'insideEndBottom', fontSize: 10, color: FleetChartConstant.SemanticRamp.warning,
+            },
+          },
+          {
+            yAxis: ACTION_THRESHOLD,
+            lineStyle: { color: FleetChartConstant.SemanticRamp.critical, type: 'dashed', width: 1 },
+            label: {
+              show: true, formatter: `清潔行動線 ${ACTION_THRESHOLD}%`, position: 'insideEndTop', fontSize: 10, color: FleetChartConstant.SemanticRamp.critical,
+            },
+          },
+        ],
+      },
+    },
     {
       name: RAW_NAME,
       type: 'line',
       smooth: false,
       showSymbol: false,
+      z: 1,
       lineStyle: { width: 1, color: SPEED_LOSS_COLOR, opacity: 0.25 },
       itemStyle: { color: SPEED_LOSS_COLOR, opacity: 0.25 },
       data: speedLossDaily.value.map(r => ({
         value: [fleetUtils.dayToMs(r.noon_utc), r.avg_speed_loss_pct],
         ships: r.n_speed_loss_ships,
       })),
+      markArea: {
+        silent: true,
+        itemStyle: { color: GAP_COLOR.value, opacity: GAP_OPACITY.value },
+        label: {
+          show: true,
+          position: 'insideTop',
+          fontSize: 10,
+          color: themeColors.value.text,
+          formatter: 'Pre-2023: displacement backfilled — fails ISO gate',
+        },
+        data: dataGapArea.value,
+      },
     },
     {
-      name: ROLLING_NAME,
+      name: COVERAGE_NAME,
       type: 'line',
+      yAxisIndex: 1,
       smooth: true,
       showSymbol: false,
-      lineStyle: { width: 2, color: SPEED_LOSS_COLOR },
-      itemStyle: { color: SPEED_LOSS_COLOR },
-      emphasis: { itemStyle: { color: SPEED_LOSS_COLOR } },
-      data: speedLossRolling.value.map(r => [fleetUtils.dayToMs(r.noon_utc), r.value]),
+      z: 0,
+      lineStyle: { width: 1, color: COVERAGE_COLOR.value, opacity: 0.6 },
+      itemStyle: { color: COVERAGE_COLOR.value },
+      areaStyle: { opacity: 0.18, color: COVERAGE_COLOR.value },
+      data: coverageRolling.value.map(r => [fleetUtils.dayToMs(r.noon_utc), r.value]),
     },
   ],
 }));

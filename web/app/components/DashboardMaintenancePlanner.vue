@@ -120,7 +120,7 @@ const kpis = computed(() => [
     label: 'Net saving', value: fmtUsdCompact(totalNetSaving.value), sub: 'backlog total', tooltip: T.netSaving, color: FleetChartConstant.SemanticRamp.good,
   },
   { label: 'Dry-dock windows', value: `${dryDockCount.value}`, sub: 'haul-out service windows', tooltip: T.dryDockWindow },
-  { label: 'Next window', value: nextWindowDate.value || '–', sub: 'earliest plan date', tooltip: T.nextMaintenance },
+  { label: 'Next window', value: nextWindowDate.value || '–', sub: 'earliest plan date', tooltip: T.nextWindow },
 ]);
 
 const openShipDetail = async (item) => {
@@ -147,8 +147,8 @@ const tableHeaders = [
   { title: 'Action', key: 'action', sortable: true, minWidth: 160, tooltip: T.maintenanceAction },
   { title: 'Priority', key: 'priority', sortable: true, width: 90, minWidth: 90 },
   { title: 'Service', key: 'serviceType', sortable: true, minWidth: 110, tooltip: T.serviceType },
-  { title: 'Plan date', key: 'planDate', sortable: true, minWidth: 110 },
-  { title: 'Due (ETA)', key: 'dueDay', sortable: true, minWidth: 110, tooltip: T.nextMaintenance },
+  { title: 'Plan date', key: 'planDate', sortable: true, minWidth: 110, tooltip: T.planDate },
+  { title: 'Due (ETA)', key: 'dueDay', sortable: true, minWidth: 110, tooltip: T.dueEta },
   { title: 'Net saving', key: 'netSaving', sortable: true, minWidth: 110, tooltip: T.netSaving },
   { title: 'Rationale', key: 'rationale', sortable: false, minWidth: 220 },
 ];
