@@ -1,6 +1,6 @@
 """Build the 10-fold masked holdout: pick eligible rows, split them, write ``train.csv``/``eval.csv``.
 
-Eligible rows are labelled single-fuel days with a unique ``(ship, day, fuel)`` key — the only rows
+Eligible rows are labelled steady-state single-fuel days with a unique ``(ship, day, fuel)`` key — the only rows
 whose per-fuel MT truth is unambiguous. Each fold's ``eval.csv`` mirrors a real ``PREDICT`` row: the
 target + leakage columns are blanked and the masked flags set, while ``target_fuel_type`` (the fuel
 identity is *given* on predict rows) and every ``predict_safe`` feature survive. ``train.csv`` is the
@@ -37,16 +37,19 @@ def load_features(path: str) -> pd.DataFrame:
 
 
 def select_eligible(df: pd.DataFrame) -> list[dict]:
-    """Labelled single-``>0``-fuel rows with a unique ``(ship, day, fuel)`` key.
+    """Labelled steady-state single-``>0``-fuel rows with a unique ``(ship, day, fuel)`` key.
 
     Returns one ``{'row_idx', 'ship', 'day', 'fuel'}`` dict per eligible row (``fuel`` = short key).
-    Rows whose ``(ship, day, fuel)`` key is not unique are dropped entirely — their truth cannot be
-    attributed to a single day/fuel, so they are unsafe to hide and score.
+    Steady-state rows are those flagged by the upstream ``is_steady_state`` gate (io.py) — the README
+    ``PREDICT``-cell population the eval folds must imitate. Rows whose ``(ship, day, fuel)`` key is not
+    unique are dropped entirely — their truth cannot be attributed to a single day/fuel, so they are
+    unsafe to hide and score.
     """
     fuel_num = df[FUEL_COLS].apply(pd.to_numeric, errors='coerce')
     labelled = df['is_masked'].str.lower() != 'true'
     single_fuel = (fuel_num > 0).sum(axis=1) == 1
-    idx = df.index[labelled & single_fuel]
+    steady = df['is_steady_state'].str.lower() == 'true'  # CSV read as str; matches io.py gate
+    idx = df.index[labelled & single_fuel & steady]
 
     fuel_short = fuel_num.loc[idx].idxmax(axis=1).str.removeprefix(_FUEL_PREFIX)
     rows = pd.DataFrame(

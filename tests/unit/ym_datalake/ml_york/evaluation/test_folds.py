@@ -15,13 +15,14 @@ MANIFEST = {
 }
 
 
-def _row(ship, day, fuel_amounts, *, masked=False, fuel_type, target='', energy=''):
+def _row(ship, day, fuel_amounts, *, masked=False, steady=True, fuel_type, target='', energy=''):
     """One synthetic feature row; ``fuel_amounts`` maps a subset of FUEL_COLS to their MT strings."""
     row = {
         'ship_id': ship,
         'noon_utc': day,
         'is_masked': 'True' if masked else 'False',
         'is_predict': 'True' if masked else 'False',
+        'is_steady_state': 'True' if steady else 'False',
         'target_fuel_type': fuel_type,
         'target_me_fs_consump': target,
         'target_energy_mj': energy,
@@ -48,6 +49,9 @@ def frame():
         _row('S4', '0', {HSHFO: '10', VLSFO: '20'}, fuel_type='HSHFO', target='30'),  # multi-fuel: excluded
         _row('S5', '0', {HSHFO: '90'}, masked=True, fuel_type='HSHFO'),  # masked: excluded
         _row('S1', '0', {HSHFO: '999'}, fuel_type='HSHFO', target='999'),  # dup of row 0 key: both dropped
+        _row(
+            'S6', '0', {HSHFO: '80'}, steady=False, fuel_type='HSHFO', target='80', energy='3216'
+        ),  # non-steady: excluded
     ]
     return pd.DataFrame(rows)
 
@@ -55,8 +59,9 @@ def frame():
 def test_eligible_is_labelled_single_fuel_unique_only(frame):
     keys = {(r['ship'], r['day'], r['fuel']) for r in folds.select_eligible(frame)}
     assert keys == {('S1', '1', 'VLSFO'), ('S2', '0', 'HSHFO'), ('S2', '1', 'LSMGO'), ('S3', '0', 'HSHFO')}
-    # (S1,0,HSHFO) is non-unique → both copies dropped; S4 multi-fuel and S5 masked excluded.
+    # (S1,0,HSHFO) is non-unique → both copies dropped; S4 multi-fuel, S5 masked, S6 non-steady excluded.
     assert ('S1', '0', 'HSHFO') not in keys
+    assert ('S6', '0', 'HSHFO') not in keys  # non-steady-state row is held out of the eval population
 
 
 def test_folds_disjoint_and_cover_eligible(frame):
