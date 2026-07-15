@@ -234,25 +234,25 @@ const handleMapClick = async (params) => {
   <div class="d-flex flex-column ga-6">
     <UsageResultCardFrame>
       <template #title>
-        <DashboardFleetSelector
-          v-model="selectedFleet"
-          :items="fleetOptions"
-        />
-        <div class="text-caption text-medium-emphasis mt-1">
-          {{ T.fleetMap }}
-        </div>
-      </template>
-      <template #actions>
-        <div class="color-by-toggle">
-          <AppButtonToggle
-            v-model="colorBy"
-            :button-width="100"
-            :elevation="0"
-            :items="[
-              { title: '速度損失', value: 'speed_loss' },
-              { title: 'CII', value: 'cii' },
-            ]"
+        <div class="w-100">
+          <DashboardFleetSelector
+            v-model="selectedFleet"
+            :items="fleetOptions"
           />
+          <div class="text-caption text-medium-emphasis mt-1">
+            {{ T.fleetMap }}
+          </div>
+          <div class="color-by-toggle d-flex justify-end mt-2">
+            <AppButtonToggle
+              v-model="colorBy"
+              :button-width="100"
+              :elevation="0"
+              :items="[
+                { title: '速度損失', value: 'speed_loss' },
+                { title: 'CII', value: 'cii' },
+              ]"
+            />
+          </div>
         </div>
       </template>
       <UsageResultCard>
