@@ -132,11 +132,14 @@ const specs = computed(() => {
 });
 
 // --- Speed-loss value + 30-day delta (header) ---
-// Latest value colored by threshold band, plus a current-vs-previous 30-day delta chip
-// (Executive style). Speed loss is up-bad, so a rising delta reads red / ↑.
-const slLatest = computed(() => latest.value?.speed_loss_pct ?? null);
+// 30-day trailing mean of ISO-valid days, not the single latest one — this tile's own tooltip
+// (T.speedLoss) already promises the 30-day mean, and a single day's fit-scatter (up to ±4pp) was
+// able to flip both this tile's color band and the Cause Diagnostics hull-risk level below it.
+// Matches the Fleet Overview table column and the Executive KPI fix.
+const validDaily = computed(() => (daily.value ?? []).filter(d => d.valid_flag));
+const slTrailing = computed(() => fleetUtils.trailingMean(validDaily.value, 'speed_loss_pct', 30));
 const slColor = computed(() => {
-  const v = slLatest.value;
+  const v = slTrailing.value;
   if (v == null) return FleetChartConstant.FallbackColor;
   if (v < 6) return FleetChartConstant.SemanticRamp.good;
   if (v < THRESHOLD) return FleetChartConstant.SemanticRamp.warning;
@@ -145,10 +148,9 @@ const slColor = computed(() => {
 const mean = arr => (arr.length ? arr.reduce((sum, v) => sum + v, 0) / arr.length : null);
 const fmtMag = v => (v == null ? '–' : `${Math.abs(v).toFixed(1)}%`);
 const slDelta = computed(() => {
-  const vals = (daily.value ?? []).filter(d => d.valid_flag && d.speed_loss_pct != null).map(d => d.speed_loss_pct);
-  const cur = mean(vals.slice(-30));
+  const vals = validDaily.value.map(d => d.speed_loss_pct).filter(v => v != null);
   const prev = mean(vals.slice(-60, -30));
-  return cur != null && prev != null ? cur - prev : null;
+  return slTrailing.value != null && prev != null ? slTrailing.value - prev : null;
 });
 // Decide direction on the *displayed* magnitude: a change that rounds to 0.0% reads flat.
 const slDeltaSign = computed(() => {
@@ -1125,11 +1127,17 @@ const buildMetricStat = (rows, key) => {
     .filter(d => d.value != null);
   const baseline = median(points.slice(0, Math.min(DIAGNOSTIC_BASELINE_WINDOW, points.length)).map(d => d.value));
   const latestPoint = points.at(-1);
+  // excess_foc is DERIVED from speed_loss_pct (physics.excess_foc_mt), so a single day carries
+  // the same ISO curve-fit scatter that made the hull tile noise-dominated — trailing-mean it
+  // for the same reason, over the same window this file already uses for speed loss.
+  const trailingValue = mean(points.slice(-DIAGNOSTIC_BASELINE_WINDOW).map(d => d.value));
 
   return {
     baseline,
     latestIndex: toBaselineIndex(latestPoint?.value, baseline),
     latestValue: latestPoint?.value ?? null,
+    trailingIndex: toBaselineIndex(trailingValue, baseline),
+    trailingValue,
     points,
   };
 };
@@ -1189,15 +1197,15 @@ const causeDiagnostics = computed(() => {
   const stats = diagnosticStats.value;
   const slipDelta = stats.slip.latestIndex == null ? null : stats.slip.latestIndex - 100;
   const sfocDelta = stats.sfoc.latestIndex == null ? null : stats.sfoc.latestIndex - 100;
-  const excessDelta = stats.excessFoc.latestIndex == null ? null : stats.excessFoc.latestIndex - 100;
+  const excessDelta = stats.excessFoc.trailingIndex == null ? null : stats.excessFoc.trailingIndex - 100;
   const speedLossAnomalies = recentAnomalyCount('speed_loss');
   const slipAnomalies = recentAnomalyCount('slip');
   const sfocAnomalies = recentAnomalyCount('sfoc');
   const excessAnomalies = recentAnomalyCount('excess_foc');
 
   const hullLevel = diagnosticLevel(
-    (slLatest.value ?? 0) >= DIAGNOSTIC_HIGH.speedLoss || speedLossAnomalies >= 2,
-    (slLatest.value ?? 0) >= 6 || speedLossAnomalies >= 1,
+    (slTrailing.value ?? 0) >= DIAGNOSTIC_HIGH.speedLoss || speedLossAnomalies >= 2,
+    (slTrailing.value ?? 0) >= 6 || speedLossAnomalies >= 1,
   );
   const propellerLevel = diagnosticLevel(
     (slipDelta != null && slipDelta >= DIAGNOSTIC_HIGH.slip) || slipAnomalies >= 2,
@@ -1251,12 +1259,12 @@ const causeDiagnostics = computed(() => {
       title: '船體＋螺槳／速度損失',
       icon: metricIcon('speed_loss'),
       level: hullLevel,
-      score: Math.max(slLatest.value ?? 0, speedLossAnomalies * 4),
+      score: Math.max(slTrailing.value ?? 0, speedLossAnomalies * 4),
       highThreshold: DIAGNOSTIC_HIGH.speedLoss,
-      value: slLatest.value == null ? '–' : `${slLatest.value.toFixed(1)}%`,
+      value: slTrailing.value == null ? '–' : `${slTrailing.value.toFixed(1)}%`,
       label: '速度損失',
       detail: `近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${speedLossAnomalies} 件異常`,
-      summary: `速度損失 ${slLatest.value == null ? '–' : `${slLatest.value.toFixed(1)}%`}，近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${speedLossAnomalies} 件異常`,
+      summary: `速度損失 ${slTrailing.value == null ? '–' : `${slTrailing.value.toFixed(1)}%`}，近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${speedLossAnomalies} 件異常`,
     },
     {
       key: 'slip',
@@ -1289,10 +1297,10 @@ const causeDiagnostics = computed(() => {
       level: excessLevel,
       score: Math.max(excessDelta ?? 0, excessAnomalies * 4),
       highThreshold: DIAGNOSTIC_HIGH.excessFoc,
-      value: fmtIndexDelta(stats.excessFoc.latestIndex),
+      value: fmtIndexDelta(stats.excessFoc.trailingIndex),
       label: '超額油耗 vs 基準',
-      detail: `目前 ${fmtMetricRaw('excess_foc', stats.excessFoc.latestValue)} · 近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${excessAnomalies} 件異常`,
-      summary: `超額油耗 ${fmtIndexDelta(stats.excessFoc.latestIndex)}，近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${excessAnomalies} 件異常`,
+      detail: `近 30 天平均 ${fmtMetricRaw('excess_foc', stats.excessFoc.trailingValue)} · 近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${excessAnomalies} 件異常`,
+      summary: `超額油耗 ${fmtIndexDelta(stats.excessFoc.trailingIndex)}（近 30 天平均），近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${excessAnomalies} 件異常`,
     },
   ].map((item) => {
     const confidence = confidenceOf(item.key);
@@ -1474,7 +1482,7 @@ watch(alertPageCount, (n) => {
         <DashboardKpiCard
           label="Speed loss"
           :tooltip="T.speedLoss"
-          :value="slLatest == null ? '–' : `${slLatest.toFixed(1)}%`"
+          :value="slTrailing == null ? '–' : `${slTrailing.toFixed(1)}%`"
           :value-color="slColor"
         >
           <div class="d-flex align-center ga-2 mt-1">
