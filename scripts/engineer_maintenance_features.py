@@ -157,13 +157,11 @@ def write_rows(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Add maintenance-event features to vt_fd.csv')
-    parser.add_argument('--voyage', default='tmp/yangming-aws-summit-hackathon/vt_fd.csv', help='Path to vt_fd.csv')
-    parser.add_argument(
-        '--maintenance', default='tmp/yangming-aws-summit-hackathon/maintenance.csv', help='Path to maintenance.csv'
-    )
+    parser.add_argument('--voyage', default='dataset/vt_fd.csv', help='Path to vt_fd.csv')
+    parser.add_argument('--maintenance', default='dataset/maintenance.csv', help='Path to maintenance.csv')
     parser.add_argument(
         '--output',
-        default='tmp/yangming-aws-summit-hackathon/vt_fd_with_maintenance_features.csv',
+        default='dataset/vt_fd_with_maintenance_features.csv',
         help='Output CSV path',
     )
     args = parser.parse_args()

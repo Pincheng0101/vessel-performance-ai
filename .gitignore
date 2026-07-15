@@ -50,6 +50,9 @@ web/config.js
 *.swp
 *.swo
 
+# macOS
+.DS_Store
+
 # Env
 .env
 .env.*

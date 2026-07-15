@@ -11,9 +11,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import re
+import statistics
 from pathlib import Path
 from typing import Any
+
+import feature_engineering as fe
 
 FUEL_HEAT_VALUES = {
     'ME_FULLSPEED_CONSUMP_HSHFO': 40.2,
@@ -80,6 +84,22 @@ def convert_total_energy_to_fuel_amount(total_energy: float, fuel_type: str) -> 
     return total_energy / heat_value
 
 
+def compute_zscore_stats(values: list[float]) -> tuple[float, float]:
+    """Compute population mean/std (ddof=0) for z-score normalization."""
+
+    mean = statistics.mean(values)
+    std = statistics.pstdev(values)
+    return mean, std
+
+
+def zscore_normalize(value: float, mean: float, std: float) -> float:
+    """Apply z-score normalization; guard against zero std by returning 0."""
+
+    if std == 0:
+        return 0.0
+    return (value - mean) / std
+
+
 def _to_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -141,12 +161,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Create model-ready train/test/prediction CSV files')
     parser.add_argument(
         '--input',
-        default='tmp/yangming-aws-summit-hackathon/vt_fd_with_maintenance_features.csv',
+        default='dataset/vt_fd_with_maintenance_features.csv',
         help='Path to the enriched voyage CSV',
     )
-    parser.add_argument(
-        '--output-dir', default='tmp/yangming-aws-summit-hackathon', help='Directory for the output files'
-    )
+    parser.add_argument('--output-dir', default='dataset', help='Directory for the output files')
     parser.add_argument(
         '--test-size', type=float, default=0.2, help='Fraction of rows per ship class to place into the test set'
     )
@@ -178,6 +196,9 @@ def main() -> None:
             if unified_target is not None:
                 prepared_row['target_value'] = str(unified_target)
 
+        # Clip physically-impossible raw values in place and add all derived features.
+        prepared_row.update(fe.engineer_row(row))
+
         prepared_rows.append(prepared_row)
 
     prediction_rows = [row for row in prepared_rows if row['is_prediction_row'] == 1]
@@ -190,8 +211,44 @@ def main() -> None:
         if _to_float(row.get('HOURS_FULL_SPEED')) is not None and _to_float(row.get('HOURS_FULL_SPEED')) >= 22
     ]
 
-    # Keep fieldnames ordered, adding model-target columns at the end.
-    output_fieldnames = fieldnames + ['target_fuel_column', 'target_value', 'is_prediction_row']
+    # Fit z-score stats on the labels that land in train + test, then add a normalized
+    # column while keeping the original target_value. Stats are persisted so prediction
+    # can invert the transform consistently.
+    label_values = [
+        value for row in (*train_rows, *test_rows) if (value := _to_float(row.get('target_value'))) is not None
+    ]
+    target_mean, target_std = compute_zscore_stats(label_values)
+
+    for row in (*train_rows, *test_rows):
+        value = _to_float(row.get('target_value'))
+        row['target_value_normalized'] = '' if value is None else str(zscore_normalize(value, target_mean, target_std))
+    for row in prediction_rows:
+        row['target_value_normalized'] = ''
+
+    normalization = {
+        'method': 'zscore',
+        'column': 'target_value',
+        'normalized_column': 'target_value_normalized',
+        'mean': target_mean,
+        'std': target_std,
+        'std_ddof': 0,
+        'source': 'train+test',
+        'n': len(label_values),
+    }
+    normalization_path = output_dir / 'target_value_normalization.json'
+    normalization_path.write_text(json.dumps(normalization, indent=2, ensure_ascii=False), encoding='utf-8')
+
+    # Keep fieldnames ordered, adding model-target and derived feature columns at the end.
+    output_fieldnames = (
+        fieldnames
+        + [
+            'target_fuel_column',
+            'target_value',
+            'is_prediction_row',
+            'target_value_normalized',
+        ]
+        + fe.ENGINEERED_COLUMNS
+    )
     save_rows(output_dir / 'prediction_model_ready.csv', prediction_rows, output_fieldnames)
     save_rows(output_dir / 'test_model_ready.csv', test_rows, output_fieldnames)
     save_rows(output_dir / 'train_model_ready.csv', train_rows, output_fieldnames)
@@ -200,6 +257,8 @@ def main() -> None:
     print(f'Prediction rows: {len(prediction_rows)}')
     print(f'Test rows: {len(test_rows)}')
     print(f'Train rows: {len(train_rows)}')
+    print(f'Label normalization (z-score): mean={target_mean:.4f} std={target_std:.4f} n={len(label_values)}')
+    print(f'Wrote normalization stats to {normalization_path}')
     print(f'Wrote files to {output_dir}')
 
 
