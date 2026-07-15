@@ -55,10 +55,6 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
-  enableAddToFavorite: {
-    type: Boolean,
-    default: false,
-  },
   enableExpand: {
     type: Boolean,
     default: false,
@@ -363,7 +359,6 @@ if (props.restoredObjects) {
 const columnCount = computed(() => {
   return props.headers.length
     + Number(props.draggable)
-    + Number(props.enableAddToFavorite)
     + Number(props.enableExpand)
     + Number(!!props.onSelect)
     + Number(!!slots.actions)
@@ -606,23 +601,6 @@ const handleFiltersChange = () => {
   props.onFiltersChange(state.filters, state.query);
 };
 
-const handleCategoryChange = (value) => {
-  router.replace({
-    query: {
-      ...route.query,
-      category: value === ListConstant.DefaultParams.CATEGORY ? undefined : value,
-      q: undefined,
-      filters: undefined,
-      page: undefined,
-      pageToken: undefined,
-    },
-  });
-  state.page = ListConstant.DefaultParams.PAGE;
-  state.query = ListConstant.DefaultParams.QUERY;
-  state.filters = [];
-  props.onCategoryChange(value);
-};
-
 const handleClientSideCurrentItemsChange = (v) => {
   state.currentItems = v;
   props.onClientSideCurrentItemsChange(v);
@@ -710,12 +688,6 @@ const handleClientSideCurrentItemsChange = (v) => {
                 sm="auto"
                 class="d-flex align-center ga-2"
               >
-                <template v-if="props.enableAddToFavorite">
-                  <AppTableCategorySelect
-                    v-model="state.category"
-                    @update:model-value="handleCategoryChange"
-                  />
-                </template>
                 <slot name="header-actions" />
               </v-col>
             </template>
@@ -737,7 +709,6 @@ const handleClientSideCurrentItemsChange = (v) => {
         :draggable="props.draggable"
         :headers="[
           ...(props.draggable ? [{ text: '', value: TableConstant.ColumnKey.DRAG }] : []),
-          ...(props.enableAddToFavorite ? [{ text: '', value: TableConstant.ColumnKey.ADD_TO_FAVORITES }] : []),
           ...(props.enableExpand ? [{ text: '', value: TableConstant.ColumnKey.EXPAND }] : []),
           ...(props.onSelect ? [{ text: '', value: TableConstant.ColumnKey.SELECT, width: SELECT_COLUMN_WIDTH }] : []),
           ...props.headers.map(header => ({

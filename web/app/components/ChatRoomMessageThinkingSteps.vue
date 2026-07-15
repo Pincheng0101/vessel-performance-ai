@@ -141,18 +141,6 @@ onBeforeUnmount(() => {
                     />
                   </template>
                 </template>
-                <template v-else-if="item.contentBlockType === StreamingConstant.ContentBlockType.TOOL_USE.value">
-                  <ChatRoomMessageThinkingStepsToolUse
-                    :item="item"
-                    :width="state.contentWidth"
-                  />
-                </template>
-                <template v-else-if="item.contentBlockType === StreamingConstant.ContentBlockType.TOOL_RESULT.value">
-                  <ChatRoomMessageThinkingStepsToolResult
-                    :item="item"
-                    :width="state.contentWidth"
-                  />
-                </template>
               </v-timeline-item>
             </v-timeline>
             <template v-if="loading && props.message.thinkingSteps.length > 0">

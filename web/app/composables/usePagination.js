@@ -1,14 +1,11 @@
 import * as ListConstant from '~/constants/ListConstant';
 
 export function usePagination({
-  type,
-  filterField,
   perPageOptions = ListConstant.ItemsPerPageOption.LIST,
   enableUrlParams,
 } = {}) {
   const route = useRoute();
   const router = useRouter();
-  const favoriteItemStorage = useFavoriteItemStore();
 
   const isInsideDialog = inject('isInsideDialog', false);
   const useUrl = enableUrlParams ?? !isInsideDialog;
@@ -38,15 +35,6 @@ export function usePagination({
   };
 
   const updateFiltersByCategory = ({ reset } = {}) => {
-    if (category.value === ListConstant.Category.FAVORITES.value) {
-      const favorites = favoriteItemStorage.getFavorites(type);
-      // Filter favorites or use a filter that matches nothing
-      filters.value = Object.keys(favorites).length > 0
-        ? Object.keys(favorites).map(item => ({ field: filterField, value: favorites[item].id }))
-        : [{ field: filterField, value: '' }];
-      filterLogic.value = ListConstant.FilterLogic.OR;
-      return;
-    }
     if (reset) {
       filters.value = ListConstant.DefaultParams.FILTERS;
       filterLogic.value = ListConstant.DefaultParams.FILTER_LOGIC;

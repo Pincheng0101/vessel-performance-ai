@@ -100,7 +100,6 @@ const props = defineProps({
   },
 });
 
-const favoriteItemStorage = useFavoriteItemStore();
 const slots = useSlots();
 
 const selectedId = computed(() => props.selectedId);
@@ -152,20 +151,6 @@ watch(isExpandedRowVisible, (after) => {
                 :disabled="props.internalItems.some(props.isExpanded)"
                 :disabled-tooltip="$t('__tooltipCloseExpandedRowsToDrag')"
                 drag-class="handle"
-              />
-            </div>
-          </template>
-          <template v-else-if="column.key === TableConstant.ColumnKey.ADD_TO_FAVORITES">
-            <div
-              class="d-flex align-center justify-center opacity-1 transition-opacity"
-              :class="{
-                'opacity-30': !isHovering && !favoriteItemStorage.allFavorites[props.item.id],
-              }"
-            >
-              <AppAddToFavoritesButton
-                :item="props.item"
-                :type="props.item.resourceType"
-                persistent
               />
             </div>
           </template>
