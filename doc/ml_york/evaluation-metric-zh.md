@@ -6,7 +6,7 @@
 個 fold 會在一批互不重疊的*已標註* row 上把 target 抹掉（模擬真實的 `PREDICT` row），由預測器作答，
 接著 `scoring` 拿這些答案對照仍保留在全域 feature frame 中的真值來評分。*
 
-> 本文說明 `evaluate` CLI 印出的**五項指標**以及**如何判讀這個分數**。它不是 fold 生成過程的逐步
+> 本文說明 `evaluate` CLI 印出的**六項指標**以及**如何判讀這個分數**。它不是 fold 生成過程的逐步
 > 導覽。指標的數學位於 `evaluation/scoring.py::fold_metrics`；CLI 表格位於
 > `evaluation/__main__.py::_cmd_evaluate`。
 
@@ -57,7 +57,7 @@ precision = correct / scored
 
 ## 已作答 cell 上的誤差指標
 
-除了命中率之外，另有四項誤差指標概括*已作答的預測偏離多遠*。設已作答的 cell 為那些同時具有真值與
+除了命中率之外，另有五項誤差指標概括*已作答的預測偏離多遠*。設已作答的 cell 為那些同時具有真值與
 （非空白）答案的 predict cell，並令 `n_a` 為其數量：
 
 | 指標 | 公式 | 單位 | 判讀為 |
@@ -66,11 +66,14 @@ precision = correct / scored
 | `rmse` | `sqrt( (1/n_a) · Σ (pred − true)² )` | MT/day | 類似 MAE 但**對大偏差懲罰更重** |
 | `mape` | `(1/n_a) · Σ abs(pred − true) / true` | 比例 | 平均**相對**偏差（0.04 = 4 %） |
 | `one_minus_mape` | `1 − mape` | 比例 | `mape` 的越高越好分數形式 |
+| `r2` | `1 − Σ(pred − true)² / Σ(true − mean)²` | 比例 | 已解釋的真值變異數比例（≤1） |
 
 `mae`/`rmse` 以 target 自身的單位表示（MT/day）；`mape` 是無因次的。`rmse ≥ mae` 恆成立，兩者的差
 距隨誤差的變異數而擴大 — 大 `rmse` 搭配小 `mae` 意味著少數幾個 cell 偏得很離譜。`one_minus_mape` 存
 在的唯一目的是讓 dashboard 能把每個欄位都當成「越大越好」；當 `mape > 1`（平均偏離超過 100 %）時它
-**可以變成負值**。
+**可以變成負值**。`r2` 即決定係數 (coefficient of determination, R²)，其值**上限為 1**（完美擬
+合）；當預測對真值變異數的解釋能力**不如**直接猜平均值時會**變成負值**；單一已作答 cell 時為 `nan`
+（單點的變異數為零，沒有東西可解釋）。
 
 ---
 
@@ -80,8 +83,8 @@ precision = correct / scored
 
 - **`precision` 的分母 = `scored`** — *每一個*帶有真值的 predict cell，**包含你未作答的 cell**。未作
   答的 cell 被計為一次未命中（`n_missing`）並拖低 `precision`：它不算 correct，卻仍留在分母中。
-- **`mae` / `rmse` / `mape` 的分母 = 僅限已作答的 cell**（`n_a = scored − n_missing`）。沒有答案的
-  cell 對這些總和**不貢獻任何項**。
+- **`mae` / `rmse` / `mape` / `r2` 的分母 = 僅限已作答的 cell**（`n_a = scored − n_missing`）。沒有
+  答案的 cell 對這些總和**不貢獻任何項**（對 `r2` 的變異數也不貢獻）。
 
 由此帶來的後果：**空白答案會拉沉 `precision`，卻永遠碰不到誤差指標。** 你無法靠只作答容易的 cell、把
 困難的留白來美化你的 MAE/RMSE/MAPE — 那種策略只會反過來把 `precision` 弄垮。要嘛全部作答，要嘛在這
@@ -97,12 +100,13 @@ precision = correct / scored
 `python -m ym_datalake.ml_york.evaluation evaluate …` 每個 fold 印一列，最後印一段 footer：
 
 ```
-fold      n  miss        precision  one_minus_mape             mae            rmse            mape
---------------------------------------------------------------------------------------------------
-   1     11     0         0.727273        0.958000        3.500000        5.200000        0.042000
+fold      n  miss       precision  one_minus_mape             mae            rmse              r2            mape
+-----------------------------------------------------------------------------------------------------------------
+   1     11     0        0.727273        0.958000        3.500000        5.200000        0.912000        0.042000
    ...
---------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------
 precision  avg=0.731000  min=0.636364  max=0.900000  (tol=0.05)
+   mae avg=3.480000   rmse avg=5.150000   r2 avg=0.905000   mape avg=0.043000
 ```
 
 判讀這個範例列：
@@ -112,11 +116,13 @@ precision  avg=0.731000  min=0.636364  max=0.900000  (tol=0.05)
 - **`miss = 0`** — `n_missing`：這 `n` 個之中有多少被留白未作答。此處任何非零值都會直接拖累該 fold
   的 `precision`。
 - **`precision = 0.727273`** — 11 個答案中有 8 個落在 ±5 % 之內。
-- **`one_minus_mape … mape`** — 上一節提到的誤差區塊，計算範圍為已作答的 cell。
+- **`one_minus_mape … r2 … mape`** — 上一節提到的誤差區塊，計算範圍為已作答的 cell（`r2` 位於
+  `rmse` 與 `mape` 之間）。
 
 **footer 就是最終判定**：`avg` 是**跨 fold** 的平均 `precision` — harness 給該預測器的單一數字分數。
 `min`/`max` 顯示分布範圍（低 `min` 標示出模型處理不佳的某個 fold），`tol` 則回顯這些命中率是在哪個誤
-差帶下計算的。
+差帶下計算的。**第二行 footer** 印出誤差區塊的跨 fold 平均值 — `mae`、`rmse`、`r2`、`mape` — 讓平均
+誤差與主角命中率並列（平均值計算時會忽略 `nan` 的 fold）。
 
 ---
 
@@ -136,6 +142,8 @@ precision  avg=0.731000  min=0.636364  max=0.900000  (tol=0.05)
 - `rmse = sqrt((100 + 0 + 1) / 3) ≈ 5.8023` MT/day — 高於 `mae`，被那 10 MT 的 HSHFO 偏差拉高。
 - `mape = (0.10 + 0.00 + 0.02) / 3 = 0.04`（4 %）。
 - `one_minus_mape = 1 − 0.04 = 0.96`。
+- `r2 = 1 − 101 / 11666.67 ≈ 0.9913` — `ss_res = 10² + 0² + 1² = 101`，對比真值 `[100, 200, 50]` 的
+  離散程度（`ss_tot ≈ 11666.67`），因此預測幾乎完整解釋了這份變異數。
 
 因為三個 cell 全部作答，`n_missing = 0`，誤差指標涵蓋的三個 cell 與 `precision` 相同。若改把 LSMGO
 的答案留白，`precision` 會掉到 `1/3`（該空白計為一次未命中），而 `mae`/`rmse`/`mape` 則只會在剩下兩

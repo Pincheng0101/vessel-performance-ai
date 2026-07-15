@@ -7,7 +7,7 @@ synthetic 10-fold masked holdout: each fold blanks the target on a disjoint slic
 rows (mimicking a real `PREDICT` row), the predictor answers, and `scoring` grades the answers
 against truth still held in the global feature frame.*
 
-> This document explains the **five metrics** the `evaluate` CLI prints and **how to read the
+> This document explains the **six metrics** the `evaluate` CLI prints and **how to read the
 > score**. It is not a walkthrough of fold generation. The metric math lives in
 > `evaluation/scoring.py::fold_metrics`; the CLI table in `evaluation/__main__.py::_cmd_evaluate`.
 
@@ -59,7 +59,7 @@ denominator**, which is safe here because a single-fuel PREDICT day always has `
 
 ## Error Metrics Over Answered Cells
 
-Alongside the hit rate, four error metrics summarise *how far off* the answered predictions were.
+Alongside the hit rate, five error metrics summarise *how far off* the answered predictions were.
 Let the answered cells be those predict cells that have both a truth and a (non-blank) answer, and
 let `n_a` be their count:
 
@@ -69,12 +69,15 @@ let `n_a` be their count:
 | `rmse` | `sqrt( (1/n_a) · Σ (pred − true)² )` | MT/day | like MAE but **punishes big misses more** |
 | `mape` | `(1/n_a) · Σ abs(pred − true) / true` | fraction | mean **relative** miss (0.04 = 4 %) |
 | `one_minus_mape` | `1 − mape` | fraction | higher-is-better score form of `mape` |
+| `r2` | `1 − Σ(pred − true)² / Σ(true − mean)²` | fraction | share of truth variance explained (≤1) |
 
 `mae`/`rmse` are in the target's own units (MT/day); `mape` is dimensionless. `rmse ≥ mae` always,
 and the gap between them grows with the variance of the errors — a large `rmse` next to a small
 `mae` means a few cells missed badly. `one_minus_mape` exists only so a dashboard can treat every
 column as "bigger is better"; it **can go negative** when `mape > 1` (a prediction more than 100 %
-off on average).
+off on average). `r2` is **bounded above by 1** (a perfect fit) and goes **negative** when the
+predictions explain the truth's variance *less* well than simply guessing the mean would; it is
+`nan` for a single answered cell (the variance of one point is zero, so there is nothing to explain).
 
 ---
 
@@ -85,8 +88,8 @@ off on average).
 - **`precision` denominator = `scored`** — *every* truth-bearing predict cell, **including cells you
   left unanswered**. An unanswered cell is counted as a miss (`n_missing`) and drags `precision`
   down: it is not correct, but it still sits in the denominator.
-- **`mae` / `rmse` / `mape` denominator = answered cells only** (`n_a = scored − n_missing`). A cell
-  with no answer contributes **no term** to these sums.
+- **`mae` / `rmse` / `mape` / `r2` denominator = answered cells only** (`n_a = scored − n_missing`).
+  A cell with no answer contributes **no term** to these sums (nor to `r2`'s variance).
 
 The consequence: **blank answers sink `precision` but never touch the error metrics.** You cannot
 flatter your MAE/RMSE/MAPE by only answering the easy cells and leaving the hard ones blank — that
@@ -102,12 +105,13 @@ counted nowhere; on a well-formed fold this should not happen.
 `python -m ym_datalake.ml_york.evaluation evaluate …` prints one row per fold, then a footer:
 
 ```
-fold      n  miss        precision  one_minus_mape             mae            rmse            mape
---------------------------------------------------------------------------------------------------
-   1     11     0         0.727273        0.958000        3.500000        5.200000        0.042000
+fold      n  miss       precision  one_minus_mape             mae            rmse              r2            mape
+-----------------------------------------------------------------------------------------------------------------
+   1     11     0        0.727273        0.958000        3.500000        5.200000        0.912000        0.042000
    ...
---------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------
 precision  avg=0.731000  min=0.636364  max=0.900000  (tol=0.05)
+   mae avg=3.480000   rmse avg=5.150000   r2 avg=0.905000   mape avg=0.043000
 ```
 
 Reading the sample row:
@@ -117,11 +121,14 @@ Reading the sample row:
 - **`miss = 0`** — `n_missing`: how many of those `n` were left unanswered. Any non-zero value here
   is a direct drag on `precision` for that fold.
 - **`precision = 0.727273`** — 8 of 11 answers within ±5 %.
-- **`one_minus_mape … mape`** — the error block from the previous section, over the answered cells.
+- **`one_minus_mape … r2 … mape`** — the error block from the previous section, over the answered
+  cells (`r2` sits between `rmse` and `mape`).
 
 The **footer is the verdict**: `avg` is the mean `precision` **across folds** — the harness's
 single-number score for the predictor. `min`/`max` show the spread (a low `min` flags a fold the
-model handled poorly), and `tol` echoes the band those hit rates were computed at.
+model handled poorly), and `tol` echoes the band those hit rates were computed at. A **second footer
+line** reports the across-fold means of the error block — `mae`, `rmse`, `r2`, `mape` — so the
+average error travels next to the headline hit rate (means taken with `nan` folds ignored).
 
 ---
 
@@ -141,6 +148,9 @@ From `tests/unit/…/evaluation/test_scoring.py::test_jittered_answers_match_han
 - `rmse = sqrt((100 + 0 + 1) / 3) ≈ 5.8023` MT/day — above `mae`, pulled up by the 10 MT HSHFO miss.
 - `mape = (0.10 + 0.00 + 0.02) / 3 = 0.04` (4 %).
 - `one_minus_mape = 1 − 0.04 = 0.96`.
+- `r2 = 1 − 101 / 11666.67 ≈ 0.9913` — `ss_res = 10² + 0² + 1² = 101` against the spread of the
+  truths `[100, 200, 50]` (`ss_tot ≈ 11666.67`), so the predictions explain the variance almost
+  entirely.
 
 Because all three cells were answered, `n_missing = 0` and the error metrics span the same three
 cells as `precision`. Blank the LSMGO answer instead and `precision` would fall to `1/3` (the blank
