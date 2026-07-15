@@ -10,6 +10,7 @@ raw columns. Run from the repo root: ``uv run python dataset-submission/generate
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import shutil
 import tempfile
@@ -20,12 +21,12 @@ import pandas as pd
 
 from ym_datalake.ml_york.feature_engineering.build import build_features
 from ym_datalake.ml_york.feature_engineering.io import FUEL_COLS, ORIGINAL_COLUMNS
-from ym_datalake.ml_york.model.xgboost import predict_cells, train_model
-from ym_datalake.ml_york.model.xgboost.model import _is_true
+from ym_datalake.ml_york.model.common import _is_true, predict_cells
 
 HERE = Path(__file__).resolve().parent
 DATASET = HERE.parent / 'dataset'
 FUEL_TYPE = 'ME_FULLSPEED_CONSUMP_HSHFO'
+MODEL_CHOICES = ['xgboost', 'lightgbm', 'random_forest', 'extra_trees', 'hist_gbdt', 'elasticnet']
 
 
 def evaluate_against_truth(out: pd.DataFrame, truth_csv: Path, label: str) -> None:
@@ -69,7 +70,8 @@ def evaluate_against_truth(out: pd.DataFrame, truth_csv: Path, label: str) -> No
         )
 
 
-def main(data_dir: Path) -> int:
+def main(data_dir: Path, model_name: str = 'xgboost') -> int:
+    mod = importlib.import_module(f'ym_datalake.ml_york.model.{model_name}')
     train = pd.read_csv(data_dir / 'train.csv', dtype=str, encoding='utf-8-sig')
     test_submission = pd.read_csv(data_dir / 'test_submission.csv', dtype=str, encoding='utf-8-sig')
 
@@ -93,10 +95,10 @@ def main(data_dir: Path) -> int:
         combined_dedup = raw.drop_duplicates().reset_index(drop=True)
 
     n_predict = int(_is_true(df['is_predict']).sum())
-    print(f'is_predict rows: {n_predict}  (features: {len(features)})')
+    print(f'is_predict rows: {n_predict}  (features: {len(features)}, model: {model_name})')
 
     # 3. Train on labelled steady single-fuel rows (test rows have NaN target -> auto-excluded).
-    model = train_model(df, features)
+    model = mod.train_model(df, features)
     answer = predict_cells(model, df, features)  # one row per is_predict row, in df order
 
     # 4. Attach predictions to the row-aligned frame, then LEFT-merge onto the full 5,571 rows.
@@ -142,5 +144,11 @@ if __name__ == '__main__':
         default=HERE,
         help='folder holding train.csv / test.csv / test_submission.csv; submission.csv is written here',
     )
+    parser.add_argument(
+        '--model',
+        choices=MODEL_CHOICES,
+        default='xgboost',
+        help='model family to train (default: xgboost, reproduces the current submission)',
+    )
     args = parser.parse_args()
-    raise SystemExit(main(args.data_dir))
+    raise SystemExit(main(args.data_dir, args.model))
