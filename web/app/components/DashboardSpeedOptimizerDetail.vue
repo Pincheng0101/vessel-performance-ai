@@ -355,11 +355,6 @@ const fuelEmissionCurveOption = computed(() => {
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
-            <v-icon
-              icon="mdi-speedometer"
-              size="20"
-              class="text-medium-emphasis"
-            />
             <div class="text-body-2 font-weight-medium flex-grow-1">
               {{ summary }}
             </div>

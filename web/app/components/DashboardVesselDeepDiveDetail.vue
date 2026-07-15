@@ -1590,11 +1590,6 @@ watch(alertPageCount, (n) => {
         />
         <div class="diagnostic-panel mt-4">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
-            <v-icon
-              icon="mdi-filter-remove-outline"
-              size="20"
-              class="text-medium-emphasis"
-            />
             <div class="text-body-2 font-weight-medium flex-grow-1">
               {{ rejectionSummary }}
             </div>
@@ -1638,11 +1633,6 @@ watch(alertPageCount, (n) => {
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
-            <v-icon
-              icon="mdi-cash-multiple"
-              size="20"
-              class="text-medium-emphasis"
-            />
             <div class="text-body-2 font-weight-medium flex-grow-1">
               {{ costSummary }}
             </div>
@@ -1690,11 +1680,6 @@ watch(alertPageCount, (n) => {
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
-            <v-icon
-              icon="mdi-leaf"
-              size="20"
-              class="text-medium-emphasis"
-            />
             <div class="text-body-2 font-weight-medium flex-grow-1">
               {{ ciiTrendSummary }}
             </div>
@@ -1736,12 +1721,6 @@ watch(alertPageCount, (n) => {
           </div>
 
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
-            <v-icon
-              v-if="dominantDiagnostic"
-              :icon="dominantDiagnostic.icon"
-              size="20"
-              class="text-medium-emphasis"
-            />
             <div class="text-body-2 font-weight-medium flex-grow-1">
               {{ causeDiagnosticSummary }}
             </div>
@@ -1847,11 +1826,6 @@ watch(alertPageCount, (n) => {
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
-            <v-icon
-              icon="mdi-diving-scuba"
-              size="20"
-              class="text-medium-emphasis"
-            />
             <div class="text-body-2 font-weight-medium flex-grow-1">
               {{ uwiSummary }}
             </div>
@@ -1922,11 +1896,6 @@ watch(alertPageCount, (n) => {
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
-            <v-icon
-              icon="mdi-clipboard-check-outline"
-              size="20"
-              class="text-medium-emphasis"
-            />
             <div class="text-body-2 font-weight-medium flex-grow-1">
               {{ maintenanceSummary }}
             </div>
