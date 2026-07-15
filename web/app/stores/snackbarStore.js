@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { SnackbarConstant } from '~/constants';
+import * as SnackbarConstant from '~/constants/SnackbarConstant';
 
 /**
  * @import { SnackbarMessage } from '~/models/ui/SnackbarMessage.d'

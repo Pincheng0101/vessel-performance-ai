@@ -1,5 +1,5 @@
 <script setup>
-import { FormConstant } from '~/constants';
+import * as FormConstant from '~/constants/FormConstant';
 
 const props = defineProps({
   ariaLabel: {

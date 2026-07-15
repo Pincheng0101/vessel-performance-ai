@@ -1,5 +1,5 @@
 <script setup>
-import { StreamingConstant } from '~/constants';
+import * as StreamingConstant from '~/constants/StreamingConstant';
 import { ChatRoomMessage } from '~/models/ui/chatRoom';
 
 const props = defineProps({

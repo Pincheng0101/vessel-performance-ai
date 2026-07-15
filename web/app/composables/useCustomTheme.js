@@ -1,5 +1,5 @@
 import { useTheme } from 'vuetify';
-import { CookieConstant } from '~/constants';
+import * as CookieConstant from '~/constants/CookieConstant';
 
 const THEME_DARK = 'dark';
 const THEME_LIGHT = 'light';

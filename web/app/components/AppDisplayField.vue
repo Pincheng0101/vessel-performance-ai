@@ -1,5 +1,5 @@
 <script setup>
-import { StatusConstant } from '~/constants';
+import * as StatusConstant from '~/constants/StatusConstant';
 
 /**
  * @import { DisplayField } from '~/models/ui/DisplayField.d'

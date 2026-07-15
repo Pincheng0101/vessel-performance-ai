@@ -1,5 +1,6 @@
 <script setup>
-import { ChatConstant, LangForgeAssistantConstant } from '~/constants';
+import * as ChatConstant from '~/constants/ChatConstant';
+import * as LangForgeAssistantConstant from '~/constants/LangForgeAssistantConstant';
 
 const model = defineModel({
   type: Boolean,

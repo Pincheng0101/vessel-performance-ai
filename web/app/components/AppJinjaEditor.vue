@@ -1,7 +1,8 @@
 <script setup>
 import { StreamLanguage } from '@codemirror/language';
 import { jinja2 } from '@codemirror/legacy-modes/mode/jinja2';
-import { FileExtensionConstant, RegexConstant } from '~/constants';
+import * as FileExtensionConstant from '~/constants/FileExtensionConstant';
+import * as RegexConstant from '~/constants/RegexConstant';
 
 const props = defineProps({
   defaultValue: {

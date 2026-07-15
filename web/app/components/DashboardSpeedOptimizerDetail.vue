@@ -5,7 +5,8 @@
 // model recommends (recommended_speed_kn always sits exactly at the curve's lowest usd_per_nm
 // point). recommended_speed_kn / current_speed_kn / annual_distance_nm are repeated on all 24
 // rows of a ship — read them off the first row, never aggregate.
-import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
+import * as FleetChartConstant from '~/constants/FleetChartConstant';
+import * as FleetGlossaryConstant from '~/constants/FleetGlossaryConstant';
 
 const props = defineProps({
   vessel: {

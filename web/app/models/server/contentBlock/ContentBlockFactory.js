@@ -1,4 +1,4 @@
-import { ContentBlockConstant } from '~/constants';
+import * as ContentBlockConstant from '~/constants/ContentBlockConstant';
 import AttachmentContentBlock from './AttachmentContentBlock';
 import ContentBlock from './ContentBlock';
 import ImageContentBlock from './ImageContentBlock';

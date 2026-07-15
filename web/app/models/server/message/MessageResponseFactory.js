@@ -1,4 +1,4 @@
-import { LlmConstant } from '~/constants';
+import * as LlmConstant from '~/constants/LlmConstant';
 import AssistantMessageResponse from './AssistantMessageResponse';
 import MessageResponse from './MessageResponse';
 import UserMessageResponse from './UserMessageResponse';

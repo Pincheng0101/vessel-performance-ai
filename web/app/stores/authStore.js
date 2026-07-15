@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { CookieConstant } from '~/constants';
+import * as CookieConstant from '~/constants/CookieConstant';
 import { Token } from '~/models/cognito';
 
 export const useAuthStore = defineStore('auth', () => {

@@ -3,7 +3,8 @@
 // dedup'd upstream), across all vessels. Not vessel-scoped — mirrors DashboardFleetOverview /
 // DashboardMaintenancePlanner (KPI grid + AppTable, no vessel selector). Row click opens that
 // vessel's deep-dive, matching those two tabs' own navigation.
-import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
+import * as FleetChartConstant from '~/constants/FleetChartConstant';
+import * as FleetGlossaryConstant from '~/constants/FleetGlossaryConstant';
 
 const server = useServer();
 const route = useRoute();

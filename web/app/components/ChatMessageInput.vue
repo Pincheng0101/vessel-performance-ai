@@ -1,5 +1,5 @@
 <script setup>
-import { SnackbarConstant } from '~/constants';
+import * as SnackbarConstant from '~/constants/SnackbarConstant';
 import { TextContentBlock } from '~/models/server/contentBlock';
 
 const props = defineProps({

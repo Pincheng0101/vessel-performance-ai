@@ -1,4 +1,4 @@
-import { ContentBlockConstant } from '~/constants';
+import * as ContentBlockConstant from '~/constants/ContentBlockConstant';
 import ContentBlock from './ContentBlock';
 
 class TextContentBlock extends ContentBlock {

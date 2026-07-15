@@ -7,7 +7,8 @@
 // fact_performance_daily is the spine: one row per (ship, day) carrying the ISO 19030 speed loss,
 // the raw signals, the fouling clocks, the CII trajectory and the excess-cost split — so most of
 // this file reads from that single fetch.
-import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
+import * as FleetChartConstant from '~/constants/FleetChartConstant';
+import * as FleetGlossaryConstant from '~/constants/FleetGlossaryConstant';
 
 const props = defineProps({
   vessel: {

@@ -1,5 +1,5 @@
 <script setup>
-import { ChatConstant } from '~/constants';
+import * as ChatConstant from '~/constants/ChatConstant';
 import { TextContentBlock } from '~/models/server/contentBlock';
 import ChatRoomActionPromptCard from './ChatRoomActionPromptCard.vue';
 

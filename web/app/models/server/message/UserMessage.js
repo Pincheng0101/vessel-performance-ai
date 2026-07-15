@@ -1,4 +1,4 @@
-import { LlmConstant } from '~/constants';
+import * as LlmConstant from '~/constants/LlmConstant';
 import { ContentBlockFactory } from '~/models/server/contentBlock';
 import Message from './Message';
 

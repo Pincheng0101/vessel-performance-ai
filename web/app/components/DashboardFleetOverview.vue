@@ -1,7 +1,8 @@
 <script setup>
 // Fleet overview tab (all-fleet, no fleet filter): KPIs, per-vessel table, CII rating
 // distribution + speed-loss distribution. Self-contained; loads when its tab is opened.
-import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
+import * as FleetChartConstant from '~/constants/FleetChartConstant';
+import * as FleetGlossaryConstant from '~/constants/FleetGlossaryConstant';
 
 const server = useServer();
 const route = useRoute();

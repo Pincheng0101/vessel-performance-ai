@@ -1,5 +1,5 @@
 <script setup>
-import { StreamingConstant } from '~/constants';
+import * as StreamingConstant from '~/constants/StreamingConstant';
 import { ChatRoomMessage } from '~/models/ui/chatRoom';
 import chatUtils from '~/utils/chatUtils';
 import markdownScriptPreviewUtils, { RESIZE_MESSAGE_TYPE, SCRIPT_PREVIEW_IFRAME_CLASS } from '~/utils/markdownScriptPreviewUtils';
@@ -47,7 +47,6 @@ const handleSubmitAskUserQuestionAnswers = (items) => {
   props.onAskUserQuestionAnswersSubmit({ messageId: props.message.id, items });
 };
 
-const { workspaceFileDownloadSlotInjector } = useAgentWorkspace();
 const { markdownScriptPreviewInjector, toMarkdownWithScriptPreviewPlaceholders } = useMarkdownScriptPreview();
 
 const toAssistantMarkdownText = (text) => {
@@ -59,15 +58,7 @@ const shouldHideStreamingScriptPreview = (text) => {
 };
 
 const assistantMarkdownSlotInjector = (html) => {
-  const scriptPreviewResult = markdownScriptPreviewInjector(html);
-  const workspaceResult = workspaceFileDownloadSlotInjector(scriptPreviewResult.html);
-  return {
-    html: workspaceResult.html,
-    slots: [
-      ...scriptPreviewResult.slots,
-      ...workspaceResult.slots,
-    ],
-  };
+  return markdownScriptPreviewInjector(html);
 };
 
 const SCRIPT_PREVIEW_MIN_HEIGHT = 180;

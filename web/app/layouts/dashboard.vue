@@ -1,19 +1,21 @@
 <!-- Public demo dashboard shell: own minimal app bar (brand + chat button + theme toggle) over
-     a full-width canvas. LayoutHeaderDefault is mounted hidden ONLY so the app's single
-     theme/locale init (which lives in its setup) runs — no langforge nav / assistant fab.
-     DashboardChatButton is this dashboard's own (unrelated) chat launcher, not the langforge
-     one — it lives here (not a tab component) so it stays visible across every tab. -->
+     a full-width canvas. Theme/locale init used to live in LayoutHeader's setup (mounted in
+     every layout); with the app stripped to this single layout, it runs here directly.
+     DashboardChatButton is this dashboard's own chat launcher — it lives here (not a tab
+     component) so it stays visible across every tab. -->
 <script setup>
 const isCopilotOpen = ref(false);
+
+const { initTheme } = useCustomTheme();
+const { initLocale } = useCustomLocale();
+initTheme();
+onMounted(() => {
+  initLocale();
+});
 </script>
 
 <template>
   <v-app>
-    <LayoutHeaderDefault
-      :show-drawer="false"
-      temporary
-      hide-app-bar
-    />
     <v-app-bar
       :elevation="0"
       color="background"

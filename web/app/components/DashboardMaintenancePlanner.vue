@@ -11,7 +11,8 @@
 // trip. Do NOT sum window_cost_usd the same way: it repeats the whole window's cost on every row of
 // that window, so dedupe on window_id first.
 // Non-economic actions (e.g. engine_inspection) still carry no saving at all.
-import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
+import * as FleetChartConstant from '~/constants/FleetChartConstant';
+import * as FleetGlossaryConstant from '~/constants/FleetGlossaryConstant';
 
 const server = useServer();
 const route = useRoute();

@@ -1,4 +1,4 @@
-import { ChatConstant } from '~/constants';
+import * as ChatConstant from '~/constants/ChatConstant';
 import { ContentBlockResponseFactory } from '~/models/server/contentBlock';
 import { AssistantChatRoomMessage, UserChatRoomMessage } from '~/models/ui/chatRoom';
 
