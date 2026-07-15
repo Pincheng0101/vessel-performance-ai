@@ -4,13 +4,17 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  size: {
+    type: String,
+    default: 'small',
+  },
 });
 </script>
 
 <template>
   <div class="d-flex align-center">
     <v-icon
-      size="small"
+      :size="props.size"
       icon="mdi-information-outline"
       class="cursor-pointer text-medium-emphasis"
     />

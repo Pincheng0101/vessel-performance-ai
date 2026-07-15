@@ -96,8 +96,24 @@ const kpis = computed(() => [
 ]);
 
 // --- Alerts by metric, stacked by severity ---
+// Cross-tab trend-chart date-range filter (see DashboardExecutive.vue) — the control itself
+// lives in the dashboard page's header. This is the only chart on this tab with a genuine
+// date dimension to narrow (an episode's opened/last-seen span); the KPI tiles and the table
+// below stay on the fleet's full, unfiltered history.
+const chartRangeStore = useChartRangeStore();
+const chartRangeLabel = computed(
+  () => `${fleetUtils.dayDate(chartRangeStore.startDay)} – ${fleetUtils.dayDate(chartRangeStore.endDay)}`,
+);
+// An episode counts if its open→last-seen span overlaps the selected window at all — an alert
+// opened before the window but still ongoing (or closed inside it) still belongs in the count.
+const rangeFilteredRows = computed(() => rows.value.filter(r => (
+  r.openedDay != null
+  && r.openedDay <= chartRangeStore.endDay
+  && (r.lastSeenDay == null || r.lastSeenDay >= chartRangeStore.startDay)
+)));
 const causeSeverityOption = computed(() => {
-  const metrics = METRIC_ORDER.filter(m => rows.value.some(r => r.metric === m));
+  const filtered = rangeFilteredRows.value;
+  const metrics = METRIC_ORDER.filter(m => filtered.some(r => r.metric === m));
   if (!metrics.length) return {};
   return {
     grid: { left: 48, right: 16, top: 38, bottom: 50 },
@@ -114,7 +130,7 @@ const causeSeverityOption = computed(() => {
       type: 'bar',
       stack: 'severity',
       itemStyle: { color: severityColor(sev) },
-      data: metrics.map(m => rows.value.filter(r => r.metric === m && r.severity === sev).length),
+      data: metrics.map(m => filtered.filter(r => r.metric === m && r.severity === sev).length),
     })),
   };
 });
@@ -254,6 +270,18 @@ const openVesselDetail = async (item) => {
       :title="FleetGlossaryConstant.Title.alertsBySeverity"
       :tooltip="T.alertsBySeverity"
     >
+      <template
+        v-if="!chartRangeStore.isFull"
+        #actions
+      >
+        <v-chip
+          size="x-small"
+          variant="tonal"
+          prepend-icon="mdi-filter-outline"
+        >
+          {{ chartRangeLabel }}
+        </v-chip>
+      </template>
       <UsageResultCard>
         <AppEChart
           :option="causeSeverityOption"

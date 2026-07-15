@@ -69,61 +69,11 @@ const monthly = computed(() => {
 });
 
 // --- Trend-chart date range (CII rating trend + Fleet speed-loss trend only) ---
-// Deliberately not wired into the KPI tiles above: those must keep reading the fleet's true
-// current state regardless of what historical period a viewer is browsing here. It carries its
-// own visible label (not the "最新一日" header above), so the two never read as the same date.
-const dataRangeBounds = computed(() => {
-  const rows = overviewRows.value ?? [];
-  return rows.length
-    ? { startDay: rows[0].noon_utc, endDay: rows.at(-1).noon_utc }
-    : { startDay: 0, endDay: 0 };
-});
-// A calendar click hands back a local-midnight JS Date; reproject its Y/M/D onto the UTC
-// day-index grid every other date in the lake lives on — the same technique fleetUtils.todayDay()
-// already uses for "the reader's day."
-const toDayIndex = date => fleetUtils.msToDay(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-const chartRange = reactive({
-  startDay: dataRangeBounds.value.startDay,
-  endDay: dataRangeBounds.value.endDay,
-});
-const chartRangeBounds = computed(() => ({
-  min: new Date(fleetUtils.dayToMs(dataRangeBounds.value.startDay)),
-  max: new Date(fleetUtils.dayToMs(dataRangeBounds.value.endDay)),
-}));
-// v-date-input's own model, bound directly (not derived) — picking a range is two clicks, and
-// after the first one the component emits a single-element array while it waits for the second.
-// A computed getter here used to re-synthesize a full [start, end] pair from the *old* end date
-// on that first click and hand it straight back, which reads to the component as "the range is
-// already complete," so the second click started a new range instead of finishing this one —
-// that's the bug where the end date could never be changed. Only commit to `chartRange` (and
-// the charts it feeds) once a real two-date range comes back out.
-const pickerModel = ref([
-  new Date(fleetUtils.dayToMs(chartRange.startDay)),
-  new Date(fleetUtils.dayToMs(chartRange.endDay)),
-]);
-watch(pickerModel, (val) => {
-  // `multiple="range"` doesn't emit a [start, end] pair — it expands to EVERY date the range
-  // spans (all 182 Date objects for a 6-month pick), always in ascending order. The boundaries
-  // are val[0] and val.at(-1); reading val[1] (as this used to) grabbed the *second day of the
-  // range* as the end, which is why picking Jan–Jun rendered as a 1-day window.
-  if (!Array.isArray(val) || val.length < 2) return;
-  const start = val[0];
-  const end = val.at(-1);
-  if (!start || !end) return;
-  chartRange.startDay = toDayIndex(start);
-  chartRange.endDay = toDayIndex(end);
-});
-const isChartRangeFull = computed(
-  () => chartRange.startDay === dataRangeBounds.value.startDay && chartRange.endDay === dataRangeBounds.value.endDay,
-);
-const resetChartRange = () => {
-  chartRange.startDay = dataRangeBounds.value.startDay;
-  chartRange.endDay = dataRangeBounds.value.endDay;
-  pickerModel.value = [
-    new Date(fleetUtils.dayToMs(chartRange.startDay)),
-    new Date(fleetUtils.dayToMs(chartRange.endDay)),
-  ];
-};
+// Shared across every tab via chartRangeStore (the control itself lives in the dashboard page's
+// header, next to "資料期間") — deliberately not wired into the KPI tiles above, which must keep
+// reading the fleet's true current state regardless of what historical period a viewer is
+// browsing here (see the "即時狀態" tooltip below).
+const chartRangeStore = useChartRangeStore();
 // A month counts as "in range" if it overlaps the selected window at all — the range picker is
 // day-precision, the CII trend is month-precision, so a month is either fully in or fully out.
 const monthStartDay = (monthStr) => {
@@ -135,8 +85,13 @@ const monthEndDay = (monthStr) => {
   return fleetUtils.msToDay(Date.UTC(y, m, 0));
 };
 const fleetMonthlyFiltered = computed(() => fleetMonthly.value.filter(
-  r => monthEndDay(r.month) >= chartRange.startDay && monthStartDay(r.month) <= chartRange.endDay,
+  r => monthEndDay(r.month) >= chartRangeStore.startDay && monthStartDay(r.month) <= chartRangeStore.endDay,
 ));
+// Shown as a chip on the two charts this store actually filters — visible at each chart
+// regardless of where the shared control itself has scrolled off to.
+const chartRangeLabel = computed(
+  () => `${fleetUtils.dayDate(chartRangeStore.startDay)} – ${fleetUtils.dayDate(chartRangeStore.endDay)}`,
+);
 
 const mean = (rows, key) => {
   const xs = rows.map(r => r[key]).filter(v => v != null);
@@ -354,7 +309,7 @@ const speedLossTrendOption = computed(() => ({
   // the data lake's actual start) rather than auto-fitting to the first non-null point —
   // otherwise the chart would silently start mid-window and invite "where did 2021-2022 go?"
   // instead of showing the answer.
-  xAxis: { type: 'time', min: fleetUtils.dayToMs(chartRange.startDay), max: fleetUtils.dayToMs(chartRange.endDay) },
+  xAxis: { type: 'time', min: fleetUtils.dayToMs(chartRangeStore.startDay), max: fleetUtils.dayToMs(chartRangeStore.endDay) },
   yAxis: [
     {
       type: 'value',
@@ -489,8 +444,14 @@ const savingsByShipOption = computed(() => {
 
 <template>
   <div class="d-flex flex-column ga-6">
-    <div class="text-caption text-medium-emphasis mb-n4">
-      最新一日 · {{ latestDate }}
+    <div class="d-flex align-center ga-1 mb-n4">
+      <span class="text-caption text-medium-emphasis">
+        即時狀態 · {{ latestDate }}
+      </span>
+      <AppInputTooltip
+        size="x-small"
+        text="此列為船隊目前的真實狀態，不受頁首「顯示期間」篩選影響。"
+      />
     </div>
     <div class="kpi-grid">
       <DashboardKpiCard
@@ -522,39 +483,23 @@ const savingsByShipOption = computed(() => {
       </DashboardKpiCard>
     </div>
 
-    <div class="d-flex align-center ga-1">
-      <v-date-input
-        v-model="pickerModel"
-        multiple="range"
-        label="顯示期間"
-        density="compact"
-        variant="outlined"
-        prepend-icon=""
-        hide-details
-        :min="chartRangeBounds.min"
-        :max="chartRangeBounds.max"
-        class="chart-range-input"
-      />
-      <AppInputTooltip
-        size="x-small"
-        text="僅套用於下方「CII rating trend」與「Fleet speed-loss trend」，不影響上方即時狀態指標"
-      />
-      <AppIconButton
-        v-if="!isChartRangeFull"
-        icon="mdi-restore"
-        tooltip="重設為完整期間"
-        size="small"
-        icon-size="small"
-        variant="text"
-        :on-click="resetChartRange"
-      />
-    </div>
-
     <div class="exec-grid">
       <UsageResultCardFrame
         :title="FleetGlossaryConstant.Title.ciiTrend"
         :tooltip="FleetGlossaryConstant.Term.cii"
       >
+        <template
+          v-if="!chartRangeStore.isFull"
+          #actions
+        >
+          <v-chip
+            size="x-small"
+            variant="tonal"
+            prepend-icon="mdi-filter-outline"
+          >
+            {{ chartRangeLabel }}
+          </v-chip>
+        </template>
         <UsageResultCard>
           <AppEChart
             :option="ciiTrendOption"
@@ -590,6 +535,18 @@ const savingsByShipOption = computed(() => {
       :title="FleetGlossaryConstant.Title.fleetSpeedLossTrend"
       :tooltip="FleetGlossaryConstant.Term.speedLoss"
     >
+      <template
+        v-if="!chartRangeStore.isFull"
+        #actions
+      >
+        <v-chip
+          size="x-small"
+          variant="tonal"
+          prepend-icon="mdi-filter-outline"
+        >
+          {{ chartRangeLabel }}
+        </v-chip>
+      </template>
       <UsageResultCard>
         <AppEChart
           :option="speedLossTrendOption"
@@ -619,9 +576,5 @@ const savingsByShipOption = computed(() => {
   @media (min-width: 1280px) {
     grid-template-columns: 1fr 1fr;
   }
-}
-
-.chart-range-input {
-  max-width: 280px;
 }
 </style>

@@ -29,6 +29,18 @@ const shipId = defineModel('shipId', {
 const server = useServer();
 const { themeColors } = useCustomTheme();
 const T = FleetGlossaryConstant.Term;
+// Cross-tab trend-chart date-range filter (see DashboardExecutive.vue) — the control itself
+// lives in the dashboard page's header. Wired into every chart on this page whose x-axis is a
+// genuine calendar date over this ship's historical daily rows: speed-loss trend, excess fuel
+// cost, CII AER/IMO trend, cause diagnostics, and the anomaly episode timeline. Never wired into
+// the header's Speed loss / CII tiles or the "近 30 天平均" / "最新一日" summaries beside each
+// chart — those must keep reading the ship's true current state.
+const chartRangeStore = useChartRangeStore();
+// Shown as a chip on every chart the store actually filters — visible at each chart regardless
+// of where the shared control itself (in the dashboard page header) has scrolled off to.
+const chartRangeLabel = computed(
+  () => `${fleetUtils.dayDate(chartRangeStore.startDay)} – ${fleetUtils.dayDate(chartRangeStore.endDay)}`,
+);
 // Two different lines: the ISO 19030 maintenance trigger the ETL fires MT rows on (8%), and
 // this dashboard's own cleaning-action policy (10%). See FleetChartConstant.
 const ISO_TRIGGER = FleetChartConstant.SpeedLossIsoTrigger;
@@ -340,7 +352,9 @@ const speedLossTrendOption = computed(() => {
         return '';
       },
     },
-    xAxis: { type: 'time' },
+    // Follows the shared trend-chart date range; the fit/prediction lines above are still
+    // computed over the ship's full history regardless — only the view narrows.
+    xAxis: { type: 'time', min: fleetUtils.dayToMs(chartRangeStore.startDay), max: fleetUtils.dayToMs(chartRangeStore.endDay) },
     yAxis: { type: 'value', name: 'speed loss %', nameLocation: 'middle', nameGap: 36, min: yMin, max: yMax, axisLabel: { formatter: '{value}%' } },
     series: [
       {
@@ -541,7 +555,9 @@ const excessCostOption = computed(() => {
         return `${fleetUtils.formatDate(ts) ?? ''}<br/>${body}<br/>合計: ${fmtUsd(total)}/day`;
       },
     },
-    xAxis: { type: 'time' },
+    // Follows the shared trend-chart date range; the smoothed daily-rate series is still
+    // computed over the ship's full history — only the view narrows.
+    xAxis: { type: 'time', min: fleetUtils.dayToMs(chartRangeStore.startDay), max: fleetUtils.dayToMs(chartRangeStore.endDay) },
     yAxis: { type: 'value', name: 'USD / 日', nameLocation: 'middle', nameGap: 46, axisLabel: { formatter: fmtUsdCompact } },
     series: series.map(p => ({
       name: p.title, type: 'line', stack: 'cost', showSymbol: false, symbol: 'none',
@@ -667,7 +683,9 @@ const ciiTrendOption = computed(() => {
         return `${fleetUtils.formatDate(ts)}<br/>${body}`;
       },
     },
-    xAxis: { type: 'time' },
+    // Follows the shared trend-chart date range; the rating markers/y-axis bounds are still
+    // computed over the ship's full history — only the view narrows.
+    xAxis: { type: 'time', min: fleetUtils.dayToMs(chartRangeStore.startDay), max: fleetUtils.dayToMs(chartRangeStore.endDay) },
     yAxis: {
       type: 'value',
       name: 'gCO₂ / dwt·nm',
@@ -985,16 +1003,16 @@ const anomalyTimelineOption = computed(() => {
     ...SEVERITY_ORDER.filter(s => episodes.some(d => d.severity === s)),
     ...[...new Set(episodes.map(d => d.severity))].filter(s => !SEVERITY_ORDER.includes(s)),
   ];
-  const minDay = Math.min(...episodes.map(d => d.start));
-  const maxDay = Math.max(...episodes.map(d => d.end));
-  const xPad = Math.max(14, (maxDay - minDay) * 0.02);
   const c = themeColors.value;
-  const xMin = fleetUtils.dayToMs(minDay - xPad);
-  const xMax = fleetUtils.dayToMs(maxDay + xPad);
   const laneBandColors = [c.backgroundScale1, c.backgroundScale2];
+  // Follows the shared trend-chart date range — replaces the standalone dataZoom slider this
+  // chart used to have; one shared control for the whole page instead of a second, local one.
+  // The lane-band series below spans the same [xMin, xMax] so its background fills the axis.
+  const xMin = fleetUtils.dayToMs(chartRangeStore.startDay);
+  const xMax = fleetUtils.dayToMs(chartRangeStore.endDay);
 
   return {
-    grid: { left: 104, right: 20, top: 46, bottom: 64 },
+    grid: { left: 104, right: 20, top: 46, bottom: 34 },
     legend: {
       top: 10, left: 'center', itemGap: 14, itemWidth: 18, itemHeight: 9,
       textStyle: { fontSize: 11 },
@@ -1011,29 +1029,6 @@ const anomalyTimelineOption = computed(() => {
         return `${metricTitle(d.metric)} · ${SEVERITY_LABEL[d.severity] || d.severity}<br/>${span}${peak}<br/>${d.message_zh || ''}`;
       },
     },
-    dataZoom: [
-      {
-        type: 'slider',
-        xAxisIndex: 0,
-        filterMode: 'weakFilter',
-        bottom: 8,
-        height: 18,
-        brushSelect: false,
-        showDetail: false,
-        borderColor: c.backgroundScale3,
-        backgroundColor: c.backgroundScale1,
-        fillerColor: c.backgroundScale3,
-        handleSize: '80%',
-        handleStyle: {
-          color: c.backgroundScale2,
-          borderColor: c.backgroundScale4,
-          borderWidth: 1,
-        },
-        moveHandleStyle: {
-          color: c.backgroundScale4,
-        },
-      },
-    ],
     xAxis: { type: 'time', min: xMin, max: xMax },
     yAxis: {
       type: 'category', data: laneLabels, boundaryGap: true, inverse: true,
@@ -1379,8 +1374,10 @@ const causeDiagnosticsOption = computed(() => {
 
   if (!series.some(s => s.data.length)) return {};
 
-  const xMin = fleetUtils.dayToMs(diagnosticRows.value.at(0)?.day);
-  const xMax = fleetUtils.dayToMs(diagnosticRows.value.at(-1)?.day);
+  // Follows the shared trend-chart date range; each signal's baseline/extent is still computed
+  // over the ship's full history — only the view narrows.
+  const xMin = fleetUtils.dayToMs(chartRangeStore.startDay);
+  const xMax = fleetUtils.dayToMs(chartRangeStore.endDay);
 
   return {
     grid: DIAGNOSTIC_GRIDS.map(g => ({ left: 86, right: 24, top: g.top, height: g.height })),
@@ -1478,41 +1475,52 @@ watch(alertPageCount, (n) => {
         </div>
       </div>
 
-      <div class="stat-tiles">
-        <DashboardKpiCard
-          label="Speed loss"
-          :tooltip="T.speedLoss"
-          :value="slTrailing == null ? '–' : `${slTrailing.toFixed(1)}%`"
-          :value-color="slColor"
-        >
-          <div class="d-flex align-center ga-2 mt-1">
-            <v-chip
-              size="x-small"
-              variant="tonal"
-              :color="deltaColor(slDeltaSign)"
-              class="px-2"
-            >
-              <span :class="deltaTextClass(slDeltaSign)">
-                <template v-if="deltaArrow(slDeltaSign)">{{ deltaArrow(slDeltaSign) }} </template>{{ fmtMag(slDelta) }}
-              </span>
-            </v-chip>
-            <span class="text-caption text-medium-emphasis">vs prev 30d</span>
-          </div>
-        </DashboardKpiCard>
-        <!-- cii_rating_imo, NOT cii_rating_aer: the tooltip promises the regulatory grade
-             (scored against the year's reduced required line) and every other CII surface in
-             the dashboard uses it. aer scores against the un-reduced 2019 base line, which
-             flatters the ship — S1 on 2026-06-30 is an 'A' by aer and a 'B' by imo. -->
-        <DashboardKpiCard
-          label="CII"
-          :tooltip="T.cii"
-          :value="latestReported?.cii_rating_imo || '–'"
-          :value-color="latestReported?.cii_rating_imo ? ciiColor(latestReported.cii_rating_imo) : ''"
-        >
-          <div class="text-caption text-medium-emphasis mt-1">
-            {{ `AER ${fmtNum(latestReported?.cii_aer, 2)}` }}
-          </div>
-        </DashboardKpiCard>
+      <div>
+        <div class="d-flex align-center ga-1 mb-1">
+          <span class="text-caption text-medium-emphasis">
+            即時狀態 · {{ fleetUtils.dayDate(shipLastDay) }}
+          </span>
+          <AppInputTooltip
+            size="x-small"
+            text="此列為本船目前的真實狀態，不受頁首「顯示期間」篩選影響。"
+          />
+        </div>
+        <div class="stat-tiles">
+          <DashboardKpiCard
+            label="Speed loss"
+            :tooltip="T.speedLoss"
+            :value="slTrailing == null ? '–' : `${slTrailing.toFixed(1)}%`"
+            :value-color="slColor"
+          >
+            <div class="d-flex align-center ga-2 mt-1">
+              <v-chip
+                size="x-small"
+                variant="tonal"
+                :color="deltaColor(slDeltaSign)"
+                class="px-2"
+              >
+                <span :class="deltaTextClass(slDeltaSign)">
+                  <template v-if="deltaArrow(slDeltaSign)">{{ deltaArrow(slDeltaSign) }} </template>{{ fmtMag(slDelta) }}
+                </span>
+              </v-chip>
+              <span class="text-caption text-medium-emphasis">vs prev 30d</span>
+            </div>
+          </DashboardKpiCard>
+          <!-- cii_rating_imo, NOT cii_rating_aer: the tooltip promises the regulatory grade
+               (scored against the year's reduced required line) and every other CII surface in
+               the dashboard uses it. aer scores against the un-reduced 2019 base line, which
+               flatters the ship — S1 on 2026-06-30 is an 'A' by aer and a 'B' by imo. -->
+          <DashboardKpiCard
+            label="CII"
+            :tooltip="T.cii"
+            :value="latestReported?.cii_rating_imo || '–'"
+            :value-color="latestReported?.cii_rating_imo ? ciiColor(latestReported.cii_rating_imo) : ''"
+          >
+            <div class="text-caption text-medium-emphasis mt-1">
+              {{ `AER ${fmtNum(latestReported?.cii_aer, 2)}` }}
+            </div>
+          </DashboardKpiCard>
+        </div>
       </div>
     </div>
 
@@ -1583,6 +1591,18 @@ watch(alertPageCount, (n) => {
       :title="FleetGlossaryConstant.Title.vesselSpeedLossTrend"
       :tooltip="T.vesselSpeedLossTrend"
     >
+      <template
+        v-if="!chartRangeStore.isFull"
+        #actions
+      >
+        <v-chip
+          size="x-small"
+          variant="tonal"
+          prepend-icon="mdi-filter-outline"
+        >
+          {{ chartRangeLabel }}
+        </v-chip>
+      </template>
       <UsageResultCard>
         <AppEChart
           :option="speedLossTrendOption"
@@ -1630,12 +1650,28 @@ watch(alertPageCount, (n) => {
       :title="FleetGlossaryConstant.Title.excessCost"
       :tooltip="T.excessCost"
     >
+      <template
+        v-if="!chartRangeStore.isFull"
+        #actions
+      >
+        <v-chip
+          size="x-small"
+          variant="tonal"
+          prepend-icon="mdi-filter-outline"
+        >
+          {{ chartRangeLabel }}
+        </v-chip>
+      </template>
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
             <div class="text-body-2 font-weight-medium flex-grow-1">
               {{ costSummary }}
             </div>
+            <AppInputTooltip
+              size="x-small"
+              text="此為近 30 天平均，取自本船最新回報，不受頁首「顯示期間」篩選影響；下方圖表才會依篩選範圍顯示。"
+            />
           </div>
 
           <div class="cost-grid">
@@ -1677,12 +1713,28 @@ watch(alertPageCount, (n) => {
       :title="FleetGlossaryConstant.Title.vesselCiiTrend"
       :tooltip="T.ciiTrend"
     >
+      <template
+        v-if="!chartRangeStore.isFull"
+        #actions
+      >
+        <v-chip
+          size="x-small"
+          variant="tonal"
+          prepend-icon="mdi-filter-outline"
+        >
+          {{ chartRangeLabel }}
+        </v-chip>
+      </template>
       <UsageResultCard>
         <div class="diagnostic-panel">
           <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
             <div class="text-body-2 font-weight-medium flex-grow-1">
               {{ ciiTrendSummary }}
             </div>
+            <AppInputTooltip
+              size="x-small"
+              text="此為本船最新一日的真實狀態，不受頁首「顯示期間」篩選影響；下方圖表才會依篩選範圍顯示。"
+            />
           </div>
 
           <AppEChart
@@ -1698,6 +1750,18 @@ watch(alertPageCount, (n) => {
       :title="FleetGlossaryConstant.Title.causeDiagnostics"
       :tooltip="T.causeDiagnostics"
     >
+      <template
+        v-if="!chartRangeStore.isFull"
+        #actions
+      >
+        <v-chip
+          size="x-small"
+          variant="tonal"
+          prepend-icon="mdi-filter-outline"
+        >
+          {{ chartRangeLabel }}
+        </v-chip>
+      </template>
       <UsageResultCard>
         <div class="diagnostic-panel">
           <!-- ISO 19030 measures the COMBINED hull+propeller change and provides no method to
@@ -1732,6 +1796,10 @@ watch(alertPageCount, (n) => {
             >
               {{ dominantDiagnostic.status }}
             </v-chip>
+            <AppInputTooltip
+              size="x-small"
+              text="以上診斷卡片讀本船目前的真實狀態，不受頁首「顯示期間」篩選影響；下方共用時間軸的圖表才會依篩選範圍顯示。"
+            />
           </div>
 
           <div class="diagnostic-grid">
@@ -1809,6 +1877,18 @@ watch(alertPageCount, (n) => {
         :title="FleetGlossaryConstant.Title.anomalyTimeline"
         :tooltip="T.anomalyTimeline"
       >
+        <template
+          v-if="!chartRangeStore.isFull"
+          #actions
+        >
+          <v-chip
+            size="x-small"
+            variant="tonal"
+            prepend-icon="mdi-filter-outline"
+          >
+            {{ chartRangeLabel }}
+          </v-chip>
+        </template>
         <UsageResultCard>
           <AppEChart
             :option="anomalyTimelineOption"
