@@ -1,4 +1,4 @@
-import { toCamelCase, toKebabCase, toPascalCase, toSnakeCase, toTitleCase } from '@kklab/stryle';
+import { toCamelCase, toKebabCase, toSnakeCase, toTitleCase } from '@kklab/stryle';
 import { v4 } from 'uuid';
 import { capitalize } from 'vue';
 
@@ -51,14 +51,6 @@ class strUtils {
    * @returns {string} The camelCase version of the input string.
    */
   static toCamelCase = toCamelCase;
-
-  /**
-   * Converts a string to PascalCase.
-   *
-   * @param {string} str - The string to be converted to PascalCase.
-   * @returns {string} The PascalCase version of the input string.
-   */
-  static toPascalCase = toPascalCase;
 
   /**
    * Converts a given string to snake_case.
