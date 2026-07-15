@@ -9,6 +9,7 @@ raw columns. Run from the repo root: ``uv run python dataset-submission/generate
 
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import tempfile
@@ -18,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 from ym_datalake.ml_york.feature_engineering.build import build_features
-from ym_datalake.ml_york.feature_engineering.io import ORIGINAL_COLUMNS
+from ym_datalake.ml_york.feature_engineering.io import FUEL_COLS, ORIGINAL_COLUMNS
 from ym_datalake.ml_york.model.xgboost import predict_cells, train_model
 from ym_datalake.ml_york.model.xgboost.model import _is_true
 
@@ -27,9 +28,50 @@ DATASET = HERE.parent / 'dataset'
 FUEL_TYPE = 'ME_FULLSPEED_CONSUMP_HSHFO'
 
 
-def main() -> int:
-    train = pd.read_csv(HERE / 'train.csv', dtype=str, encoding='utf-8-sig')
-    test_submission = pd.read_csv(HERE / 'test_submission.csv', dtype=str, encoding='utf-8-sig')
+def evaluate_against_truth(out: pd.DataFrame, truth_csv: Path, label: str) -> None:
+    """Post-hoc MAE/RMSE of ``predicted_value`` vs the real per-day ME full-speed fuel mass in ``truth_csv``.
+
+    ``truth_csv`` is a raw 40-column file (``dataset/vt_fd.csv`` or the held-out ``test.csv``); it is
+    filtered to the submission's ships and never used to predict. ``(ship, day)`` is not unique, so
+    near-dup days are averaged before the join. Reported both over the README steady-state single-fuel
+    predict-cell population (the fair read) and over all matched rows.
+    """
+    vt = pd.read_csv(truth_csv, dtype=str, encoding='utf-8-sig')
+    vt = vt[vt['De-identification Name'].isin(out['ship_id'].unique())]
+    fuel_num = vt[FUEL_COLS].apply(pd.to_numeric, errors='coerce')
+    truth = pd.DataFrame(
+        {
+            'ship_id': vt['De-identification Name'].astype(str),
+            'day': pd.to_numeric(vt['NOON_UTC']).astype(int),
+            'truth_mass': fuel_num.sum(axis=1, min_count=1),
+            'hours': pd.to_numeric(vt['HOURS_FULL_SPEED'], errors='coerce'),
+            'wind': pd.to_numeric(vt['WIND_SCALE'], errors='coerce'),
+            'n_fuel': (fuel_num > 0).sum(axis=1),
+        }
+    )
+    per_day = truth.groupby(['ship_id', 'day'], as_index=False).agg(
+        truth_mass=('truth_mass', 'mean'),
+        hours=('hours', 'mean'),
+        wind=('wind', 'mean'),
+        n_fuel=('n_fuel', 'max'),
+    )
+
+    m = out.assign(day=out['day'].astype(int)).merge(per_day, on=['ship_id', 'day'], how='left')
+    pred, t = m['predicted_value'].to_numpy(), m['truth_mass'].to_numpy()
+    valid = np.isfinite(t) & (t > 0)
+    steady = valid & (m['hours'] >= 22.0).to_numpy() & (m['wind'] <= 4.0).to_numpy() & (m['n_fuel'] == 1).to_numpy()
+
+    print(f'submission vs {label} (MT/day):')
+    for name, mask in [('steady single-fuel predict cells', steady), ('all matched rows (truth>0)', valid)]:
+        err = pred[mask] - t[mask]
+        print(
+            f'  {name:>32}: n={int(mask.sum()):>4}  MAE={np.mean(np.abs(err)):.4f}  RMSE={np.sqrt(np.mean(err**2)):.4f}'
+        )
+
+
+def main(data_dir: Path) -> int:
+    train = pd.read_csv(data_dir / 'train.csv', dtype=str, encoding='utf-8-sig')
+    test_submission = pd.read_csv(data_dir / 'test_submission.csv', dtype=str, encoding='utf-8-sig')
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_data = Path(tmp) / 'data'
@@ -79,14 +121,26 @@ def main() -> int:
             'predicted_value': merged['predicted_value'],
         }
     )
-    out_path = HERE / 'submission.csv'
+    out_path = data_dir / 'submission.csv'
     out.to_csv(out_path, index=False)
     print(
         f'wrote {len(out)} rows -> {out_path}  ships={sorted(out["ship_id"].unique())}  '
         f'value range [{out["predicted_value"].min():.3f}, {out["predicted_value"].max():.3f}]'
     )
+
+    evaluate_against_truth(out, DATASET / 'vt_fd.csv', 'real dataset/vt_fd.csv')
+    evaluate_against_truth(out, data_dir / 'test.csv', f'test set ({data_dir}/test.csv)')
     return 0
 
 
 if __name__ == '__main__':
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        'data_dir',
+        nargs='?',
+        type=Path,
+        default=HERE,
+        help='folder holding train.csv / test.csv / test_submission.csv; submission.csv is written here',
+    )
+    args = parser.parse_args()
+    raise SystemExit(main(args.data_dir))
