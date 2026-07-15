@@ -33,6 +33,10 @@ const T = FleetGlossaryConstant.Term;
 // this dashboard's own cleaning-action policy (10%). See FleetChartConstant.
 const ISO_TRIGGER = FleetChartConstant.SpeedLossIsoTrigger;
 const THRESHOLD = FleetChartConstant.SpeedLossThreshold;
+// A categorical hue, not a semantic one — the Theil-Sen fit and its extrapolation are a
+// derived read on the data, not a risk-level rule like the ISO trigger, so they used to share
+// warning's amber with it, which read as if the fit line WAS the trigger rule.
+const TREND_COLOR = FleetChartConstant.CategoricalPalette[0];
 
 // fact_performance_daily.reject_reason → the gate, in words. Unknown reasons fall through as
 // themselves rather than being swallowed: a new gate in the ETL should show up, not vanish.
@@ -257,10 +261,10 @@ const speedLossTrendOption = computed(() => {
     const x1 = seg.at(-1).day;
     fitSeries.push({
       name: '趨勢', type: 'line', showSymbol: false, symbol: 'none', silent: true,
-      lineStyle: { color: FleetChartConstant.SemanticRamp.warning, width: 1.8 },
+      lineStyle: { color: TREND_COLOR, width: 1.8 },
       // Legend icon uses the series color (itemStyle), not lineStyle — set it so the icon
-      // matches the amber line instead of falling back to the auto palette.
-      itemStyle: { color: FleetChartConstant.SemanticRamp.warning },
+      // matches the line instead of falling back to the auto palette.
+      itemStyle: { color: TREND_COLOR },
       data: [[fleetUtils.dayToMs(x0), yAt(x0)], [fleetUtils.dayToMs(x1), yAt(x1)]],
     });
     if (triggerDay != null && r.degradation_rate != null) {
@@ -270,8 +274,8 @@ const speedLossTrendOption = computed(() => {
       const yEnd = y1 + r.degradation_rate * (triggerDay - x1);
       fitSeries.push({
         name: '預測', type: 'line', showSymbol: false, symbol: 'none', silent: true,
-        lineStyle: { color: FleetChartConstant.SemanticRamp.warning, width: 1.8, type: [5, 4] },
-        itemStyle: { color: FleetChartConstant.SemanticRamp.warning },
+        lineStyle: { color: TREND_COLOR, width: 1.8, type: [5, 4] },
+        itemStyle: { color: TREND_COLOR },
         data: [[fleetUtils.dayToMs(x1), y1], [fleetUtils.dayToMs(triggerDay), yEnd]],
       });
     }
@@ -293,13 +297,13 @@ const speedLossTrendOption = computed(() => {
     const label = MAINT_ZH[e.event_type] || e.event_type;
     maintMarks.push({
       value: [fleetUtils.dayToMs(day), yMax],
-      tip: `${label} · ${fleetUtils.dayLabel(day)}`,
+      tip: `${label} · ${fleetUtils.dayDate(day)}`,
     });
   });
   const triggerMarks = [];
   if (triggerDay != null) {
     guides.push({ xAxis: fleetUtils.dayToMs(triggerDay), lineStyle: { color: 'rgba(190, 64, 55, 0.35)', type: 'dashed', width: 1 } }); // SemanticRamp.critical at 35% opacity
-    triggerMarks.push({ value: [fleetUtils.dayToMs(triggerDay), yMax], tip: `預測觸發 · ${fleetUtils.dayLabel(triggerDay)}` });
+    triggerMarks.push({ value: [fleetUtils.dayToMs(triggerDay), yMax], tip: `預測觸發 · ${fleetUtils.dayDate(triggerDay)}` });
   }
   // Downward-triangle path so the legend icon matches the ▼ drawn on the chart (built-in
   // 'triangle' points up and legend ignores symbolRotate).
@@ -324,7 +328,7 @@ const speedLossTrendOption = computed(() => {
       formatter: (p) => {
         if (p.data?.tip) return p.data.tip;
         if (Array.isArray(p.value)) {
-          const label = fleetUtils.dayLabel(fleetUtils.msToDay(p.value[0]));
+          const label = fleetUtils.dayDate(fleetUtils.msToDay(p.value[0]));
           return `${label} · 速度損失 ${p.value[1] == null ? '–' : `${(+p.value[1]).toFixed(1)}%`}`;
         }
         return '';
@@ -349,10 +353,10 @@ const speedLossTrendOption = computed(() => {
             // trigger the lake itself fires on (indicators.MT_TRIGGER_PCT); the 10% is this
             // dashboard's own cleaning-action policy. Only the 10% used to be drawn, labeled
             // the bare word "threshold" — which read as though ISO had set it.
-            // Hangs BELOW its line ('insideStartBottom'), unlike the 10% rule above it: only
+            // Hangs BELOW its line ('insideEndBottom'), unlike the 10% rule above it: only
             // 2 percentage points separate the two, so two top-anchored labels overlap.
-            { yAxis: ISO_TRIGGER, lineStyle: { color: FleetChartConstant.SemanticRamp.warning, type: 'dashed', width: 1 }, label: { show: true, formatter: `ISO 19030 維修觸發 ${ISO_TRIGGER}%`, position: 'insideStartBottom', fontSize: 10, color: FleetChartConstant.SemanticRamp.warning } },
-            { yAxis: THRESHOLD, lineStyle: { color: FleetChartConstant.SemanticRamp.critical, type: 'dashed', width: 1 }, label: { show: true, formatter: `清潔行動線 ${THRESHOLD}%`, position: 'insideStartTop', fontSize: 10, color: FleetChartConstant.SemanticRamp.critical } },
+            { yAxis: ISO_TRIGGER, lineStyle: { color: FleetChartConstant.SemanticRamp.warning, type: 'dashed', width: 1 }, label: { show: true, formatter: `ISO 19030 維修觸發 ${ISO_TRIGGER}%`, position: 'insideEndBottom', fontSize: 10, color: FleetChartConstant.SemanticRamp.warning } },
+            { yAxis: THRESHOLD, lineStyle: { color: FleetChartConstant.SemanticRamp.critical, type: 'dashed', width: 1 }, label: { show: true, formatter: `清潔行動線 ${THRESHOLD}%`, position: 'insideEndTop', fontSize: 10, color: FleetChartConstant.SemanticRamp.critical } },
             ...guides,
           ],
         },
@@ -374,13 +378,17 @@ const speedLossTrendOption = computed(() => {
         // symbolSize 5, not 3: at 3px the dots are effectively impossible to hover, which would
         // make the rejection reason below unreachable — a drill-down nobody can open is not one.
         name: '排除資料', type: 'scatter', symbolSize: 5,
-        itemStyle: { color: '#cbd5e1' },
+        // Theme-derived, not a fixed hex: a light-mode gray reads as a bright, attention-
+        // grabbing dot once alpha-free-drawn over the dark theme's card background.
+        // backgroundScale3 is Vuetify's own light/dark pair for exactly this "structural, not
+        // data" decoration (see AppEChart's axis/gridlines), so it stays equally muted in both.
+        itemStyle: { color: themeColors.value.backgroundScale3 },
         emphasis: { scale: 2 },
         // Clamped to the axis so an impossible reading stays visible at the edge instead of
         // stretching the scale; the tooltip always reports the value the row actually carries.
         data: drawn.filter(d => !d.valid).map(d => ({
           value: [fleetUtils.dayToMs(d.day), clamp(d.plotSl, yMin, yMax)],
-          tip: `${fleetUtils.dayLabel(d.day)} · 速度損失 ${d.sl.toFixed(1)}%<br/><b>未通過 ISO 19030 篩選</b><br/>原因：${rejectReasonLabel(d.reason)}`,
+          tip: `${fleetUtils.dayDate(d.day)} · 速度損失 ${d.sl.toFixed(1)}%<br/><b>未通過 ISO 19030 篩選</b><br/>原因：${rejectReasonLabel(d.reason)}`,
         })),
       },
       ...fitSeries,
@@ -389,6 +397,43 @@ const speedLossTrendOption = computed(() => {
       topMark('預測觸發', triggerMarks, FleetChartConstant.SemanticRamp.critical),
     ],
   };
+});
+
+// --- Excluded-data breakdown (ISO gate rejection reasons) ---
+// The trend chart's grey scatter only answers "why was THIS one day excluded" one point at a
+// time. This rolls every excluded day up by reject_reason, so which gates actually drop this
+// ship's data — and how often — is visible without hovering the whole cloud. Counted over every
+// daily row (not just the ones the chart plots, which drop rows with no speed_loss_pct at all),
+// so the total matches the header's own "ISO data coverage" denominator.
+const rejectionBreakdown = computed(() => {
+  const rows = (daily.value ?? []).filter(d => !d.valid_flag && d.reject_reason != null);
+  const total = rows.length;
+  if (!total) return [];
+  const counts = new Map();
+  rows.forEach((d) => {
+    counts.set(d.reject_reason, (counts.get(d.reject_reason) ?? 0) + 1);
+  });
+  return [...counts.entries()]
+    .map(([reason, count]) => ({
+      reason,
+      label: rejectReasonLabel(reason),
+      count,
+      pct: (count / total) * 100,
+    }))
+    .sort((a, b) => b.count - a.count);
+});
+const rejectionHeaders = [
+  { title: '排除原因', key: 'label', minWidth: 220 },
+  { title: '天數', key: 'count', minWidth: 80, sortable: true },
+  { title: '佔比', key: 'pct', minWidth: 90, sortable: true },
+];
+const rejectionExpanded = ref(false);
+const rejectionSummary = computed(() => {
+  const rows = rejectionBreakdown.value;
+  if (!rows.length) return '目前沒有被排除的資料。';
+  const total = rows.reduce((sum, r) => sum + r.count, 0);
+  const top = rows[0];
+  return `共 ${total} 天未通過 ISO 19030 篩選 —— 最大原因為「${top.label}」（${top.count} 天，${top.pct.toFixed(0)}%）。`;
 });
 
 // --- Excess fuel cost composition (fouling / weather / operational) ---
@@ -1535,6 +1580,45 @@ watch(alertPageCount, (n) => {
           :option="speedLossTrendOption"
           :height="320"
         />
+        <div class="diagnostic-panel mt-4">
+          <div class="diagnostic-lead pa-3 d-flex flex-wrap align-center ga-3">
+            <v-icon
+              icon="mdi-filter-remove-outline"
+              size="20"
+              class="text-medium-emphasis"
+            />
+            <div class="text-body-2 font-weight-medium flex-grow-1">
+              {{ rejectionSummary }}
+            </div>
+            <v-btn
+              v-if="rejectionBreakdown.length"
+              variant="text"
+              size="small"
+              class="flex-shrink-0"
+              :append-icon="rejectionExpanded ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+              @click="rejectionExpanded = !rejectionExpanded"
+            >
+              {{ rejectionExpanded ? '收合' : `依原因分類（${rejectionBreakdown.length}）` }}
+            </v-btn>
+          </div>
+
+          <AppTable
+            v-if="rejectionBreakdown.length && rejectionExpanded"
+            :headers="rejectionHeaders"
+            :items="rejectionBreakdown"
+            item-value="reason"
+            :server-side="false"
+            :enable-search="false"
+            :show-pagination="false"
+            bordered
+            density="compact"
+            hide-details
+          >
+            <template #item.pct="{ item }">
+              {{ item.pct.toFixed(1) }}%
+            </template>
+          </AppTable>
+        </div>
       </UsageResultCard>
     </UsageResultCardFrame>
 
