@@ -159,7 +159,7 @@ const ciiTrendOption = computed(() => ({
   grid: { left: 36, right: 16, top: 40, bottom: 28 },
   tooltip: { trigger: 'axis' },
   xAxis: { type: 'category', data: fleetMonthly.value.map(r => r.month), axisLabel: { interval: 11 } },
-  yAxis: { type: 'value', minInterval: 1, name: 'vessels' },
+  yAxis: { type: 'value', minInterval: 1, name: 'ships' },
   series: CII_RATINGS.map(r => ({
     name: r,
     type: 'line',
@@ -235,10 +235,10 @@ const speedLossTrendOption = computed(() => ({
         // two — keep its line separate rather than forcing it through fmtPct.
         if (p.seriesName === COVERAGE_NAME) {
           const marker = `<span style="display:inline-block;margin-right:4px;border-radius:10px;width:10px;height:10px;background-color:${COVERAGE_COLOR.value};"></span>`;
-          return `${marker}${p.seriesName} <b>${Math.round(p.value[1])}</b> / ${roster.length} vessels`;
+          return `${marker}${p.seriesName} <b>${Math.round(p.value[1])}</b> / ${roster.length} ships`;
         }
         const ships = p.data?.ships;
-        const shipLabel = ships == null ? '' : ` · ${ships} ${ships === 1 ? 'vessel' : 'vessels'}`;
+        const shipLabel = ships == null ? '' : ` · ${ships} ${ships === 1 ? 'ship' : 'ships'}`;
         // p.marker ignores itemStyle.opacity, so the Daily dot would render fully saturated —
         // out of step with its 25%-opacity line on the chart. Bake the opacity into the color instead.
         const markerColor = p.seriesName === RAW_NAME ? `${SPEED_LOSS_COLOR}40` : SPEED_LOSS_COLOR;
@@ -271,7 +271,7 @@ const speedLossTrendOption = computed(() => ({
       position: 'right',
       min: 0,
       max: roster.length,
-      name: 'vessels',
+      name: 'ships',
       nameLocation: 'middle',
       nameGap: 36,
       nameRotate: -90,
@@ -443,7 +443,7 @@ const savingsByShipOption = computed(() => {
             <div class="d-flex align-baseline ga-2">
               <span class="text-h4 font-weight-bold">{{ fmtUsdCompact(potential) }}</span>
               <span class="d-flex align-center ga-1 text-body-2 text-medium-emphasis">
-                across {{ savingsByShip.length }} of {{ roster.length }} vessels
+                across {{ savingsByShip.length }} of {{ roster.length }} ships
                 <AppInputTooltip :text="FleetGlossaryConstant.Term.savingsByShip" />
               </span>
             </div>

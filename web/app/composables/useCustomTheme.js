@@ -7,7 +7,6 @@ const THEME_LIGHT = 'light';
 export function useCustomTheme() {
   const localTheme = useCookie(CookieConstant.Base.THEME, { secure: true, sameSite: true, maxAge: 86400 * 365 });
   const theme = useTheme();
-  const currentTheme = computed(() => theme.global.name.value);
   const isDarkTheme = computed(() => theme.global.name.value === THEME_DARK);
   const themeColors = computed(() => theme.global.current.value.colors);
 
@@ -30,11 +29,8 @@ export function useCustomTheme() {
   };
 
   return {
-    currentTheme,
     initTheme,
     isDarkTheme,
-    localTheme,
-    setTheme,
     themeColors,
     toggleTheme,
   };

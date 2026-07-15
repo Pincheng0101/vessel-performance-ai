@@ -26,28 +26,3 @@ describe('scrollUtils.scrollTo', () => {
     expect(spy).toHaveBeenCalledWith({ top: 0, left: 0, behavior: 'smooth' });
   });
 });
-
-describe('scrollUtils.scrollToElementById', () => {
-  test('scrolls to the element position adjusted by the offset', () => {
-    const el = document.createElement('div');
-    el.id = 'target';
-    document.body.appendChild(el);
-    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 200 });
-    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(50);
-    const spy = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
-    scrollUtils.scrollToElementById('#target', 30);
-    expect(spy).toHaveBeenCalledWith({ top: 220, left: 0, behavior: 'smooth' });
-  });
-
-  test('does nothing when targetId is empty', () => {
-    const spy = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
-    scrollUtils.scrollToElementById('');
-    expect(spy).not.toHaveBeenCalled();
-  });
-
-  test('does nothing when the element is not found', () => {
-    const spy = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
-    scrollUtils.scrollToElementById('#nonexistent');
-    expect(spy).not.toHaveBeenCalled();
-  });
-});

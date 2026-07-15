@@ -71,76 +71,6 @@ class strUtils {
   static toKebabCase = toKebabCase;
 
   /**
-   * Escapes control characters in a given string, converting them into their escaped forms.
-   * For example, carriage return (`\r`) and line feed (`\n`) are transformed into `\\r` and `\\n`.
-   *
-   * @param {string} str - The string to be escaped.
-   * @returns {string} The escaped string.
-   *
-   * @example
-   * const escapedStr = escapeControlChars('Hello\r\nWorld');
-   * console.log(escapedStr); // Output: Hello\\r\\nWorld
-   */
-  static escapeControlChars(str) {
-    return JSON.stringify(str).slice(1, -1);
-  }
-
-  /**
-   * Unescapes a given string, restoring escaped control characters to their original form.
-   * For example, `\\r\\n` is converted back to `\r\n`.
-   * If parsing fails, the original string is returned.
-   *
-   * @param {string} str - The string to unescape.
-   * @returns {string} The unescaped string or the original string if parsing fails.
-   *
-   * @example
-   * const unescapedStr = unescapeControlChars('Hello\\r\\nWorld');
-   * console.log(unescapedStr); // Output: Hello\r\nWorld
-   */
-  static unescapeControlChars(str) {
-    try {
-      return JSON.parse(`"${str}"`);
-    } catch {
-      return str;
-    }
-  }
-
-  /**
-   * Generates a cryptographic nonce by creating a random value using the Web Crypto API,
-   * hashing it with SHA-256, and returning the result as a hexadecimal string.
-   *
-   * @returns {Promise<string>} A promise that resolves to a hexadecimal string representing the nonce.
-   */
-  static async generateNonce() {
-    const hash = await strUtils.toSha256(crypto.getRandomValues(new Uint32Array(4)).toString());
-    const hashArray = Array.from(new Uint8Array(hash));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  };
-
-  /**
-   * Converts a given string to a Base64 URL encoded string.
-   *
-   * @param {string} str - The input string to be converted.
-   * @returns {string} The Base64 URL encoded string.
-   */
-  static toBase64Url(str) {
-    return btoa(String.fromCharCode.apply(null, new Uint8Array(str)))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-  };
-
-  /**
-   * Generates a SHA-256 hash of the given string.
-   *
-   * @param {string} str - The input string to be hashed.
-   * @returns {Promise<ArrayBuffer>} A promise that resolves to an ArrayBuffer containing the SHA-256 hash.
-   */
-  static toSha256(str) {
-    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  };
-
-  /**
    * Checks if a string starts with the specified prefix.
    *
    * @param {string} str - The string to check.
@@ -149,17 +79,6 @@ class strUtils {
    */
   static isStartsWith(str, prefix) {
     return String(str).startsWith(prefix);
-  }
-
-  /**
-   * Checks if a string ends with the specified suffix.
-   *
-   * @param {string} str - The string to check.
-   * @param {string} suffix - The suffix to look for.
-   * @returns {boolean} Returns true if the string ends with the suffix, otherwise false.
-   */
-  static isEndsWith(str, suffix) {
-    return String(str).endsWith(suffix);
   }
 
   /**
@@ -211,73 +130,6 @@ class strUtils {
   }
 
   /**
-   * Generates a hash value for a given string.
-   *
-   * @param {string} str - The string to hash.
-   * @param {number} seed - An optional seed value to start the hash calculation.
-   * @returns {number} The resulting hash value.
-   */
-  static hash(str, seed = 0) {
-    return String(str).split('').reduce((acc, char) => char.charCodeAt(0) + ((acc << 5) - acc), seed) >>> 0;
-  }
-
-  /**
-   * Escapes special characters in a string to safely use in RegExp.
-   *
-   * @param {string} str - The string to escape.
-   * @returns {string} The escaped string.
-   */
-  static escapeRegExp(str) {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  /**
-   * Counts how many times a substring appears in a given string.
-   *
-   * @param {string} str - The text to search within.
-   * @param {string} subStr - The substring to count.
-   * @returns {number} The number of occurrences.
-   */
-  static countSubstring(str, subStr) {
-    if (!subStr) return 0;
-    return str.split(subStr).length - 1;
-  }
-
-  /**
-   * Truncates a string to a specified maximum length, optionally appending a suffix.
-   *
-   * @param {string} str - The string to truncate.
-   * @param {number} maxLength - The maximum length of the resulting string (including suffix).
-   * @param {string} suffix - The suffix to append to truncated strings (default: '...').
-   * @returns {string} The truncated string with suffix, or the original string if within maxLength.
-   */
-  static truncate(str, maxLength, suffix = '...') {
-    const text = String(str);
-    if (text.length <= maxLength) {
-      return text;
-    }
-    const truncateLength = Math.max(0, maxLength - suffix.length);
-    return text.slice(0, truncateLength) + suffix;
-  }
-
-  /**
-   * Checks if the given string consists only of unsigned digits (0-9).
-   *
-   * @param {string} str - The string to validate.
-   * @returns {boolean} Returns true if the string contains only digits, false otherwise.
-   */
-  static isUnsignedDigits(str) {
-    return /^[0-9]+$/.test(str);
-  }
-
-  /**
-   * Checks if the given string is a numeric value, including integers and decimals.
-   */
-  static isNumeric(str) {
-    return /^-?\d+(\.\d+)?$/.test(String(str).trim());
-  }
-
-  /**
    * Checks if a string contains common markdown structural syntax (code fence,
    * heading, table row, bold, bullet/numbered list). Used as a heuristic to
    * decide whether streamed content should be treated as a formatted answer.
@@ -293,37 +145,6 @@ class strUtils {
       || /\*\*[^*\n]+\*\*/.test(str)
       || /(?:^|\n)\s*[-*+]\s+\S/.test(str)
       || /(?:^|\n)\s*\d+\.\s+\S/.test(str);
-  }
-
-  /**
-   * Generates a password that meets AWS Cognito password policy requirements.
-   *
-   * Rules enforced:
-   * - Minimum length: 8 characters
-   * - Must contain at least one uppercase letter
-   * - Must contain at least one lowercase letter
-   * - Must contain at least one number
-   * - Must contain at least one special character (from the allowed set)
-   *
-   * @param {number} length - The total password length (minimum of 8).
-   * @returns {string} A random password that satisfies Cognito requirements.
-  */
-  static generatePassword(length = 12) {
-    const passwordLength = Math.max(8, Number(length) || 12);
-    const uppercaseChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const lowercaseChars = 'abcdefghijklmnopqrstuvwxyz';
-    const digitChars = '0123456789';
-    const symbolChars = `^$*.[]{}()?-"!@#%&/\\,><':;|_~\`+=`;
-    const fullCharPool = uppercaseChars + lowercaseChars + digitChars + symbolChars;
-    const pickChar = str => str[randomUtils.secureInt(str.length)];
-    const passwordChars = [
-      pickChar(uppercaseChars),
-      pickChar(lowercaseChars),
-      pickChar(digitChars),
-      pickChar(symbolChars),
-      ...Array.from({ length: passwordLength - 4 }, () => pickChar(fullCharPool)),
-    ];
-    return arrUtils.shuffle(passwordChars).join('');
   }
 }
 

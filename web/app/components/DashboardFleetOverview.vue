@@ -229,7 +229,7 @@ const ciiCountOption = computed(() => {
       },
     },
     xAxis: { type: 'category', data: CII_RATINGS, name: 'CII rating', nameLocation: 'middle', nameGap: 26 },
-    yAxis: { type: 'value', minInterval: 1, name: 'vessels', nameGap: 18 },
+    yAxis: { type: 'value', minInterval: 1, name: 'ships', nameGap: 18 },
     series: [{
       type: 'bar',
       barWidth: '55%',
@@ -273,7 +273,7 @@ const speedLossHistOption = computed(() => {
       },
     },
     xAxis: { type: 'category', data: bins.map(b => b.label), name: 'speed loss', nameLocation: 'middle', nameGap: 26 },
-    yAxis: { type: 'value', minInterval: 1, name: 'vessels', nameGap: 18 },
+    yAxis: { type: 'value', minInterval: 1, name: 'ships', nameGap: 18 },
     series: [{
       type: 'bar',
       barWidth: '55%',

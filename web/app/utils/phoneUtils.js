@@ -4,7 +4,11 @@ import { findPhoneNumbersInText } from 'libphonenumber-js';
 // libphonenumber's VALID leniency, so they need to be filtered out explicitly. Matched as a
 // substring (not anchored) because libphonenumber sometimes pulls leading punctuation like
 // `(` or `[` into the match — e.g. `(2025.09.23,` yields the slice `(2025.09.23`.
-const ISO_DATE_LIKE = /\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/;
+// The second alternative catches year/month ranges like `2023/03–06`: a 19xx/20xx year, a
+// month, then anything but another digit — the lookahead keeps landlines such as
+// `02-2023-4567` (where `2023-45` is followed by more digits) matchable. The third catches
+// year-to-year ranges like `2023 – 2026`, whose digits parse as a TW landline.
+const ISO_DATE_LIKE = /\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|(?:19|20)\d{2}[-/.]\d{1,2}(?!\d)|(?:19|20)\d{2}\s*[-–~～]\s*(?:19|20)\d{2}/;
 
 class phoneUtils {
   static DEFAULT_COUNTRY = 'TW';

@@ -28,9 +28,6 @@ export default defineNuxtConfig({
     '~/assets/markdown.scss',
     'katex/dist/katex.min.css',
   ],
-  ignore: [
-    (process.env.NODE_ENV === 'development' || process.env.AWS_ACCOUNT_ENV === 'dev') ? '' : 'playground',
-  ],
   hooks: {
     // POC: ship only the datalake dashboard. Drop every other page from the
     // router (cuts build ~3x) and redirect the root to /dashboard.
@@ -101,10 +98,6 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       appVersion: process.env.APP_VERSION,
-      appLogoLightUrl: process.env.APP_LOGO_LIGHT_URL,
-      appLogoDarkUrl: process.env.APP_LOGO_DARK_URL,
-      serverApiUrl: process.env.SERVER_API_URL,
-      serverWsApiUrl: process.env.SERVER_API_WS_URL,
       agentcoreRuntimeArn: process.env.AGENTCORE_RUNTIME_ARN,
       agentcoreRegion: process.env.AGENTCORE_REGION || 'us-west-2',
       agentcoreTokenEndpoint: process.env.AGENTCORE_TOKEN_ENDPOINT,
@@ -112,11 +105,7 @@ export default defineNuxtConfig({
       agentcoreClientSecret: process.env.AGENTCORE_CLIENT_SECRET,
       agentcoreTokenScope: process.env.AGENTCORE_TOKEN_SCOPE || 'genbi/invoke',
       awsAccountEnv: process.env.AWS_ACCOUNT_ENV,
-      awsCognitoApiUrl: process.env.AWS_COGNITO_API_URL,
-      awsCognitoClientId: process.env.AWS_COGNITO_CLIENT_ID,
       rollbarClientToken: process.env.ROLLBAR_CLIENT_TOKEN,
-      isFirstPartyEnv: ['dev', 'platform'].includes(String(process.env.AWS_ACCOUNT_ENV)),
-      appManagementConsoleGroups: process.env.APP_MANAGEMENT_CONSOLE_GROUPS,
     },
   },
 });

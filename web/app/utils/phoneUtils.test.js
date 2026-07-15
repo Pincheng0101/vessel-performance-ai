@@ -32,8 +32,19 @@ describe('phoneUtils.findPhoneNumbers', () => {
     '【2025.09.23】',
     '2025.09.23.',
     '日期 2025.09.23 發布',
+    '成長期 2023/03–06 之間',
+    '2023/03-06 區間',
+    '高峰落在 2026/02',
+    '2023 – 2026 年間',
+    '2023-2026 全期間',
+    '2023 ~ 2026',
   ])('filters out ISO-date-like substrings that libphonenumber misclassifies as TW landlines: %j', (text) => {
     expect(phoneUtils.findPhoneNumbers(text)).toEqual([]);
+  });
+
+  test('still detects a TW landline whose digits contain a year-like run', () => {
+    const [match] = phoneUtils.findPhoneNumbers('公司電話 02-2023-4567');
+    expect(match.e164).toBe('+886220234567');
   });
 
   test('ignores arbitrary numeric strings that are not phone numbers', () => {
