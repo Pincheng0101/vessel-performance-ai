@@ -4,6 +4,7 @@ plan.md
 .claude
 tmp
 data
+etl/
 
 # Python
 __pycache__/
