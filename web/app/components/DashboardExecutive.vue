@@ -86,9 +86,19 @@ const deltaTextClass = m => (deltaTone(m) ? `text-${deltaTone(m)}` : 'text-mediu
 // Sparklines share the muted speed-loss color, matching the fleet speed-loss trend line.
 const SPEED_LOSS_COLOR = FleetChartConstant.SpeedLossColor;
 // `latest` overrides the tile's headline where the last daily row is not the fleet's current
-// state — the excess-cost sum is folded from each ship's own latest report instead.
+// state — the excess-cost sum is folded from each ship's own latest report instead. Speed loss
+// has the same problem for a different reason: a single day's fleet mean only pools whichever
+// handful of ships cleared the ISO gate that day (as few as 5 of 15), so the headline uses the
+// 30-day mean already computed for the delta chip, matching the glossary term and the Fleet
+// Overview tab's KPI instead of the raw last row.
 const METRICS = [
-  { key: 'avg_speed_loss_pct', label: 'Avg speed loss', fmt: fmtPct, tooltip: FleetGlossaryConstant.Term.avgSpeedLoss },
+  {
+    key: 'avg_speed_loss_pct',
+    label: 'Avg speed loss',
+    fmt: fmtPct,
+    latest: cur => cur,
+    tooltip: FleetGlossaryConstant.Term.avgSpeedLoss,
+  },
   {
     key: 'excess_fleet_usd',
     label: 'Excess fuel cost',
@@ -116,7 +126,7 @@ const buildTile = (dailyRows, sparkRows, m) => {
   const deltaSign = delta == null ? null : (m.fmt(Math.abs(delta)) === m.fmt(0) ? 0 : delta);
   return {
     ...m,
-    latest: m.latest ? m.latest() : (vals.length ? vals[vals.length - 1] : null),
+    latest: m.latest ? m.latest(cur) : (vals.length ? vals[vals.length - 1] : null),
     delta,
     deltaSign,
     sparkOption: {
@@ -176,7 +186,7 @@ const speedLossRolling = computed(
 );
 
 const speedLossTrendOption = computed(() => ({
-  legend: { top: 0, right: 8, data: [ROLLING_NAME, RAW_NAME] },
+  legend: { top: 0, left: 'center', data: [ROLLING_NAME, RAW_NAME] },
   grid: {
     left: 44, right: 16, top: 32, bottom: 28,
   },
@@ -188,7 +198,11 @@ const speedLossTrendOption = computed(() => ({
       const lines = params.map((p) => {
         const ships = p.data?.ships;
         const shipLabel = ships == null ? '' : ` · ${ships} ${ships === 1 ? 'ship' : 'ships'}`;
-        return `${p.marker}${p.seriesName} <b>${fmtPct(p.value[1])}</b>${shipLabel}`;
+        // p.marker ignores itemStyle.opacity, so the Daily dot would render fully saturated —
+        // out of step with its 25%-opacity line on the chart. Bake the opacity into the color instead.
+        const markerColor = p.seriesName === RAW_NAME ? `${SPEED_LOSS_COLOR}40` : SPEED_LOSS_COLOR;
+        const marker = `<span style="display:inline-block;margin-right:4px;border-radius:10px;width:10px;height:10px;background-color:${markerColor};"></span>`;
+        return `${marker}${p.seriesName} <b>${fmtPct(p.value[1])}</b>${shipLabel}`;
       });
       return [fleetUtils.dayLabel(fleetUtils.msToDay(params[0]?.axisValue)), ...lines].join('<br/>');
     },
