@@ -358,8 +358,8 @@ const speedLossHistOption = computed(() => {
               <span>{{ item.nextDate }}</span>
               <span
                 v-if="item.nextIn != null"
-                class="text-medium-emphasis ml-1"
-              >({{ fmtDueIn(item.nextIn) }})</span>
+                class="text-caption text-medium-emphasis ml-1 due-in"
+              >{{ fmtDueIn(item.nextIn) }}</span>
               <span
                 v-if="item.serviceType"
                 class="d-inline-block"
@@ -436,6 +436,12 @@ const speedLossHistOption = computed(() => {
   @media (min-width: 1280px) {
     grid-template-columns: 1fr 1fr;
   }
+}
+
+.due-in {
+  display: inline-block;
+  vertical-align: bottom;
+  margin-bottom: 2px;
 }
 
 </style>
