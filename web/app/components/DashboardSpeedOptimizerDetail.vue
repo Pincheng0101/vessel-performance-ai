@@ -146,17 +146,25 @@ const scheduleNm = computed(() => valueAt('usd_per_nm', scheduleSpeed.value));
 // distance is also shown — it's a different number from "本船年省" above (which uses the annual
 // distance, not this voyage's), so it's not redundant: it's the theoretical upper bound against
 // which the schedule-constrained figure can fall short. Both floor at 0.
-const savingsVoyage = computed(() => {
+//
+// Split out the per-nm rate each total is built from: it's the fixed ingredient that explains why
+// the economic figure never moves when only `days` changes (schedule speed isn't in its formula),
+// while the schedule figure does — and it's the same $/nm already shown on the speed tiles above.
+const savingsPerNmSchedule = computed(() => {
   const s = stats.value;
   const schedNm = scheduleNm.value;
-  if (!s || schedNm == null) return null;
-  return Math.max(0, s.curNm - schedNm) * scheduleInput.distanceNm;
+  return !s || schedNm == null ? null : Math.max(0, s.curNm - schedNm);
 });
-const savingsVoyageEconomic = computed(() => {
+const savingsPerNmEconomic = computed(() => {
   const s = stats.value;
-  if (!s) return null;
-  return Math.max(0, s.curNm - s.recNm) * scheduleInput.distanceNm;
+  return s ? Math.max(0, s.curNm - s.recNm) : null;
 });
+const savingsVoyage = computed(() => (
+  savingsPerNmSchedule.value == null ? null : savingsPerNmSchedule.value * scheduleInput.distanceNm
+));
+const savingsVoyageEconomic = computed(() => (
+  savingsPerNmEconomic.value == null ? null : savingsPerNmEconomic.value * scheduleInput.distanceNm
+));
 const summary = computed(() => {
   const s = stats.value;
   if (!s) return '目前沒有足夠的航速優化資料。';
@@ -469,14 +477,14 @@ const fuelEmissionCurveOption = computed(() => {
                 {{ fmtUsd(savingsVoyage) }}
               </div>
               <div class="text-caption text-medium-emphasis mt-1">
-                較目前降速至排程航速 · {{ scheduleInput.distanceNm.toLocaleString() }} nm
+                較目前降速至排程航速 · 每海里省 {{ fmtUsdPerNm(savingsPerNmSchedule) }} · {{ scheduleInput.distanceNm.toLocaleString() }} nm
               </div>
               <div class="mt-2">
                 <span
                   class="text-h6 font-weight-bold"
                   :style="{ color: FleetChartConstant.SemanticRamp.good }"
                 >{{ fmtUsd(savingsVoyageEconomic) }}</span>
-                <span class="text-caption text-medium-emphasis"> 若改採經濟航速可省（同樣此航程距離）</span>
+                <span class="text-caption text-medium-emphasis"> 若改採經濟航速可省 · 每海里省 {{ fmtUsdPerNm(savingsPerNmEconomic) }}（同樣此航程距離）</span>
               </div>
             </div>
           </div>
