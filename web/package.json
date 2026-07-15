@@ -47,7 +47,6 @@
     "fflate": "^0.8.2",
     "highlight.js": "^11.11.1",
     "html2pdf.js": "^0.14.0",
-    "jsonpath-plus": "^10.3.0",
     "jwt-decode": "^4.0.0",
     "libphonenumber-js": "^1.13.1",
     "marked-highlight": "^2.2.1",

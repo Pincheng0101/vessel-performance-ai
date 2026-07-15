@@ -1,6 +1,7 @@
 <script setup>
 import * as ChatConstant from '~/constants/ChatConstant';
-import * as LangForgeAssistantConstant from '~/constants/LangForgeAssistantConstant';
+
+const PANEL_WIDTH = 400;
 
 const model = defineModel({
   type: Boolean,
@@ -63,7 +64,7 @@ onMounted(() => {
     fill-body
     expanded-full-height
     gradient-border
-    :width="LangForgeAssistantConstant.PANEL_WIDTH"
+    :width="PANEL_WIDTH"
     @close="handleClose"
   >
     <template #header-actions>
