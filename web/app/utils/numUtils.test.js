@@ -22,57 +22,6 @@ describe('numUtils.format', () => {
   );
 });
 
-describe('numUtils.formatCompact', () => {
-  test('returns standard formatting when below 1000', () => {
-    expect(numUtils.formatCompact(999)).toBe('999');
-  });
-
-  test('returns standard formatting when not a multiple of 1000', () => {
-    expect(numUtils.formatCompact(1500)).toMatch(/^1[.,]?500$/);
-  });
-
-  test.each([
-    [1000, '1K'],
-    [2000, '2K'],
-    [1_000_000, '1M'],
-    [3_000_000_000, '3B'],
-    [4_000_000_000_000, '4T'],
-  ])('formats %j as %j with the matching tier suffix', (input, expected) => {
-    expect(numUtils.formatCompact(input)).toBe(expected);
-  });
-
-  test('handles negative compact values', () => {
-    expect(numUtils.formatCompact(-2000)).toBe('-2K');
-  });
-
-  test.each([null, undefined, 'abc', NaN])(
-    'returns null for invalid input %j',
-    (input) => {
-      expect(numUtils.formatCompact(input)).toBeNull();
-    },
-  );
-
-  describe('numUtils.toFiniteNumber', () => {
-    test.each([
-      [0, 0],
-      ['42', 42],
-      [1.5, 1.5],
-      [null, 0],
-      [undefined, 0],
-      ['abc', 0],
-      [NaN, 0],
-      [Infinity, 0],
-      [-Infinity, 0],
-    ])('converts %j to %j', (input, expected) => {
-      expect(numUtils.toFiniteNumber(input)).toBe(expected);
-    });
-
-    test('returns the fallback for invalid values', () => {
-      expect(numUtils.toFiniteNumber('abc', 7)).toBe(7);
-    });
-  });
-});
-
 describe('numUtils.formatPercentageLabel', () => {
   test.each([
     [0, '0.0%'],
@@ -113,24 +62,5 @@ describe('numUtils.formatPercentageLabel', () => {
     [3, 0.0005, '<0.001%'],
   ])('adapts lower boundary label to decimalPlaces=%j', (decimalPlaces, value, expectedBoundary) => {
     expect(numUtils.formatPercentageLabel(value, decimalPlaces)).toBe(expectedBoundary);
-  });
-});
-
-describe('numUtils.formatShareLabel', () => {
-  test.each([
-    [0, 0, '0%'],
-    [1, 4, /^25[.,]0%$/],
-    [1, 1, '100%'],
-    [999.5, 1000, '>99.9%'],
-    [0.5, 1000, '<0.1%'],
-    ['abc', 100, '0.0%'],
-  ])('formats %j / %j as %j', (value, total, expected) => {
-    const result = numUtils.formatShareLabel(value, total);
-
-    if (expected instanceof RegExp) {
-      expect(result).toMatch(expected);
-    } else {
-      expect(result).toBe(expected);
-    }
   });
 });

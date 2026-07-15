@@ -2,11 +2,8 @@
 
 Hackathon UI for the YM fleet-performance data-lake.
 
-- **Base architecture:** ported (frozen) from `langforge-enterprise-ui` @ `db7476f5c`.
-  This repo does **not** track langforge upstream — the structure is pinned at that commit.
-- **Concept / content reference:** the `ym-datalake-poc` dashboard (a living reference; re-ported as it evolves).
-
----
+A Nuxt 4 + Vuetify SPA, stripped down to a single public dashboard page plus a
+GenBI copilot chat.
 
 ## Demo data (fixtures)
 

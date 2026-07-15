@@ -15,20 +15,6 @@ class scrollUtils {
       behavior,
     });
   };
-
-  /**
-   * Scrolls the window to the element with the specified ID.
-   *
-   * @param {string} targetId - The ID of the target element to scroll to.
-   * @param {number} offset - Optional offset to adjust the final scroll position.
-   */
-  static scrollToElementById = (targetId, offset = 0) => {
-    if (!targetId) return;
-    const targetElement = document.querySelector(targetId);
-    if (!targetElement) return;
-    const elementPosition = targetElement.getBoundingClientRect().top + window.scrollY;
-    scrollUtils.scrollTo({ top: elementPosition - offset });
-  };
 }
 
 export default scrollUtils;

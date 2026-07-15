@@ -14,23 +14,6 @@ class jsonUtils {
   }
 
   /**
-   * Safely converts an object to a JSON string.
-   * If the object is null, it returns an empty string.
-   * If an error occurs during stringification, it catches the error and returns an empty string.
-   *
-   * @param {Object} obj - The object to be stringified.
-   * @returns {string} The JSON string representation of the object, or an empty string if the object is null or an error occurs.
-   */
-  static safeStringify(obj) {
-    if (obj === null) return '';
-    try {
-      return JSON.stringify(obj);
-    } catch {
-      return '';
-    }
-  }
-
-  /**
    * Safely beautifies a JSON string or object.
    * If the input is a JSON string, it attempts to parse it into an object.
    * If parsing fails, it returns the original string.

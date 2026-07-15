@@ -15,22 +15,6 @@ describe('jsonUtils.safeParse', () => {
   });
 });
 
-describe('jsonUtils.safeStringify', () => {
-  test('stringifies a value to JSON', () => {
-    expect(jsonUtils.safeStringify({ a: 1 })).toBe('{"a":1}');
-  });
-
-  test('returns an empty string when input is null', () => {
-    expect(jsonUtils.safeStringify(null)).toBe('');
-  });
-
-  test('returns an empty string for circular references', () => {
-    const circular = {};
-    circular.self = circular;
-    expect(jsonUtils.safeStringify(circular)).toBe('');
-  });
-});
-
 describe('jsonUtils.safeBeautify', () => {
   test('pretty-prints an object with 2-space indentation', () => {
     expect(jsonUtils.safeBeautify({ a: 1 })).toBe('{\n  "a": 1\n}');

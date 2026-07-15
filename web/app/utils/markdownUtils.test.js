@@ -40,39 +40,6 @@ describe('markdownUtils.removeHeadings', () => {
   });
 });
 
-describe('markdownUtils.toMarkdown', () => {
-  test('returns "<p>-</p>" for empty array input', () => {
-    expect(markdownUtils.toMarkdown([])).toBe('<p>-</p>');
-  });
-
-  test('escapes HTML tags in single-line string values', () => {
-    const md = markdownUtils.toMarkdown({ note: '<script>alert(1)</script>' });
-    expect(md).toContain('&lt;script&gt;');
-    expect(md).not.toContain('<script>');
-  });
-
-  test('wraps multi-line string values in a fenced code block', () => {
-    const sql = 'SELECT\n    "col"\nFROM t';
-    const md = markdownUtils.toMarkdown({ query: sql });
-    expect(md).toContain('```');
-    expect(md).toContain(sql);
-    expect(md).not.toContain('&quot;');
-  });
-
-  test('does not re-escape quotes in already-fenced code values', () => {
-    const md = markdownUtils.toMarkdown({ snippet: '```js\nconsole.log("x");\n```' });
-    expect(md).toContain('"x"');
-    expect(md).not.toContain('&quot;');
-  });
-
-  test('rendered HTML preserves quotes from multi-line tool input', () => {
-    const sql = 'SELECT\n    "col"\nFROM t';
-    const html = markdownUtils.toHtml(markdownUtils.toMarkdown({ query: sql }));
-    expect(html).not.toContain('&amp;quot;');
-    expect(html).toContain('"col"');
-  });
-});
-
 describe('markdownUtils.toHtml', () => {
   test('renders markdown to HTML output', () => {
     const html = markdownUtils.toHtml('# Hello');
@@ -88,16 +55,6 @@ describe('markdownUtils.toHtml', () => {
   test('hides the frontmatter table when hideFrontmatter is true', () => {
     const html = markdownUtils.toHtml('---\ntitle: T\n---\n\nbody', { hideFrontmatter: true });
     expect(html).not.toContain('class="frontmatter"');
-  });
-});
-
-describe('markdownUtils.toPlainText', () => {
-  test('returns the textual content without markdown formatting', () => {
-    expect(markdownUtils.toPlainText('# Hello\n\nworld')).toContain('Hello');
-  });
-
-  test('returns an empty string for falsy input', () => {
-    expect(markdownUtils.toPlainText('')).toBe('');
   });
 });
 

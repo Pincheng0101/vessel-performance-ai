@@ -1,4 +1,3 @@
-import { Converter as JsonToMarkdownConverter } from '@kklab/json2markdown';
 import { Converter as MarkdownToHtmlConverter } from '@kklab/markdown2html';
 import { markedHighlight } from 'marked-highlight';
 import markedKatex from 'marked-katex-extension';
@@ -11,104 +10,6 @@ const MARKDOWN_DOMPURIFY_CONFIG = {
 };
 
 class markdownUtils {
-  /**
-   * Converts a given object to a Markdown string.
-   *
-   * @param {Object} obj - The object to convert to Markdown.
-   * @param {Object} [options] - Optional settings for the conversion.
-   * @param {string[]} [options.ignoredHeadings] - List of headings to ignore during conversion.
-   * @returns {string} The Markdown representation of the object.
-   */
-  static toMarkdown = (obj, { ignoredHeadings = [] } = {}) => {
-    if (arrUtils.isEmpty(obj)) return '<p>-</p>';
-    return new JsonToMarkdownConverter(obj)
-      .toMarkdown((element) => {
-        if (element.value) {
-          if (jsonUtils.isObject(element.value)) {
-            // Use preformatted text for JSON string
-            element.tag = 'pre';
-            element.value = jsonUtils.safeBeautify(element.value);
-            return element;
-          }
-          if (typeof element.value === 'string') {
-            const isFencedCode = /^\s*```/.test(element.value);
-            const isMultiLine = element.value.includes('\n');
-            if (isMultiLine && !isFencedCode) {
-              // Render multi-line strings as fenced code blocks so leading
-              // whitespace doesn't accidentally form an indented code block —
-              // inside which marked HTML-escapes `&`, turning escaped entities
-              // like `&quot;` into the literal text `&quot;` on screen.
-              element.tag = 'pre';
-            } else if (!isFencedCode) {
-              // Single-line: escape so HTML tags display as plain text in paragraphs.
-              element.value = htmlUtils.escape(element.value);
-            }
-          }
-          if (typeof element.value === 'boolean') {
-            // Convert boolean values to title case
-            element.value = strUtils.toTitleCase(element.value);
-          }
-          const parsedFile = fileUtils.parseFromBase64(element.value);
-          if (parsedFile && parsedFile.mediaType.startsWith('image/')) {
-            // Use image tag for base64 images
-            element.tag = 'img';
-            element.src = element.value;
-            element.alt = '';
-          }
-        }
-        if (element.tag === 'heading') {
-          // Ignore headings that are in the ignoredHeadings list
-          if (ignoredHeadings.includes(element.value)) return;
-          // Convert headings to title case
-          element.value = strUtils.toTitleCase(element.value);
-        }
-        if (element.tag === 'tr') {
-          // Convert table headers to title case
-          element.values = element.values.map(strUtils.toTitleCase);
-        }
-        if (element.tag === 'td') {
-          // Use preformatted text for JSON string
-          element.values = element.values.map((value) => {
-            if (!value) return '-';
-            const parsedFile = fileUtils.parseFromBase64(value);
-            if (parsedFile && parsedFile.mediaType.startsWith('image/')) {
-              // Use image tag for base64 images
-              return `<img src="${value}" />`;
-            }
-            if (jsonUtils.isObject(value)) {
-              // escape HTML tags to prevent warnings from highlight.js
-              const json = jsonUtils.safeBeautify(value)
-                .replaceAll('<', '&lt;')
-                .replaceAll('>', '&gt;');
-              return `<pre><code>${json}</code></pre>`;
-            }
-            if (value.startsWith('http')) {
-              return `<a href="${value}" target="_blank" rel="noopener noreferrer">${value} <i class="mdi-open-in-new mdi v-icon notranslate v-theme--light v-icon--size-x-small" aria-hidden="true" variant="flat"></i></a>`;
-            }
-            if (window.isFinite(value)) {
-              return `<span>${value}</span>`;
-            }
-            return value;
-          });
-        }
-        if (element.tag === 'li') {
-          // Remove extra list markers
-          element.value = String(element.value).replace(/^(\d+\.\s*|-\s*)/, match => match.trim());
-        }
-        if (element.tag === 'p') {
-          // Skip newline doubling for markdown tables since their rows must stay on consecutive lines
-          const isMarkdownTable = /^\|.+\|/m.test(element.value);
-          if (!isMarkdownTable) {
-            // Convert escaped "\n" and real newlines into double newlines for paragraph spacing
-            element.value = String(element.value).replaceAll(/\\n|\n/g, '\n\n');
-          }
-          // Set a default value for empty paragraphs
-          element.value = element.value || '<p>-</p>';
-        }
-        return element;
-      });
-  };
-
   /**
    * Parses the leading frontmatter block (delimited by `---`) from a markdown string.
    * Each value is returned as a trimmed string with no type coercion.
@@ -349,20 +250,6 @@ class markdownUtils {
       node.parentNode.replaceChild(fragment, node);
     }
     return container.innerHTML;
-  }
-
-  /**
-   * Converts the given markdown string to plain text by removing markdown formatting.
-   *
-   * @param {string} markdown - The markdown string to convert.
-   * @returns {string} The plain text representation of the markdown.
-   */
-  static toPlainText(markdown) {
-    if (!markdown) return '';
-    const html = this.toHtml(markdown);
-    const div = document.createElement('div');
-    div.innerHTML = html;
-    return div.textContent;
   }
 
   static removeHeadings(markdown) {

@@ -21,51 +21,6 @@ class numUtils {
   }
 
   /**
-   * Format a numeric value into a compact string with unit symbols (K, M, B, T).
-   * This method applies compact formatting only if the absolute value is >= 1,000
-   * and is a multiple of 1,000. Otherwise, it falls back to standard formatting
-   * to preserve precision.
-   *
-   * @static
-   * @param {number|string} value - The value to format.
-   * @param {number} [decimalPlaces=1] - The number of fraction digits for the scaled value.
-   * @returns {string|null} The compact formatted string, or null for invalid inputs.
-   */
-  static formatCompact(value, decimalPlaces = 1) {
-    const num = Number(value);
-    if (value === null || value === undefined || !Number.isFinite(num)) return null;
-
-    const absValue = Math.abs(num);
-
-    // Threshold: Only compact if >= 1,000 and is an exact multiple of 1,000
-    if (absValue < 1000 || num % 1000 !== 0) {
-      return this.format(num, 0);
-    }
-
-    const tiers = [
-      { divider: 1e12, symbol: 'T' },
-      { divider: 1e9, symbol: 'B' },
-      { divider: 1e6, symbol: 'M' },
-      { divider: 1e3, symbol: 'K' },
-    ];
-
-    const tier = tiers.find(t => absValue >= t.divider);
-
-    if (tier) {
-      const scaled = num / tier.divider;
-      // Use Intl.NumberFormat for the numeric part to respect locale (e.g., decimal separators)
-      const formattedNum = new Intl.NumberFormat(undefined, {
-        minimumFractionDigits: 0,
-        maximumFractionDigits: Number.isInteger(scaled) ? 0 : decimalPlaces,
-      }).format(scaled);
-
-      return `${formattedNum}${tier.symbol}`;
-    }
-
-    return this.format(num, 0);
-  }
-
-  /**
    * Convert a value to a finite number, or return a fallback for invalid values.
    *
    * @static
@@ -106,25 +61,6 @@ class numUtils {
     }
 
     return `${this.format(percentage, decimalPlaces)}%`;
-  }
-
-  /**
-   * Format a value's share of a total as a percentage display label.
-   *
-   * @static
-   * @param {number|string} value - The numerator value.
-   * @param {number|string} total - The denominator value.
-   * @param {number} [decimalPlaces=1] - The number of fraction digits to display.
-   * @returns {string} The formatted percentage label.
-   */
-  static formatShareLabel(value, total, decimalPlaces = 1) {
-    const numericTotal = this.toFiniteNumber(total);
-
-    if (!numericTotal) {
-      return '0%';
-    }
-
-    return this.formatPercentageLabel(this.toFiniteNumber(value) / numericTotal * 100, decimalPlaces);
   }
 }
 

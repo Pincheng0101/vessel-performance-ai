@@ -1,7 +1,3 @@
-import * as ChatConstant from '~/constants/ChatConstant';
-import { ContentBlockResponseFactory } from '~/models/server/contentBlock';
-import { AssistantChatRoomMessage, UserChatRoomMessage } from '~/models/ui/chatRoom';
-
 class chatUtils {
   static CITATION_REGEX = /\[((?:Ref\s+)?(\d+))\]/gi;
 
@@ -40,40 +36,6 @@ class chatUtils {
     return value.replace(chatUtils.CITATION_REGEX, (match, label, number) => {
       return `<a href="#" class="font-weight-medium" data-index="${number}"> [${label}]</a>`;
     });
-  }
-
-  /**
-   * Flattens paginated chat session groups (newest-first) into a chronological
-   * list of completed user/assistant chat-room messages for transcript display.
-   *
-   * @param {object[]} groups - Session message groups as returned by `chatSession.listMessages`.
-   * @returns {import('~/models/ui/chatRoom').ChatRoomMessage[]} Ordered chat-room messages.
-   */
-  static convertGroupsToMessages(groups) {
-    const messages = [];
-    const reversedGroups = [...groups].reverse();
-    for (const group of reversedGroups) {
-      const { pairs, toolResults } = group;
-      if (!pairs?.length) continue;
-      for (let i = 0; i < pairs.length; i++) {
-        const pair = pairs[i];
-        const isLastPair = i === pairs.length - 1;
-        const userContent = (pair.user?.content ?? []).map(ContentBlockResponseFactory.create);
-        messages.push(new UserChatRoomMessage({
-          content: userContent,
-          status: ChatConstant.MessageStatus.COMPLETED,
-        }));
-        const assistantContent = (pair.assistant?.content ?? []).map(ContentBlockResponseFactory.create);
-        if (isLastPair && toolResults && assistantContent.length > 0) {
-          assistantContent.at(-1).toolResults = toolResults;
-        }
-        messages.push(new AssistantChatRoomMessage({
-          content: assistantContent,
-          status: ChatConstant.MessageStatus.COMPLETED,
-        }));
-      }
-    }
-    return messages;
   }
 }
 

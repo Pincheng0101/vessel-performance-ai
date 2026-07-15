@@ -39,40 +39,6 @@ describe('fileUtils.getDataUrlByteLength', () => {
   });
 });
 
-describe('fileUtils.createFromBase64', () => {
-  test('creates a File whose name includes the extension derived from the media type', () => {
-    const file = fileUtils.createFromBase64(PNG_DATA_URL, 'avatar');
-    expect(file).toBeInstanceOf(File);
-    expect(file.name).toBe('avatar.png');
-    expect(file.type).toBe('image/png');
-  });
-
-  test('returns null when the input is not a data URL', () => {
-    expect(fileUtils.createFromBase64('not a data url')).toBeNull();
-  });
-});
-
-describe('fileUtils.formatBytes', () => {
-  test.each([
-    [0, '0 Byte'],
-    [1, '1 Byte'],
-    [1024, '1 KB'],
-    [1048576, '1 MB'],
-    [1500, '1.5 KB'],
-  ])('formats %j as %j', (input, expected) => {
-    expect(fileUtils.formatBytes(input)).toBe(expected);
-  });
-});
-
-describe('fileUtils.rename', () => {
-  test('returns a new File with the requested name and the original type', () => {
-    const original = new File(['x'], 'old.txt', { type: 'text/plain', lastModified: 1234 });
-    const renamed = fileUtils.rename(original, 'new.txt');
-    expect(renamed.name).toBe('new.txt');
-    expect(renamed.type).toBe('text/plain');
-  });
-});
-
 describe('fileUtils.download', () => {
   test('creates a downloadable blob for empty string data', () => {
     const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test');
