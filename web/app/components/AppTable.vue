@@ -376,14 +376,21 @@ const headersByKey = computed(() => new Map(
 // identity comparator so VDataTable keeps the server's order (stable sort)
 // instead of re-sorting the current page client-side, which would diverge from
 // the backend collation (e.g. mixed CJK/ASCII names).
+//
+// In client-side mode, a header can opt into its own comparator via `sortComparator` — e.g. a
+// "S1"/"S2"/"S10" column, where VDataTable's default string compare would sort "S10" before
+// "S2". Columns without one keep VDataTable's default.
 const customKeySort = computed(() => {
-  if (!props.serverSide) return undefined;
-  return props.headers.reduce((acc, header) => {
-    if (header.sortable && header.key) {
+  const entries = props.headers.reduce((acc, header) => {
+    if (!header.sortable || !header.key) return acc;
+    if (props.serverSide) {
       acc[header.key] = () => 0;
+    } else if (header.sortComparator) {
+      acc[header.key] = header.sortComparator;
     }
     return acc;
   }, {});
+  return Object.keys(entries).length ? entries : undefined;
 });
 const getRowColumns = columns => columns.map((column) => {
   const header = headersByKey.value.get(column.key ?? column.value);

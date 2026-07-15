@@ -140,11 +140,16 @@ const nextByShip = computed(() => {
   });
   return out;
 });
+// dim_vessel comes back string-sorted (S1, S10, S11, S12, S2, ...) — sort numerically by the
+// digits after "S" instead, both for the default table order and (via the Ship header's
+// sortComparator below) for when a user clicks the column to sort it themselves.
+const shipIdCompare = (a, b) => a.localeCompare(b, undefined, { numeric: true });
+const rosterByShipNumber = [...roster].sort((a, b) => shipIdCompare(a.ship_id, b.ship_id));
 // The fouling clocks (days_since_dry_dock / days_since_cleaning) are carried on every daily row,
 // already reset by the maintenance events — read them off the ship's last day rather than
 // re-deriving them from the event log. Speed loss is the mean over the ship's last 30 ISO
 // 19030-valid days, the same window the trend arrow beside it is fitted on.
-const tableRows = computed(() => roster.map((v) => {
+const tableRows = computed(() => rosterByShipNumber.map((v) => {
   const daily = performanceByShip.value[v.ship_id] ?? [];
   const valid = daily.filter(r => r.valid_flag);
   const last = daily.at(-1) ?? {};
@@ -171,7 +176,9 @@ const tableRows = computed(() => roster.map((v) => {
 
 const T = FleetGlossaryConstant.Term;
 const tableHeaders = [
-  { title: 'Ship', key: 'name', sortable: true, minWidth: 100 },
+  {
+    title: 'Ship', key: 'name', sortable: true, minWidth: 100, sortComparator: shipIdCompare,
+  },
   { title: 'Speed loss', key: 'sl', sortable: true, minWidth: 120, tooltip: T.speedLoss },
   { title: 'Days since dry-dock', key: 'daysDryDock', sortable: true, minWidth: 110, tooltip: T.daysSinceDryDock },
   { title: 'Days since in-water', key: 'daysInWater', sortable: true, minWidth: 110, tooltip: T.daysSinceInWater },
