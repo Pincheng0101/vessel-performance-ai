@@ -1,4 +1,4 @@
-import * as LlmConstant from '~/constants/LlmConstant';
+import * as ChatConstant from '~/constants/ChatConstant';
 import { ContentBlockFactory } from '~/models/server/contentBlock';
 import Message from './Message';
 
@@ -8,7 +8,7 @@ class UserMessage extends Message {
   }) {
     super({
       content: Array.isArray(content) ? content.map(ContentBlockFactory.create) : content,
-      role: LlmConstant.MessageRole.USER.value,
+      role: ChatConstant.MessageRole.USER,
     });
   }
 }
