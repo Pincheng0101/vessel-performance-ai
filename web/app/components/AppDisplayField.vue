@@ -25,14 +25,6 @@ const state = reactive({
   maxWidth: null,
 });
 
-const useMinWidth = computed(() => (
-  props.item.isMarkdown
-));
-
-const useFullWidth = computed(() => (
-  props.item.isMarkdown
-));
-
 const useFlexWrap = computed(() => (
   props.item.isChip
 ));
@@ -66,14 +58,12 @@ onBeforeUnmount(() => {
   <v-sheet
     ref="rootRef"
     color="transparent"
-    :min-width="useMinWidth ? 300 : undefined"
     :style="{ '--dynamic-max-width': `${state.maxWidth}px` }"
     :class="{
       'd-flex': true,
       'overflow-auto': true,
       'flex-wrap': useFlexWrap,
       'flex-column': !useFlexWrap,
-      'w-100': useFullWidth,
       'ga-1': true,
     }"
   >
@@ -86,7 +76,6 @@ onBeforeUnmount(() => {
         :key="i"
         class="display-field d-flex"
         :class="{
-          'w-100': useFullWidth,
           'overflow-hidden': props.item.isChip,
         }"
       >
@@ -119,18 +108,6 @@ onBeforeUnmount(() => {
             :text="$t(findField(StatusConstant.Runtime, v, 'i18nTitle') || '__fieldStatusUnknown')"
             aria-label="Status"
             variant="flat"
-          />
-        </template>
-        <template v-else-if="props.item.isMarkdown">
-          <AppMarkdownViewer
-            :dialog-title="props.item.title"
-            :default-value="v"
-            :enable-anchors="props.item.markdownViewerOptions?.enableAnchors"
-            :enable-toc="props.item.markdownViewerOptions?.enableToc"
-            :anchor-prefix="`${props.item.title}${i > 0 ? `-${i + 1}` : ''}`"
-            :download-file-name="props.item.markdownViewerOptions?.downloadFileName"
-            :max-height="props.item.markdownViewerOptions?.maxHeight"
-            :width="props.item.markdownViewerOptions?.width"
           />
         </template>
         <template v-else>
