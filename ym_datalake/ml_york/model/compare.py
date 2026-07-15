@@ -38,10 +38,21 @@ def _xgb_native(fitted, features: list[str]) -> pd.Series:
     return pd.Series(fitted.feature_importances_, index=features).sort_values(ascending=False)
 
 
+def _xgb_single(train_df: pd.DataFrame, features: list[str], seed: int = 42):
+    """Score XGBoost as ONE model per fold, not the 5-member submission ensemble.
+
+    A single ``XGBRegressor`` is a fully sklearn-compliant estimator, so the shared permutation pass and
+    ``_xgb_native`` (``feature_importances_``) both work on it; the seed-bagged ``_LogMeanEnsemble`` exposes
+    only ``predict`` and would break both. The ensemble is the submission model — run ``xgboost evaluate``
+    (default ``--n-models 5``) for that (higher) number.
+    """
+    return xgboost.train_model(train_df, features, seed, n_models=1)
+
+
 # name -> (train_model, native_importance). XGBoost is imported, never modified; the shared permutation
 # pass — not these native scores — is the apples-to-apples cross-model ranking.
 MODELS: dict[str, tuple[common.TrainModel, common.NativeImportance]] = {
-    'xgboost': (xgboost.train_model, _xgb_native),
+    'xgboost': (_xgb_single, _xgb_native),
     'lightgbm': (lightgbm.train_model, lightgbm.native_importance),
     'random_forest': (random_forest.train_model, random_forest.native_importance),
     'extra_trees': (extra_trees.train_model, extra_trees.native_importance),
