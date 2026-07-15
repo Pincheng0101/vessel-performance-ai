@@ -30,6 +30,10 @@ def add_statistics_features(df: pd.DataFrame) -> pd.DataFrame:
     _voyage(df, feats)
     # coating age (maintenance) x accumulated thermal dose (this module): compound fouling driver.
     feats['coating_x_thermal'] = (df['coating_age_years'] * feats['thermal_exposure_since_clean']).to_numpy()
+    # admiralty power point x fouling-age saturation: extra fuel demand as the hull ages between cleans.
+    feats['admiralty_x_hull_clock'] = (df['admiralty_fuel_proxy'] * df['hull_clock_sat']).to_numpy()
+    # admiralty power point x combined wave height: weather added resistance scales the clean-hull baseline.
+    feats['admiralty_x_wave'] = (df['admiralty_fuel_proxy'] * df['combined_wave']).to_numpy()
     return pd.concat([df, feats], axis=1)
 
 

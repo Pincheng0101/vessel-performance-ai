@@ -71,7 +71,7 @@ def fold_metrics(
     """Score one fold. ``precision`` = share of predict cells within ``tol`` relative error.
 
     A predict cell with no matching answer is a miss: it counts against precision and is warned about,
-    but contributes no term to MAE/RMSE/MAPE (those are means over answered cells). Cells whose truth
+    but contributes no term to MAE/RMSE/MAPE/R² (those span the answered cells). Cells whose truth
     is absent from ``truth`` are skipped with a warning (should not occur for a well-formed fold).
     """
     y_true: list[float] = []
@@ -99,11 +99,16 @@ def fold_metrics(
     yp = np.array(y_pred, dtype=float)
     ape = np.abs(yp - yt) / yt if len(yt) else np.array([])
     mape = float(ape.mean()) if len(ape) else float('nan')
+    # R² over the answered cells on the original MT/day scale; nan when 0 or 1 cell (ss_tot == 0).
+    ss_res = float(((yp - yt) ** 2).sum())
+    ss_tot = float(((yt - yt.mean()) ** 2).sum()) if len(yt) else 0.0
+    r2 = 1.0 - ss_res / ss_tot if (len(yt) and ss_tot > 0) else float('nan')
     return {
         'precision': correct / scored if scored else float('nan'),
         'one_minus_mape': 1.0 - mape,
         'mae': float(np.abs(yp - yt).mean()) if len(yt) else float('nan'),
         'rmse': float(np.sqrt(((yp - yt) ** 2).mean())) if len(yt) else float('nan'),
+        'r2': r2,
         'mape': mape,
         'n': scored,
         'n_missing': n_missing,

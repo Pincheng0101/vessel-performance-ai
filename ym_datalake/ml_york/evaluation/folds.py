@@ -70,6 +70,21 @@ def assign_folds(eligible: list[dict], n: int, seed: int) -> list[list[dict]]:
     return [[eligible[i] for i in chunk] for chunk in np.array_split(order, n)]
 
 
+def assign_folds_by_ship(eligible: list[dict], seed: int) -> list[list[dict]]:
+    """Leave-one-ship-out: one fold per distinct ``ship``, ships shuffled by ``seed``.
+
+    The honest cross-ship harness — every eval fold is a whole unseen ship, so no same-ship
+    near-duplicate row can leak across the train/eval split. Returns the same ``list[list[dict]]``
+    shape as :func:`assign_folds`, so ``write_fold``/scoring consume it verbatim.
+    """
+    by_ship: dict[str, list[dict]] = {}
+    for r in eligible:
+        by_ship.setdefault(r['ship'], []).append(r)
+    ships = list(by_ship)
+    order = np.random.default_rng(seed).permutation(len(ships))
+    return [by_ship[ships[i]] for i in order]
+
+
 def write_fold(df: pd.DataFrame, manifest: dict, fold_rows: list[dict], out_dir: str) -> None:
     """Write ``{out_dir}/eval.csv`` (the fold, masked) and ``{out_dir}/train.csv`` (everything else).
 

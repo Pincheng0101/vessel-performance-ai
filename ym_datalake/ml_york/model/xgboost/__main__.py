@@ -14,11 +14,20 @@ from ym_datalake.ml_york.model.xgboost import model
 
 
 def _cmd_evaluate(args: argparse.Namespace) -> int:
-    return model.run_evaluate(args.features, args.manifest, args.out_dir, args.folds, args.seed, args.tolerance)
+    return model.run_evaluate(
+        args.features,
+        args.manifest,
+        args.out_dir,
+        args.folds,
+        args.seed,
+        args.tolerance,
+        args.n_models,
+        args.group_by_ship,
+    )
 
 
 def _cmd_predict(args: argparse.Namespace) -> int:
-    return model.run_predict(args.features, args.manifest, args.out)
+    return model.run_predict(args.features, args.manifest, args.out, args.n_models)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,12 +43,17 @@ def build_parser() -> argparse.ArgumentParser:
     ev.add_argument(
         '--tolerance', type=float, default=0.05, help='relative-error tolerance for precision (default: 0.05)'
     )
+    ev.add_argument('--n-models', type=int, default=5, help='log-space seed-bagging ensemble size (default: 5)')
+    ev.add_argument(
+        '--group-by-ship', action='store_true', help='honest leave-one-ship-out folds instead of random folds'
+    )
     ev.set_defaults(func=_cmd_evaluate)
 
     pr = sub.add_parser('predict', help='train on all steady single-fuel rows; write the 102-cell submission')
     pr.add_argument('--features', default='etl/vt_fd_features.csv', help='feature-engineered CSV')
     pr.add_argument('--manifest', default='etl/feature_manifest.json', help='column-group manifest JSON')
     pr.add_argument('--out', default='etl/submission.csv', help='submission CSV path (default: etl/submission.csv)')
+    pr.add_argument('--n-models', type=int, default=5, help='log-space seed-bagging ensemble size (default: 5)')
     pr.set_defaults(func=_cmd_predict)
 
     return parser

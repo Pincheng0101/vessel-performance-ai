@@ -12,9 +12,11 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
+
 from ym_datalake.ml_york.evaluation import folds, scoring
 
-_METRICS = ['precision', 'one_minus_mape', 'mae', 'rmse', 'mape']
+_METRICS = ['precision', 'one_minus_mape', 'mae', 'rmse', 'r2', 'mape']
 
 
 def _cmd_generate(args: argparse.Namespace) -> int:
@@ -38,18 +40,24 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     header = f'{"fold":>4}  {"n":>5}  {"miss":>4}  ' + '  '.join(f'{m:>14}' for m in _METRICS)
     print(header)
     print('-' * len(header))
-    precisions: list[float] = []
+    agg: dict[str, list[float]] = {m: [] for m in _METRICS}
     for k in range(1, args.folds + 1):
         fold_dir = Path(args.eval_dir) / str(k)
         expected = scoring.expected_cells(folds.load_features(str(fold_dir / 'eval.csv')))
         answers = scoring.load_answers(str(fold_dir / args.answer_name))
         m = scoring.fold_metrics(expected, truth, answers, args.tolerance)
-        precisions.append(m['precision'])
+        for name in _METRICS:
+            agg[name].append(m[name])
         print(f'{k:>4}  {m["n"]:>5}  {m["n_missing"]:>4}  ' + '  '.join(f'{m[x]:>14.6f}' for x in _METRICS))
 
+    precisions = agg['precision']
     avg = sum(precisions) / len(precisions)
     print('-' * len(header))
     print(f'precision  avg={avg:.6f}  min={min(precisions):.6f}  max={max(precisions):.6f}  (tol={args.tolerance})')
+    print(
+        f'   mae avg={np.nanmean(agg["mae"]):.6f}   rmse avg={np.nanmean(agg["rmse"]):.6f}   '
+        f'r2 avg={np.nanmean(agg["r2"]):.6f}   mape avg={np.nanmean(agg["mape"]):.6f}'
+    )
     return 0
 
 

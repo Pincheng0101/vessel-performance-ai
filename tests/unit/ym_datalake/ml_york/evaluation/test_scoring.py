@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -16,6 +17,7 @@ def test_perfect_answers_score_precision_one():
     assert m['precision'] == 1.0
     assert m['mae'] == 0.0 and m['rmse'] == 0.0 and m['mape'] == 0.0
     assert m['one_minus_mape'] == 1.0
+    assert m['r2'] == 1.0  # ss_res 0 with positive ss_tot -> perfect fit
     assert m['n'] == 3 and m['n_missing'] == 0
 
 
@@ -31,6 +33,8 @@ def test_jittered_answers_match_hand_calc():
     assert m['rmse'] == pytest.approx(((100 + 0 + 1) / 3) ** 0.5)
     assert m['mape'] == pytest.approx((0.10 + 0.0 + 0.02) / 3)
     assert m['one_minus_mape'] == pytest.approx(1 - 0.04)
+    # r2 = 1 - ss_res/ss_tot = 1 - 101/11666.67 over yt=[100,200,50], yp=[110,200,51]
+    assert m['r2'] == pytest.approx(0.991343, abs=1e-6)
 
 
 def test_missing_answer_counts_incorrect_and_warns():
@@ -40,6 +44,16 @@ def test_missing_answer_counts_incorrect_and_warns():
     assert m['n'] == 3 and m['n_missing'] == 1
     assert m['precision'] == pytest.approx(2 / 3)  # miss drags precision down
     assert m['mae'] == 0.0  # error metrics span the two answered (exact) cells only
+    assert m['r2'] == 1.0  # both answered cells exact -> ss_res 0, ss_tot>0
+
+
+def test_single_answered_cell_r2_is_nan():
+    # One answered cell -> ss_tot == 0 (mean == the sole value); R² is undefined, guarded to nan.
+    expected = [('S1', '0', 'HSHFO')]
+    truth = {('S1', '0', 'HSHFO'): 100.0}
+    m = scoring.fold_metrics(expected, truth, {('S1', '0', 'HSHFO'): 100.0}, tol=0.05)
+    assert m['n'] == 1
+    assert np.isnan(m['r2'])
 
 
 def test_load_answers_normalizes_full_and_short_fuel_names(tmp_path):

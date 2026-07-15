@@ -1,8 +1,8 @@
-"""XGBoost model unit tests on tiny synthetic frames — no real training, no 40 MB file.
+"""Model-agnostic core tests on tiny synthetic frames — no real training, no 40 MB file.
 
-Covers the leakage-free training-row mask (:func:`build_xy`), the MT reconstruction round-trip and
-predict-row filtering (:func:`predict_cells`). Training itself (early stopping on a real XGBoost fit) is
-exercised by the CLI end-to-end, not here.
+Ported from ``model/xgboost/test_model.py`` against :mod:`model.common` (the two hold logically identical
+``build_xy``/``predict_cells``). Covers the leakage-free training-row mask, the log target, NaN
+passthrough, and the MT reconstruction round-trip + predict-row filtering.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 
 from ym_datalake.ml_york.evaluation import folds
-from ym_datalake.ml_york.model.xgboost import model
+from ym_datalake.ml_york.model import common
 
 FEATURES = ['stw', 'rpm']
 HSHFO, VLSFO = folds.FUEL_COLS[0], folds.FUEL_COLS[2]
@@ -66,27 +66,34 @@ def train_frame():
 
 
 def test_mask_selects_only_steady_single_fuel_positive_rows(train_frame):
-    _, _, mask = model.build_xy(train_frame, FEATURES)
+    _, _, mask = common.build_xy(train_frame, FEATURES)
     assert mask.tolist() == [True, False, False, False, False, False]
 
 
 def test_masked_predict_row_excluded_even_though_steady_single_fuel(train_frame):
     # The last row is steady + single-fuel but is_predict/is_masked with a blanked target: the NaN-target
     # filter must drop it, or a real PREDICT cell's truth would leak into training.
-    _, _, mask = model.build_xy(train_frame, FEATURES)
+    _, _, mask = common.build_xy(train_frame, FEATURES)
     assert not bool(mask.iloc[-1])
 
 
 def test_y_is_log_of_target_on_kept_rows(train_frame):
-    _, y, _ = model.build_xy(train_frame, FEATURES)
+    _, y, _ = common.build_xy(train_frame, FEATURES)
     assert np.isclose(y.iloc[0], np.log(90.0))
     assert np.isnan(y.iloc[3])  # target 0 -> NaN, never -inf
 
 
 def test_x_is_float_matrix_with_feature_columns(train_frame):
-    x, _, _ = model.build_xy(train_frame, FEATURES)
+    x, _, _ = common.build_xy(train_frame, FEATURES)
     assert list(x.columns) == FEATURES
     assert x['stw'].dtype == float and np.isclose(x['stw'].iloc[0], 12.5)
+
+
+def test_x_passes_nan_through_for_the_model_to_handle():
+    # A blank feature cell must arrive as NaN (native-NaN models split on it; imputers fill it) — not 0.
+    frame = pd.DataFrame([_row('S1', '0', steady=True, fuels={HSHFO: '100'}, target_ephr='90', stw='')])
+    x, _, _ = common.build_xy(frame, FEATURES)
+    assert np.isnan(x['stw'].iloc[0])
 
 
 class _DummyModel:
@@ -96,7 +103,7 @@ class _DummyModel:
         self._log_preds = np.asarray(log_preds, dtype=float)
 
     def predict(self, x):
-        assert list(x.columns) == FEATURES  # predict_cells must hand XGBoost the feature matrix
+        assert list(x.columns) == FEATURES  # predict_cells must hand the model the feature matrix
         return self._log_preds
 
 
@@ -120,7 +127,7 @@ def test_reconstruction_roundtrip_recovers_mt():
         ]
     )
     dummy = _DummyModel([np.log(201.0), np.log(50.0 * 42.7 / 24.0)])
-    out = model.predict_cells(dummy, eval_df, FEATURES)
+    out = common.predict_cells(dummy, eval_df, FEATURES)
 
     assert np.isclose(out['predicted_value'].iloc[0], 100.0)
     assert np.isclose(out['predicted_value'].iloc[1], 50.0)
@@ -128,7 +135,7 @@ def test_reconstruction_roundtrip_recovers_mt():
 
 def test_output_header_and_fuel_type_and_day_verbatim():
     eval_df = pd.DataFrame([_row('S21', '450', steady=True, fuels={}, target_ephr='', predict=True, fuel_type='HSHFO')])
-    out = model.predict_cells(_DummyModel([np.log(200.0)]), eval_df, FEATURES)
+    out = common.predict_cells(_DummyModel([np.log(200.0)]), eval_df, FEATURES)
 
     assert list(out.columns) == ['ship_id', 'day', 'fuel_type', 'predicted_value']
     assert out['fuel_type'].iloc[0] == 'ME_FULLSPEED_CONSUMP_HSHFO'
@@ -144,40 +151,6 @@ def test_predict_cells_only_answers_predict_rows():
             _row('S21', '451', steady=True, fuels={}, target_ephr='', predict=True),
         ]
     )
-    out = model.predict_cells(_DummyModel([np.log(200.0), np.log(210.0)]), eval_df, FEATURES)
+    out = common.predict_cells(_DummyModel([np.log(200.0), np.log(210.0)]), eval_df, FEATURES)
     assert len(out) == 2
     assert out['day'].tolist() == ['450', '451']
-
-
-def test_log_mean_ensemble_averages_member_predictions_elementwise():
-    # The ensemble averages the members' log-space outputs elementwise, upstream of exp/÷lcv.
-    members = [_DummyModel([1.0, 2.0, 3.0]), _DummyModel([3.0, 4.0, 5.0])]
-    ens = model._LogMeanEnsemble(members)
-    x = pd.DataFrame({'stw': [0.0, 0.0, 0.0], 'rpm': [0.0, 0.0, 0.0]})  # cols == FEATURES for the stub assert
-    assert np.allclose(ens.predict(x), [2.0, 3.0, 4.0])
-
-
-def test_grouped_holdout_holds_out_whole_ships():
-    # 4 ships × 3 rows: a grouped split keeps every ship wholly in fit or val, never straddling.
-    ships = ['S1', 'S1', 'S1', 'S2', 'S2', 'S2', 'S3', 'S3', 'S3', 'S4', 'S4', 'S4']
-    x = pd.DataFrame({'stw': range(len(ships)), 'rpm': range(len(ships))}, dtype=float)
-    y = pd.Series(range(len(ships)), dtype=float)
-    groups = pd.Series(ships)
-    x_tr, x_val, y_tr, y_val = model._grouped_holdout(x, y, groups, seed=0, test_size=0.5)
-
-    tr_ships = set(groups.loc[x_tr.index])
-    val_ships = set(groups.loc[x_val.index])
-    assert tr_ships and val_ships  # both splits non-empty
-    assert tr_ships.isdisjoint(val_ships)  # no ship appears in both
-    assert len(x_tr) + len(x_val) == len(x)
-
-
-def test_grouped_holdout_falls_back_to_random_split_with_one_group():
-    # A single ship -> nunique() < 2 -> plain random train_test_split (nothing to hold a ship out from).
-    x = pd.DataFrame({'stw': range(10), 'rpm': range(10)}, dtype=float)
-    y = pd.Series(range(10), dtype=float)
-    groups = pd.Series(['S1'] * 10)
-    x_tr, x_val, y_tr, y_val = model._grouped_holdout(x, y, groups, seed=0, test_size=0.2)
-
-    assert len(x_val) == 2 and len(x_tr) == 8  # 20% holdout, no grouping constraint
-    assert len(x_tr) + len(x_val) == len(x)

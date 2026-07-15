@@ -32,6 +32,9 @@ ALWAYS_ON_PREDICT = [
     'wetted_proxy',
     'reynolds_proxy',
     'hull_clock_sat',
+    # physics interactions: admiralty power point × fouling-age clock / combined wave (all A/F-derived).
+    'admiralty_x_hull_clock',
+    'admiralty_x_wave',
 ]
 
 

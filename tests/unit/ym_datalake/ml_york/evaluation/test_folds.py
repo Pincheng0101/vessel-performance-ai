@@ -72,6 +72,20 @@ def test_folds_disjoint_and_cover_eligible(frame):
     assert sorted(idxs) == sorted(r['row_idx'] for r in eligible)  # cover exactly the eligible set
 
 
+def test_assign_folds_by_ship_one_ship_per_fold(frame):
+    eligible = folds.select_eligible(frame)  # ships: S1 (1 row), S2 (2 rows), S3 (1 row)
+    fold_rows = folds.assign_folds_by_ship(eligible, seed=0)
+
+    assert len(fold_rows) == 3  # one fold per distinct eligible ship
+    for fold in fold_rows:
+        assert len({r['ship'] for r in fold}) == 1  # each fold is a single whole ship
+    assert {fold[0]['ship'] for fold in fold_rows} == {'S1', 'S2', 'S3'}  # ships disjoint + fully covered
+
+    idxs = [r['row_idx'] for fold in fold_rows for r in fold]
+    assert len(idxs) == len(set(idxs))  # disjoint rows
+    assert sorted(idxs) == sorted(r['row_idx'] for r in eligible)  # cover the eligible set exactly
+
+
 def test_eval_csv_masks_targets_and_leakage_keeps_fuel_type(frame, tmp_path):
     eligible = folds.select_eligible(frame)
     fold_rows = folds.assign_folds(eligible, n=1, seed=0)[0]

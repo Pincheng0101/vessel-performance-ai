@@ -23,23 +23,28 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit, train_test_split
 from xgboost import XGBRegressor
 
 from ym_datalake.ml_york.evaluation import folds, scoring
 
 _FUEL_PREFIX = 'ME_FULLSPEED_CONSUMP_'
-_METRICS = ['precision', 'one_minus_mape', 'mae', 'rmse', 'mape']
+_METRICS = ['precision', 'one_minus_mape', 'mae', 'rmse', 'r2', 'mape']
 
 # XGBoost 3.x: early_stopping_rounds / eval_metric are CONSTRUCTOR kwargs, not fit() args.
+# Regularization-leaning (fewer ships once split cross-ship -> shallower/steadier trees): max_depth 6->5,
+# min_child_weight 5->8, plus gamma / reg_alpha / colsample_bylevel to damp same-ship overfit.
 _XGB_PARAMS = {
     'tree_method': 'hist',
     'n_estimators': 2000,
     'learning_rate': 0.03,
-    'max_depth': 6,
+    'max_depth': 5,
     'subsample': 0.8,
     'colsample_bytree': 0.8,
-    'min_child_weight': 5,
+    'colsample_bylevel': 0.8,
+    'min_child_weight': 8,
+    'gamma': 1.0,
+    'reg_alpha': 0.5,
     'reg_lambda': 1.0,
     'early_stopping_rounds': 50,
     'eval_metric': 'rmse',
@@ -87,15 +92,59 @@ def build_xy(
     return x, y, mask
 
 
-def train_model(train_df: pd.DataFrame, features: list[str], seed: int = 42) -> XGBRegressor:
-    """Fit the XGBoost regressor on the steady single-fuel labelled rows, early-stopping on a 10% split."""
+class _LogMeanEnsemble:
+    """Seed-bagged XGB members averaged in log space; duck-types :meth:`XGBRegressor.predict`.
+
+    ``predict`` returns the mean of the members' log-space outputs, so it drops straight into
+    ``predict_cells`` (``exp(pred) * hours / lcv``) with no change: the mean is upstream of the
+    ``exp``/``/fuel_lcv`` step, so the exact LCV-cancellation invariant is preserved. Each member
+    already applies its own ``best_iteration`` inside ``m.predict``.
+    """
+
+    def __init__(self, members: list[XGBRegressor]):
+        self.members = members
+
+    def predict(self, x) -> np.ndarray:
+        return np.mean([m.predict(x) for m in self.members], axis=0)
+
+
+def _grouped_holdout(x_fit, y_fit, groups, seed, test_size: float = 0.2):
+    """Ship-grouped early-stopping split ``(x_tr, x_val, y_tr, y_val)`` — whole ships held out for val.
+
+    ``GroupShuffleSplit`` keeps every ship wholly in either the fit or the val set, so
+    ``best_iteration`` is chosen against unseen ships rather than same-ship near-duplicate rows.
+    Falls back to a random ``train_test_split`` when there are <2 groups (no ship to hold out).
+    """
+    if groups.nunique() < 2:
+        return train_test_split(x_fit, y_fit, test_size=test_size, random_state=seed)
+    tr_idx, val_idx = next(
+        GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed).split(x_fit, y_fit, groups=groups)
+    )
+    return x_fit.iloc[tr_idx], x_fit.iloc[val_idx], y_fit.iloc[tr_idx], y_fit.iloc[val_idx]
+
+
+def train_model(
+    train_df: pd.DataFrame, features: list[str], seed: int = 42, n_models: int = 5
+) -> XGBRegressor | _LogMeanEnsemble:
+    """Fit the steady single-fuel labelled rows, early-stopping on a ship-grouped holdout.
+
+    ``n_models > 1`` fits a log-space seed-bagging ensemble: member ``i`` uses ``random_state=seed+i``,
+    so it re-draws its subsample/colsample (free decorrelation) and holds out a different ship subset
+    (stabilised ``best_iteration``). Returns a bare :class:`XGBRegressor` when ``n_models == 1``, else a
+    :class:`_LogMeanEnsemble`; both expose the same ``predict`` so callers stay unchanged.
+    """
     x, y, mask = build_xy(train_df, features)
     x_fit, y_fit = x.loc[mask], y.loc[mask]
-    x_tr, x_val, y_tr, y_val = train_test_split(x_fit, y_fit, test_size=0.1, random_state=seed)
+    groups = train_df.loc[mask, 'ship_id']
 
-    model = XGBRegressor(random_state=seed, **_XGB_PARAMS)
-    model.fit(x_tr, y_tr, eval_set=[(x_val, y_val)], verbose=False)
-    return model
+    members: list[XGBRegressor] = []
+    for i in range(n_models):
+        member_seed = seed + i
+        x_tr, x_val, y_tr, y_val = _grouped_holdout(x_fit, y_fit, groups, member_seed)
+        member = XGBRegressor(random_state=member_seed, **_XGB_PARAMS)
+        member.fit(x_tr, y_tr, eval_set=[(x_val, y_val)], verbose=False)
+        members.append(member)
+    return members[0] if n_models == 1 else _LogMeanEnsemble(members)
 
 
 def predict_cells(model: XGBRegressor, eval_df: pd.DataFrame, features: list[str]) -> pd.DataFrame:
@@ -133,21 +182,30 @@ def run_evaluate(
     folds_n: int = 10,
     seed: int = 42,
     tol: float = 0.05,
+    n_models: int = 5,
+    group_by_ship: bool = False,
 ) -> int:
-    """Train + score one XGBoost model per masked-holdout fold; print per-fold and aggregate metrics.
+    """Train + score one model per holdout fold; print per-fold and aggregate metrics.
 
-    Mirrors ``evaluation._cmd_generate``: build eligible rows, split into ``folds_n``, and for each fold
-    write ``train.csv``/``eval.csv``, fit on the train split, answer the eval predict cells, persist
+    Mirrors ``evaluation._cmd_generate``: build eligible rows, split them, and for each fold write
+    ``train.csv``/``eval.csv``, fit on the train split, answer the eval predict cells, persist
     ``answer.csv`` (so ``evaluation evaluate`` can cross-check), and grade against the global truth.
+    ``group_by_ship`` swaps the random split for honest leave-one-ship-out folds (one whole unseen ship
+    per fold); ``n_models`` sets the log-space seed-bagging ensemble size passed to ``train_model``.
     """
     df = folds.load_features(features_path)
     manifest = _load_manifest(manifest_path)
     features = manifest['predict_safe_features']
 
     eligible = folds.select_eligible(df)
-    fold_rows = folds.assign_folds(eligible, folds_n, seed)
+    if group_by_ship:
+        fold_rows = folds.assign_folds_by_ship(eligible, seed)
+        split_desc = f'{len(fold_rows)} leave-one-ship-out folds (seed {seed})'
+    else:
+        fold_rows = folds.assign_folds(eligible, folds_n, seed)
+        split_desc = f'{folds_n} random folds (seed {seed})'
     truth = scoring.build_truth(df)
-    print(f'eligible rows: {len(eligible)}  ->  {folds_n} folds (seed {seed}); training on steady single-fuel rows')
+    print(f'eligible rows: {len(eligible)}  ->  {split_desc}; ensemble n_models={n_models}')
 
     header = f'{"fold":>4}  {"n":>5}  {"miss":>4}  ' + '  '.join(f'{m:>14}' for m in _METRICS)
     print(header)
@@ -155,10 +213,11 @@ def run_evaluate(
 
     agg: dict[str, list[float]] = {m: [] for m in _METRICS}
     for k, rows in enumerate(fold_rows, start=1):
+        label = str(rows[0]['ship']) if group_by_ship else str(k)
         fold_dir = Path(out_dir) / str(k)
         folds.write_fold(df, manifest, rows, str(fold_dir))
         eval_df = folds.load_features(str(fold_dir / 'eval.csv'))
-        model = train_model(folds.load_features(str(fold_dir / 'train.csv')), features, seed)
+        model = train_model(folds.load_features(str(fold_dir / 'train.csv')), features, seed, n_models)
         predict_cells(model, eval_df, features).to_csv(fold_dir / 'answer.csv', index=False)
 
         m = scoring.fold_metrics(
@@ -166,7 +225,7 @@ def run_evaluate(
         )
         for name in _METRICS:
             agg[name].append(m[name])
-        print(f'{k:>4}  {m["n"]:>5}  {m["n_missing"]:>4}  ' + '  '.join(f'{m[x]:>14.6f}' for x in _METRICS))
+        print(f'{label:>4}  {m["n"]:>5}  {m["n_missing"]:>4}  ' + '  '.join(f'{m[x]:>14.6f}' for x in _METRICS))
 
     precisions = agg['precision']
     print('-' * len(header))
@@ -175,18 +234,18 @@ def run_evaluate(
     )
     print(
         f'   mae avg={np.nanmean(agg["mae"]):.6f}   rmse avg={np.nanmean(agg["rmse"]):.6f}   '
-        f'mape avg={np.nanmean(agg["mape"]):.6f}'
+        f'r2 avg={np.nanmean(agg["r2"]):.6f}   mape avg={np.nanmean(agg["mape"]):.6f}'
     )
     return 0
 
 
-def run_predict(features_path: str, manifest_path: str, out_path: str = 'etl/submission.csv') -> int:
+def run_predict(features_path: str, manifest_path: str, out_path: str = 'etl/submission.csv', n_models: int = 5) -> int:
     """Train on every labelled steady single-fuel row, then write the 102-cell README submission CSV."""
     df = folds.load_features(features_path)
     manifest = _load_manifest(manifest_path)
     features = manifest['predict_safe_features']
 
-    model = train_model(df, features)
+    model = train_model(df, features, n_models=n_models)
     answer = predict_cells(model, df, features)
 
     out = Path(out_path)
