@@ -19,20 +19,6 @@ class numUtils {
       maximumFractionDigits: decimalPlaces,
     }).format(value);
   }
-
-  /**
-   * Convert a value to a finite number, or return a fallback for invalid values.
-   *
-   * @static
-   * @param {*} value - The value to convert.
-   * @param {number} [fallback=0] - The value to return when conversion is invalid or non-finite.
-   * @returns {number} The finite numeric value, or the fallback.
-   */
-  static toFiniteNumber(value, fallback = 0) {
-    const number = Number(value ?? fallback);
-
-    return Number.isFinite(number) ? number : fallback;
-  }
 }
 
 export default numUtils;

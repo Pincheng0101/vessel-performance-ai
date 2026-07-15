@@ -12,17 +12,6 @@ class pathUtils {
   }
 
   /**
-   * Extracts the directory portion of a given path based on the specified separator.
-   * @param {string} path - The full path string.
-   * @param {string} separator - The separator to use (default is '/').
-   * @returns {string} The substring from the beginning up to and including the last separator. If the separator is not found, returns the original path.
-   */
-  static extractDirectory(path, separator) {
-    const index = path.lastIndexOf(separator);
-    return path.slice(0, index >= 0 ? index + 1 : '');
-  }
-
-  /**
    * Gets the lowercased file extension from a path, including the leading dot.
    *
    * @param {string} path - The file path or filename.

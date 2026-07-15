@@ -19,16 +19,6 @@ describe('pathUtils.extractLast', () => {
   });
 });
 
-describe('pathUtils.extractDirectory', () => {
-  test('returns the directory portion including the trailing separator', () => {
-    expect(pathUtils.extractDirectory('a/b/c', '/')).toBe('a/b/');
-  });
-
-  test('returns an empty string when the separator is absent', () => {
-    expect(pathUtils.extractDirectory('abc', '/')).toBe('');
-  });
-});
-
 describe('pathUtils.getFileExtension', () => {
   test.each([
     ['photo.PNG', '.png'],

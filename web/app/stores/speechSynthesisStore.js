@@ -51,7 +51,6 @@ export const useSpeechSynthesisStore = defineStore('speechSynthesis', () => {
   return {
     isPlaying,
     isSupported,
-    setText,
     speak: start,
     speechId,
     stop,

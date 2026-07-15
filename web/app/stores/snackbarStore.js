@@ -6,8 +6,6 @@ import * as SnackbarConstant from '~/constants/SnackbarConstant';
  */
 
 export const useSnackbarStore = defineStore('snackbar', () => {
-  const { $rollbar } = useNuxtApp();
-
   /**
    * @type {SnackbarMessage}
    */
@@ -25,25 +23,10 @@ export const useSnackbarStore = defineStore('snackbar', () => {
     setMessage({ text, type: SnackbarConstant.Type.ERROR, ...options });
   };
 
-  const setActionSuccess = (i18nKey, options = {}) => {
-    setMessage({ action: i18nKey, type: SnackbarConstant.Type.SUCCESS, ...options });
-  };
-
-  const setActionFailure = (i18nKey, options = {}) => {
-    setMessage({ action: i18nKey, type: SnackbarConstant.Type.ERROR, ...options });
-  };
-
-  const report = (error) => {
-    $rollbar?.error(error);
-  };
-
   return {
     message,
     setMessage,
     setSuccess,
     setFailure,
-    setActionSuccess,
-    setActionFailure,
-    report,
   };
 });

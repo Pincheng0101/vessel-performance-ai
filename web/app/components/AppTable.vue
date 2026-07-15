@@ -4,7 +4,12 @@ import * as TableConstant from '~/constants/TableConstant';
 
 const isInsideDialog = inject('isInsideDialog', false);
 
-const { encodePageTokens } = usePagination();
+// One page token per visited page; the URL carries the comma-joined trail so a
+// reload can rebuild the token map (lifted from the removed usePagination composable).
+const encodePageTokens = (nextTokenMap, page) => {
+  const tokens = Array.from({ length: page - 1 }, (_, i) => nextTokenMap[i + 1]).filter(Boolean);
+  return tokens.length ? encodeURIComponent(tokens.join(',')) : undefined;
+};
 
 const props = defineProps({
   title: {
