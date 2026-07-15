@@ -88,8 +88,20 @@ const buildTheme = () => {
   };
 };
 
+// A chart inside an inactive tab (or any hidden container) has a 0×0 element; ECharts
+// warns and renders nothing when init'd there. Defer init until the ResizeObserver
+// reports a real size — it fires as soon as the tab becomes visible.
+const hasSize = () => el.value?.clientWidth > 0 && el.value?.clientHeight > 0;
+
 const render = () => {
   if (!el.value) return;
+  if (!hasSize()) {
+    // Hidden right now (e.g. a theme toggle while on another tab): drop the stale chart so
+    // the observer rebuilds it with the current theme once the container is visible again.
+    chart?.dispose();
+    chart = null;
+    return;
+  }
   chart?.dispose();
   echarts.registerTheme(THEME_NAME, buildTheme());
   chart = echarts.init(el.value, THEME_NAME);
@@ -102,7 +114,11 @@ onMounted(async () => {
   // Canvas text uses whatever font is loaded at draw time — wait for Roboto first.
   await document.fonts?.ready?.catch(() => {});
   render();
-  resizeObserver = new ResizeObserver(() => chart?.resize());
+  resizeObserver = new ResizeObserver(() => {
+    if (!hasSize()) return;
+    if (chart) chart.resize();
+    else render();
+  });
   resizeObserver.observe(el.value);
 });
 
