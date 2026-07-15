@@ -20,13 +20,13 @@ const state = reactive({
 </script>
 ```
 
-This is the dominant pattern (~266 of 711 SFCs). Single-value state can still
+This is the dominant pattern for multi-field state. Single-value state can still
 use `ref()`; the convention is about grouping, not banning `ref()`.
 
 ### No `defineEmits` — thin Vuetify wrappers only
 
-Components do **not** declare custom emits via `defineEmits`. Verified: 0 of 578
-components use it.
+Components do **not** declare custom emits via `defineEmits`. Verified: 0 of the
+current components use it.
 
 Instead, form/input components are thin wrappers around Vuetify inputs that
 bind through `v-model` and attach handlers inline on the underlying input:

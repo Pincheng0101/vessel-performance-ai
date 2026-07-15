@@ -39,7 +39,7 @@ const props = defineProps({
   },
 });
 
-// Welcome copy — hardcoded (previously fetched from the LangForge agent ui_config).
+// Welcome copy — hardcoded (previously fetched from the platform agent ui_config).
 const COPILOT_TITLE = '您好，我是船舶效能分析助理';
 const COPILOT_DESCRIPTION = '可以用自然語言查詢船隊效能資料湖：速度損失 (speed loss) 趨勢、CII 評級、異常預警、'
   + '維修建議與成本效益等。';

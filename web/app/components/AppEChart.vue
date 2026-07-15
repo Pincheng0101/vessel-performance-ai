@@ -1,6 +1,6 @@
 <script setup>
 // Shared ECharts wrapper for the fleet dashboard. Bakes in the Phase 3 spike learnings:
-// a langforge-derived theme (Roboto font + distinct categorical palette + axis/tooltip/
+// a platform-derived theme (Roboto font + distinct categorical palette + axis/tooltip/
 // legend colors from the Vuetify theme), waits for fonts before the first canvas render,
 // rebuilds on light/dark toggle, and handles resize + dispose. Callers pass a plain
 // ECharts `option`; all styling comes from the theme so charts stay consistent.

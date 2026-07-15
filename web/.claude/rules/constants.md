@@ -7,7 +7,7 @@ paths:
 
 ### Always wrap in `Object.freeze(...)`
 
-Verified: 73 of 74 constant files use `Object.freeze`. New constants should
+Verified: every constant file uses `Object.freeze`. New constants should
 follow suit.
 
 ### Two shapes, chosen by use case
@@ -26,16 +26,11 @@ const Type = Object.freeze({
 entry with `i18nTitle`, `value`, and optional `icon`:
 
 ```js
-const EditorMode = Object.freeze({
-  DESIGN: {
-    i18nTitle: '__workflowEditorModeDesign',
-    value: 'design',
-    icon: 'mdi-transit-connection-variant',
-  },
-  CODE: {
-    i18nTitle: '__workflowEditorModeCode',
-    value: 'code',
-    icon: 'mdi-code-json',
+const ContentBlock = Object.freeze({
+  THINKING: {
+    i18nTitle: '__messageAgentThinking',
+    name: 'thinking',
+    value: 'Thinking...',
   },
 });
 ```

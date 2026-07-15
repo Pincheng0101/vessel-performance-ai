@@ -93,7 +93,7 @@ Three or more tests of the same shape → collapse to `test.each`.
 ## Async
 
 - Use `async`/`await`, never `.then`.
-- `delay` / `waitFor` style tests use `vi.useFakeTimers()` +
+- Timer-driven tests (e.g. `delay`) use `vi.useFakeTimers()` +
   `vi.advanceTimersByTimeAsync()` — don't actually wait.
 
 ## Comments & fixtures
