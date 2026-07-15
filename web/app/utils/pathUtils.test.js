@@ -57,35 +57,3 @@ describe('pathUtils.appendTrailingSlash', () => {
     expect(pathUtils.appendTrailingSlash(input)).toBe('');
   });
 });
-
-describe('pathUtils.removeTrailingSlash', () => {
-  test('removes the trailing slash when present', () => {
-    expect(pathUtils.removeTrailingSlash('a/b/')).toBe('a/b');
-  });
-
-  test('returns the input unchanged when no trailing slash exists', () => {
-    expect(pathUtils.removeTrailingSlash('a/b')).toBe('a/b');
-  });
-
-  test.each([null, undefined, ''])('returns an empty string for falsy input %j', (input) => {
-    expect(pathUtils.removeTrailingSlash(input)).toBe('');
-  });
-});
-
-describe('pathUtils.removeLastSegment', () => {
-  test('drops the last segment of a path', () => {
-    expect(pathUtils.removeLastSegment('a/b/c')).toBe('a/b/');
-  });
-
-  test('normalises a trailing slash before dropping', () => {
-    expect(pathUtils.removeLastSegment('a/b/c/')).toBe('a/b/');
-  });
-
-  test('returns an empty string when no segments remain', () => {
-    expect(pathUtils.removeLastSegment('a')).toBe('');
-  });
-
-  test('returns an empty string for empty input', () => {
-    expect(pathUtils.removeLastSegment('')).toBe('');
-  });
-});

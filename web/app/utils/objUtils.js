@@ -272,44 +272,6 @@ class objUtils {
 
     return obj;
   }
-
-  /**
-   * Returns all values found at the given path in an object.
-   * Supports "[]" to expand arrays at that segment.
-   * Example: "parameters.payload.retrievers[].retrieverType"
-   *
-   * @param {Object} obj
-   * @param {string} path
-   * @returns {any[]} possibly empty array
-   */
-  static getValuesAtPath(obj, path) {
-    if (!obj) return [];
-    const segments = path.split('.');
-
-    const dfs = (node, i) => {
-      if (node == null) return [];
-      if (i === segments.length) return [node];
-
-      const seg = segments[i];
-      const isArraySeg = seg.endsWith('[]');
-      const key = isArraySeg ? seg.slice(0, -2) : seg;
-
-      const next = node?.[key];
-      if (isArraySeg) {
-        if (!Array.isArray(next)) return [];
-        // Flatten: recurse over each element
-        let acc = [];
-        for (const item of next) {
-          acc = acc.concat(dfs(item, i + 1));
-        }
-        return acc;
-      } else {
-        return dfs(next, i + 1);
-      }
-    };
-
-    return dfs(obj, 0);
-  }
 }
 
 export default objUtils;

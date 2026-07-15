@@ -141,18 +141,3 @@ describe('objUtils.parseStringLiteral', () => {
     expect(objUtils.parseStringLiteral([{ n: '2' }])).toEqual([{ n: 2 }]);
   });
 });
-
-describe('objUtils.getValuesAtPath', () => {
-  test('returns the value at a simple dot path', () => {
-    expect(objUtils.getValuesAtPath({ a: { b: 1 } }, 'a.b')).toEqual([1]);
-  });
-
-  test('expands "[]" segments and concatenates values across array elements', () => {
-    const obj = { items: [{ v: 1 }, { v: 2 }, { v: 3 }] };
-    expect(objUtils.getValuesAtPath(obj, 'items[].v')).toEqual([1, 2, 3]);
-  });
-
-  test('returns an empty array when an intermediate segment is missing', () => {
-    expect(objUtils.getValuesAtPath({ a: 1 }, 'a.b.c')).toEqual([]);
-  });
-});

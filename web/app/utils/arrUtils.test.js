@@ -12,20 +12,6 @@ describe('arrUtils.cast', () => {
   });
 });
 
-describe('arrUtils.isEmpty', () => {
-  test('returns true for an empty array', () => {
-    expect(arrUtils.isEmpty([])).toBe(true);
-  });
-
-  test('returns false for a non-empty array', () => {
-    expect(arrUtils.isEmpty([1])).toBe(false);
-  });
-
-  test.each([null, undefined, '', {}])('returns false for non-array %j', (input) => {
-    expect(arrUtils.isEmpty(input)).toBe(false);
-  });
-});
-
 describe('arrUtils.deduplicate', () => {
   test('removes duplicate primitives preserving first occurrence order', () => {
     expect(arrUtils.deduplicate([1, 2, 1, 3, 2])).toEqual([1, 2, 3]);

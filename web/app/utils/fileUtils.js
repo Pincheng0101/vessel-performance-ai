@@ -67,52 +67,6 @@ class fileUtils {
   };
 
   /**
-   * Creates and triggers a file download, using either a provided URL
-   * or data (e.g., JSON object, string, Blob, ArrayBuffer) as the source.
-   *
-   * - If `url` is provided, the file will be downloaded from that location.
-   * - If `data` is provided instead, it will be converted into a Blob
-   *   (with optional MIME type) and then downloaded.
-   *
-   * @param {Object} options - The download options.
-   * @param {string} options.url - The URL of the file to be downloaded.
-   * @param {Object} options.data - The data to be downloaded as a file.
-   * @param {string} options.fileName - The suggested file name for the downloaded file.
-   * @param {string} options.type - The MIME type to use when creating the file.
-   */
-  static download({
-    url,
-    data,
-    fileName = '',
-    type,
-  }) {
-    const resolvedType = type ?? 'application/octet-stream';
-    const a = document.createElement('a');
-    let downloadUrl = url;
-
-    if (!url && data !== undefined && data !== null) {
-      let blob;
-      if (typeof data === 'object' && resolvedType === 'application/json') {
-        blob = new Blob([JSON.stringify(data, null, 2)], { type: resolvedType });
-      } else if (data instanceof Blob) {
-        blob = data;
-      } else {
-        blob = new Blob([data], { type: resolvedType });
-      }
-      downloadUrl = URL.createObjectURL(blob);
-    }
-
-    a.href = new URL(downloadUrl, window.location.origin).href;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    if (downloadUrl.startsWith('blob:')) {
-      URL.revokeObjectURL(downloadUrl);
-    }
-  };
-
-  /**
    * Extracts all files from DataTransferItemList, recursively reading nested
    * directories and preserving folder structure via webkitRelativePath.
    * Works with drag-drop, paste, and other DataTransfer events.

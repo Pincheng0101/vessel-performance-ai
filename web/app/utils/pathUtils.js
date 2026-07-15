@@ -45,29 +45,6 @@ class pathUtils {
     if (!text) return '';
     return text.endsWith('/') ? text : `${text}/`;
   }
-
-  /**
- * Removes the trailing forward slash from the given string, if it exists.
- *
- * @param {string} text - The input string.
- * @returns {string} The string without a trailing forward slash.
- */
-  static removeTrailingSlash(text) {
-    if (!text) return '';
-    return text.endsWith('/') ? text.slice(0, -1) : text;
-  }
-
-  /**
-   * Removes the last path segment from a given path.
-   * @param {string} path - The input path string.
-   * @returns {string} The path with the last segment removed, or empty string if no segments remain.
-   */
-  static removeLastSegment(path) {
-    if (!path) return '';
-    const normalized = path.endsWith('/') ? path.slice(0, -1) : path;
-    const result = pathUtils.extractDirectory(normalized, '/');
-    return result === normalized ? '' : result;
-  }
 }
 
 export default pathUtils;

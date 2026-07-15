@@ -11,16 +11,6 @@ class arrUtils {
   }
 
   /**
-   * Checks if the given value is an empty array.
-   *
-   * @param {any} value - The value to check.
-   * @returns {boolean} Returns `true` if the value is an empty array, otherwise `false`.
-   */
-  static isEmpty(value) {
-    return Array.isArray(value) && value.length === 0;
-  }
-
-  /**
    * Deduplicates an array by removing duplicate values.
    *
    * @param {Array} value - The array to deduplicate.

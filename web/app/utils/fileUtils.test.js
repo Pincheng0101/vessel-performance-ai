@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import fileUtils from './fileUtils';
 
 const PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgo=';
@@ -36,28 +36,6 @@ describe('fileUtils.getDataUrlByteLength', () => {
 
   test('returns 0 when the data URL cannot be parsed', () => {
     expect(fileUtils.getDataUrlByteLength('not a data url')).toBe(0);
-  });
-});
-
-describe('fileUtils.download', () => {
-  test('creates a downloadable blob for empty string data', () => {
-    const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test');
-    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
-    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-
-    fileUtils.download({
-      data: '',
-      fileName: 'empty.txt',
-      type: 'text/plain',
-    });
-
-    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
-    expect(click).toHaveBeenCalled();
-    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:test');
-
-    createObjectUrl.mockRestore();
-    revokeObjectUrl.mockRestore();
-    click.mockRestore();
   });
 });
 

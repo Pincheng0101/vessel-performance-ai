@@ -33,35 +33,6 @@ class numUtils {
 
     return Number.isFinite(number) ? number : fallback;
   }
-
-  /**
-   * Format a percentage value as a display label with compact boundary labels.
-   *
-   * @static
-   * @param {number|string} value - A percentage value, e.g. 42 for 42%.
-   * @param {number} [decimalPlaces=1] - The number of fraction digits to display.
-   * @returns {string} The formatted percentage label.
-   */
-  static formatPercentageLabel(value, decimalPlaces = 1) {
-    const percentage = this.toFiniteNumber(value);
-
-    if (percentage === 100) {
-      return '100%';
-    }
-
-    const threshold = 1 / Math.pow(10, decimalPlaces);
-    const upperBound = 100 - threshold;
-
-    if (percentage > upperBound && percentage < 100) {
-      return `>${this.format(upperBound, decimalPlaces)}%`;
-    }
-
-    if (percentage > 0 && percentage < threshold) {
-      return `<${this.format(threshold, decimalPlaces)}%`;
-    }
-
-    return `${this.format(percentage, decimalPlaces)}%`;
-  }
 }
 
 export default numUtils;
