@@ -35,18 +35,12 @@ const METRIC_ZH = {
   slip: '螺槳滑失',
   excess_foc: '超額油耗',
 };
-const METRIC_ICON = {
-  speed_loss: 'mdi-speedometer-slow',
-  sfoc: 'mdi-engine',
-  slip: 'mdi-fan',
-  excess_foc: 'mdi-gas-station',
-};
 const METRIC_ORDER = ['speed_loss', 'sfoc', 'slip', 'excess_foc'];
 const SEVERITY_LABEL = { low: '低', medium: '中', high: '高' };
 const SEVERITY_ORDER = ['high', 'medium', 'low'];
 const STATUS_LABEL = { open: '開啟', closed: '已關閉' };
 const metricTitle = m => METRIC_ZH[m] || m;
-const metricIcon = m => METRIC_ICON[m] || 'mdi-alert-circle-outline';
+const metricIcon = m => FleetChartConstant.MetricIcon[m] || 'mdi-alert-circle-outline';
 const severityColor = s => FleetChartConstant.SeverityColor[s] || FleetChartConstant.FallbackColor;
 
 const rows = computed(() => (alerts.value ?? []).map((r, i) => ({

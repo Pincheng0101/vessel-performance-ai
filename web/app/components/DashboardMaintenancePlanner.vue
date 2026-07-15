@@ -43,16 +43,7 @@ const ACTION_LABEL = {
   coating_renewal: '船體塗層更新',
   engine_inspection: '主機檢查',
 };
-// Same icon choices as the vessel tab's own maintenance-recommendation list — one action, one
-// icon, fleet-wide.
-const ACTION_ICON = {
-  hull_cleaning: 'mdi-spray-bottle',
-  propeller_polishing: 'mdi-fan',
-  propeller_repair: 'mdi-fan',
-  coating_renewal: 'mdi-format-paint',
-  engine_inspection: 'mdi-engine',
-};
-const actionIcon = a => ACTION_ICON[a] || 'mdi-wrench-outline';
+const actionIcon = a => FleetChartConstant.ActionIcon[a] || 'mdi-wrench-outline';
 const SERVICE_LABEL = { dry_dock: '乾塢', in_water: '水下' };
 const PRIORITY_LABEL = { high: '高', medium: '中', low: '低' };
 const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };

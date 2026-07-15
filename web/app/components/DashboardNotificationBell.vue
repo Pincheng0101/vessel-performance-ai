@@ -8,6 +8,8 @@
 // factMaintenanceRecommendation, same empty params): useAsyncData's key dedupes them, so this
 // costs nothing extra once either tab has also loaded, and is otherwise just three small JSON
 // reads — not useFleetDaily's per-ship daily fan-out, which this bell doesn't need.
+import * as FleetChartConstant from '~/constants/FleetChartConstant';
+
 const server = useServer();
 const router = useRouter();
 const route = useRoute();
@@ -16,20 +18,16 @@ const { data: alerts } = await server.datalake.factAlert({}, { lazy: false });
 const { data: recs } = await server.datalake.factMaintenanceRecommendation({}, { lazy: false });
 const { data: overview } = await server.datalake.aggFleetDaily({}, { lazy: false });
 
-// Mirrors DashboardFleetAlerts.vue / DashboardMaintenancePlanner.vue's own label + icon maps —
-// kept local (not shared) for the same reason those two don't share theirs: each caller stays
-// self-contained rather than depending on another tab's module.
+// Mirrors DashboardFleetAlerts.vue / DashboardMaintenancePlanner.vue's own label maps — kept
+// local (not shared) for the same reason those two don't share theirs: each caller stays
+// self-contained rather than depending on another tab's module. Icons DO come from a shared
+// dictionary (FleetChartConstant) — those need to actually match across every list a ship's
+// metrics/actions can show up in, not just look locally consistent.
 const METRIC_ZH = {
   speed_loss: '速度損失',
   sfoc: '主機油耗 (SFOC)',
   slip: '螺槳滑失',
   excess_foc: '超額油耗',
-};
-const METRIC_ICON = {
-  speed_loss: 'mdi-speedometer-slow',
-  sfoc: 'mdi-engine',
-  slip: 'mdi-fan',
-  excess_foc: 'mdi-gas-station',
 };
 const ACTION_LABEL = {
   hull_cleaning: '船體清潔',
@@ -37,13 +35,6 @@ const ACTION_LABEL = {
   propeller_repair: '螺旋槳修理',
   coating_renewal: '船體塗層更新',
   engine_inspection: '主機檢查',
-};
-const ACTION_ICON = {
-  hull_cleaning: 'mdi-spray-bottle',
-  propeller_polishing: 'mdi-fan',
-  propeller_repair: 'mdi-fan',
-  coating_renewal: 'mdi-format-paint',
-  engine_inspection: 'mdi-engine',
 };
 
 // The fleet's own most recent reporting day — the same reference every other "N 天前"/"N 天後"
@@ -69,7 +60,7 @@ const highSeverityAlerts = computed(() => {
     .sort((a, b) => (a.opened_day ?? 0) - (b.opened_day ?? 0))
     .map(a => ({
       shipId: a.ship_id,
-      icon: METRIC_ICON[a.driver_metric] || 'mdi-alert-circle-outline',
+      icon: FleetChartConstant.MetricIcon[a.driver_metric] || 'mdi-alert-circle-outline',
       text: METRIC_ZH[a.driver_metric] || a.driver_metric,
       detail: fmtOpenFor(a.opened_day),
     }));
@@ -82,7 +73,7 @@ const overdueMaintenance = computed(() => {
     .sort((a, b) => (a.due_day ?? 0) - (b.due_day ?? 0))
     .map(r => ({
       shipId: r.ship_id,
-      icon: ACTION_ICON[r.action_type] || 'mdi-wrench-outline',
+      icon: FleetChartConstant.ActionIcon[r.action_type] || 'mdi-wrench-outline',
       text: ACTION_LABEL[r.action_type] || r.action_type,
       detail: fmtOverdueBy(r.due_day),
     }));

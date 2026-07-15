@@ -715,11 +715,11 @@ const ciiTrendOption = computed(() => {
 // propeller work tracks roughness in µm. net_saving_usd is only populated for the economic
 // actions (hull cleaning / polishing) — engine inspection has no saving model.
 const MAINT_ACTION = {
-  hull_cleaning: { title: '船體清潔', icon: 'mdi-spray-bottle', unit: '%' },
-  propeller_polishing: { title: '螺旋槳拋光', icon: 'mdi-fan', unit: 'µm' },
-  propeller_repair: { title: '螺旋槳修理', icon: 'mdi-fan-alert', unit: 'µm' },
-  coating_renewal: { title: '船體塗層更新', icon: 'mdi-format-paint', unit: '%' },
-  engine_inspection: { title: '主機檢查', icon: 'mdi-engine', unit: '%' },
+  hull_cleaning: { title: '船體清潔', icon: FleetChartConstant.ActionIcon.hull_cleaning, unit: '%' },
+  propeller_polishing: { title: '螺旋槳拋光', icon: FleetChartConstant.ActionIcon.propeller_polishing, unit: 'µm' },
+  propeller_repair: { title: '螺旋槳修理', icon: FleetChartConstant.ActionIcon.propeller_repair, unit: 'µm' },
+  coating_renewal: { title: '船體塗層更新', icon: FleetChartConstant.ActionIcon.coating_renewal, unit: '%' },
+  engine_inspection: { title: '主機檢查', icon: FleetChartConstant.ActionIcon.engine_inspection, unit: '%' },
 };
 const PRIORITY_META = {
   high: { label: '高', color: 'error', rank: 0 },
@@ -885,13 +885,7 @@ const METRIC_ZH = {
   excess_foc: '超額油耗',
 };
 const metricTitle = m => METRIC_ZH[m] || m;
-const METRIC_ICON = {
-  speed_loss: 'mdi-speedometer-slow',
-  sfoc: 'mdi-engine',
-  slip: 'mdi-fan',
-  excess_foc: 'mdi-gas-station',
-};
-const metricIcon = m => METRIC_ICON[m] || 'mdi-alert-circle-outline';
+const metricIcon = m => FleetChartConstant.MetricIcon[m] || 'mdi-alert-circle-outline';
 
 // --- Anomaly episode timeline (swim lanes by metric) ---
 const SEVERITY_ORDER = ['low', 'medium', 'high'];

@@ -92,12 +92,40 @@ const ServiceTypeColor = Object.freeze({
 const SpeedLossIsoTrigger = 8;
 const SpeedLossThreshold = 10;
 
+// fact_alert.driver_metric icon, one dictionary shared by every list that scans alerts by metric
+// (Fleet Alerts table, the notification bell, the vessel deep-dive's own alert feed). Each metric
+// gets its own glyph — sfoc used to share mdi-engine with the engine_inspection *action* below,
+// and slip used to share mdi-fan with the propeller_* actions, so the same icon meant a diagnostic
+// reading in one list and a physical maintenance job in another.
+const MetricIcon = Object.freeze({
+  speed_loss: 'mdi-speedometer-slow',
+  sfoc: 'mdi-gauge',
+  // No propeller glyph exists in @mdi/font — slip is reported as a %, hence percent-outline.
+  slip: 'mdi-percent-outline',
+  excess_foc: 'mdi-gas-station',
+});
+
+// fact_maintenance_recommendation.action_type icon, shared by the maintenance planner, the
+// notification bell, and the vessel deep-dive's recommendation list. propeller_polishing and
+// propeller_repair used to both be mdi-fan — indistinguishable in a list meant to be scanned by
+// icon — repair now gets its own (mdi-fan-alert, already how the vessel deep-dive drew it before
+// this file existed).
+const ActionIcon = Object.freeze({
+  hull_cleaning: 'mdi-spray-bottle',
+  propeller_polishing: 'mdi-fan',
+  propeller_repair: 'mdi-fan-alert',
+  coating_renewal: 'mdi-format-paint',
+  engine_inspection: 'mdi-engine',
+});
+
 export {
+  ActionIcon,
   CategoricalPalette,
   CauseColor,
   CiiColor,
   FallbackColor,
   Font,
+  MetricIcon,
   SemanticRamp,
   ServiceTypeColor,
   SeverityColor,
