@@ -237,7 +237,7 @@ const handleMapClick = async (params) => {
   <div class="d-flex flex-column ga-6">
     <UsageResultCardFrame>
       <template #title>
-        <div class="w-100">
+        <div>
           <DashboardFleetSelector
             v-model="selectedFleet"
             :items="fleetOptions"
@@ -245,20 +245,20 @@ const handleMapClick = async (params) => {
           <div class="text-caption text-medium-emphasis mt-1">
             {{ T.fleetMap }}
           </div>
-          <div class="color-by-toggle d-flex justify-end mt-2">
-            <AppButtonToggle
-              v-model="colorBy"
-              :button-width="100"
-              :elevation="0"
-              :items="[
-                { title: '速度損失', value: 'speed_loss' },
-                { title: 'CII', value: 'cii' },
-              ]"
-            />
-          </div>
         </div>
       </template>
       <UsageResultCard>
+        <div class="color-by-toggle d-flex justify-end mb-2">
+          <AppButtonToggle
+            v-model="colorBy"
+            :button-width="100"
+            :elevation="0"
+            :items="[
+              { title: '速度損失', value: 'speed_loss' },
+              { title: 'CII', value: 'cii' },
+            ]"
+          />
+        </div>
         <div class="map-chart-wrap">
           <AppEChart
             ref="chartRef"
@@ -381,7 +381,7 @@ const handleMapClick = async (params) => {
 
 // AppButtonToggle's v-btn defaults to full-emphasis text when inactive, which reads as two
 // equally-weighted options — the rest of the app treats the non-active option as muted.
-.color-by-toggle :deep(.v-btn:not(.v-btn--active) .v-btn__content) {
+:deep(.v-btn:not(.v-btn--active) .v-btn__content) {
   color: rgba(var(--v-theme-on-surface), 0.6);
 }
 </style>
