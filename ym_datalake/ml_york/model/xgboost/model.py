@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import GroupShuffleSplit, train_test_split
+from sklearn.model_selection import train_test_split
 from xgboost import XGBRegressor
 
 from ym_datalake.ml_york.evaluation import folds, scoring
@@ -32,19 +32,16 @@ _FUEL_PREFIX = 'ME_FULLSPEED_CONSUMP_'
 _METRICS = ['precision', 'one_minus_mape', 'mae', 'rmse', 'r2', 'mape']
 
 # XGBoost 3.x: early_stopping_rounds / eval_metric are CONSTRUCTOR kwargs, not fit() args.
-# Regularization-leaning (fewer ships once split cross-ship -> shallower/steadier trees): max_depth 6->5,
-# min_child_weight 5->8, plus gamma / reg_alpha / colsample_bylevel to damp same-ship overfit.
+# The regularization-leaning variant (max_depth 5, min_child_weight 8, gamma/reg_alpha/colsample_bylevel)
+# was ablated and reverted: it regressed precision by ~0.14 on random-fold and ~0.06 on LOSO.
 _XGB_PARAMS = {
     'tree_method': 'hist',
     'n_estimators': 2000,
     'learning_rate': 0.03,
-    'max_depth': 5,
+    'max_depth': 6,
     'subsample': 0.8,
     'colsample_bytree': 0.8,
-    'colsample_bylevel': 0.8,
-    'min_child_weight': 8,
-    'gamma': 1.0,
-    'reg_alpha': 0.5,
+    'min_child_weight': 5,
     'reg_lambda': 1.0,
     'early_stopping_rounds': 50,
     'eval_metric': 'rmse',
@@ -108,39 +105,24 @@ class _LogMeanEnsemble:
         return np.mean([m.predict(x) for m in self.members], axis=0)
 
 
-def _grouped_holdout(x_fit, y_fit, groups, seed, test_size: float = 0.2):
-    """Ship-grouped early-stopping split ``(x_tr, x_val, y_tr, y_val)`` — whole ships held out for val.
-
-    ``GroupShuffleSplit`` keeps every ship wholly in either the fit or the val set, so
-    ``best_iteration`` is chosen against unseen ships rather than same-ship near-duplicate rows.
-    Falls back to a random ``train_test_split`` when there are <2 groups (no ship to hold out).
-    """
-    if groups.nunique() < 2:
-        return train_test_split(x_fit, y_fit, test_size=test_size, random_state=seed)
-    tr_idx, val_idx = next(
-        GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=seed).split(x_fit, y_fit, groups=groups)
-    )
-    return x_fit.iloc[tr_idx], x_fit.iloc[val_idx], y_fit.iloc[tr_idx], y_fit.iloc[val_idx]
-
-
 def train_model(
     train_df: pd.DataFrame, features: list[str], seed: int = 42, n_models: int = 5
 ) -> XGBRegressor | _LogMeanEnsemble:
-    """Fit the steady single-fuel labelled rows, early-stopping on a ship-grouped holdout.
+    """Fit the steady single-fuel labelled rows, early-stopping on a random 10% holdout.
 
     ``n_models > 1`` fits a log-space seed-bagging ensemble: member ``i`` uses ``random_state=seed+i``,
-    so it re-draws its subsample/colsample (free decorrelation) and holds out a different ship subset
-    (stabilised ``best_iteration``). Returns a bare :class:`XGBRegressor` when ``n_models == 1``, else a
-    :class:`_LogMeanEnsemble`; both expose the same ``predict`` so callers stay unchanged.
+    so it re-draws its subsample/colsample AND its early-stopping split (free decorrelation, stabilised
+    ``best_iteration``). Returns a bare :class:`XGBRegressor` when ``n_models == 1``, else a
+    :class:`_LogMeanEnsemble`; both expose the same ``predict`` so callers stay unchanged. A ship-grouped
+    early-stopping split was ablated and reverted (it regressed precision on both harnesses).
     """
     x, y, mask = build_xy(train_df, features)
     x_fit, y_fit = x.loc[mask], y.loc[mask]
-    groups = train_df.loc[mask, 'ship_id']
 
     members: list[XGBRegressor] = []
     for i in range(n_models):
         member_seed = seed + i
-        x_tr, x_val, y_tr, y_val = _grouped_holdout(x_fit, y_fit, groups, member_seed)
+        x_tr, x_val, y_tr, y_val = train_test_split(x_fit, y_fit, test_size=0.1, random_state=member_seed)
         member = XGBRegressor(random_state=member_seed, **_XGB_PARAMS)
         member.fit(x_tr, y_tr, eval_set=[(x_val, y_val)], verbose=False)
         members.append(member)

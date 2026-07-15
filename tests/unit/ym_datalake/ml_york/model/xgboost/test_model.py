@@ -155,29 +155,3 @@ def test_log_mean_ensemble_averages_member_predictions_elementwise():
     ens = model._LogMeanEnsemble(members)
     x = pd.DataFrame({'stw': [0.0, 0.0, 0.0], 'rpm': [0.0, 0.0, 0.0]})  # cols == FEATURES for the stub assert
     assert np.allclose(ens.predict(x), [2.0, 3.0, 4.0])
-
-
-def test_grouped_holdout_holds_out_whole_ships():
-    # 4 ships × 3 rows: a grouped split keeps every ship wholly in fit or val, never straddling.
-    ships = ['S1', 'S1', 'S1', 'S2', 'S2', 'S2', 'S3', 'S3', 'S3', 'S4', 'S4', 'S4']
-    x = pd.DataFrame({'stw': range(len(ships)), 'rpm': range(len(ships))}, dtype=float)
-    y = pd.Series(range(len(ships)), dtype=float)
-    groups = pd.Series(ships)
-    x_tr, x_val, y_tr, y_val = model._grouped_holdout(x, y, groups, seed=0, test_size=0.5)
-
-    tr_ships = set(groups.loc[x_tr.index])
-    val_ships = set(groups.loc[x_val.index])
-    assert tr_ships and val_ships  # both splits non-empty
-    assert tr_ships.isdisjoint(val_ships)  # no ship appears in both
-    assert len(x_tr) + len(x_val) == len(x)
-
-
-def test_grouped_holdout_falls_back_to_random_split_with_one_group():
-    # A single ship -> nunique() < 2 -> plain random train_test_split (nothing to hold a ship out from).
-    x = pd.DataFrame({'stw': range(10), 'rpm': range(10)}, dtype=float)
-    y = pd.Series(range(10), dtype=float)
-    groups = pd.Series(['S1'] * 10)
-    x_tr, x_val, y_tr, y_val = model._grouped_holdout(x, y, groups, seed=0, test_size=0.2)
-
-    assert len(x_val) == 2 and len(x_tr) == 8  # 20% holdout, no grouping constraint
-    assert len(x_tr) + len(x_val) == len(x)
