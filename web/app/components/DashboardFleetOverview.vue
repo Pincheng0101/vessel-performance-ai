@@ -182,7 +182,7 @@ const tableHeaders = [
   { title: 'Speed loss', key: 'sl', sortable: true, minWidth: 120, tooltip: T.speedLoss },
   { title: 'Days since dry-dock', key: 'daysDryDock', sortable: true, minWidth: 110, tooltip: T.daysSinceDryDock },
   { title: 'Days since in-water', key: 'daysInWater', sortable: true, minWidth: 110, tooltip: T.daysSinceInWater },
-  { title: 'Alerts (30d)', key: 'alerts30', sortable: true, width: 96, minWidth: 96, tooltip: T.anomaly },
+  { title: 'Anomalies (30d)', key: 'alerts30', sortable: true, width: 96, minWidth: 96, tooltip: T.anomaly },
   { title: 'Next maintenance', key: 'nextDay', sortable: true, minWidth: 260, tooltip: T.nextMaintenance },
 ];
 const SERVICE_LABEL = { dry_dock: '乾塢', in_water: '水下' };

@@ -34,7 +34,7 @@ const [fleet, fetched] = await Promise.all([
   ]),
   delay(1000),
 ]);
-const { roster, snapshot, monthly: fleetMonthly, latestDate } = fleet;
+const { roster, dailyByShip, snapshot, monthly: fleetMonthly, latestDate } = fleet;
 const [{ data: overviewRows }, { data: recommendations }] = fetched;
 
 // Fleet speed-loss trend: avg_speed_loss_pct is the mean of that day's *valid* (ISO 19030-gated)
@@ -68,6 +68,76 @@ const monthly = computed(() => {
   return [...map.values()];
 });
 
+// --- Trend-chart date range (CII rating trend + Fleet speed-loss trend only) ---
+// Deliberately not wired into the KPI tiles above: those must keep reading the fleet's true
+// current state regardless of what historical period a viewer is browsing here. It carries its
+// own visible label (not the "最新一日" header above), so the two never read as the same date.
+const dataRangeBounds = computed(() => {
+  const rows = overviewRows.value ?? [];
+  return rows.length
+    ? { startDay: rows[0].noon_utc, endDay: rows.at(-1).noon_utc }
+    : { startDay: 0, endDay: 0 };
+});
+// A calendar click hands back a local-midnight JS Date; reproject its Y/M/D onto the UTC
+// day-index grid every other date in the lake lives on — the same technique fleetUtils.todayDay()
+// already uses for "the reader's day."
+const toDayIndex = date => fleetUtils.msToDay(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+const chartRange = reactive({
+  startDay: dataRangeBounds.value.startDay,
+  endDay: dataRangeBounds.value.endDay,
+});
+const chartRangeBounds = computed(() => ({
+  min: new Date(fleetUtils.dayToMs(dataRangeBounds.value.startDay)),
+  max: new Date(fleetUtils.dayToMs(dataRangeBounds.value.endDay)),
+}));
+// v-date-input's own model, bound directly (not derived) — picking a range is two clicks, and
+// after the first one the component emits a single-element array while it waits for the second.
+// A computed getter here used to re-synthesize a full [start, end] pair from the *old* end date
+// on that first click and hand it straight back, which reads to the component as "the range is
+// already complete," so the second click started a new range instead of finishing this one —
+// that's the bug where the end date could never be changed. Only commit to `chartRange` (and
+// the charts it feeds) once a real two-date range comes back out.
+const pickerModel = ref([
+  new Date(fleetUtils.dayToMs(chartRange.startDay)),
+  new Date(fleetUtils.dayToMs(chartRange.endDay)),
+]);
+watch(pickerModel, (val) => {
+  // `multiple="range"` doesn't emit a [start, end] pair — it expands to EVERY date the range
+  // spans (all 182 Date objects for a 6-month pick), always in ascending order. The boundaries
+  // are val[0] and val.at(-1); reading val[1] (as this used to) grabbed the *second day of the
+  // range* as the end, which is why picking Jan–Jun rendered as a 1-day window.
+  if (!Array.isArray(val) || val.length < 2) return;
+  const start = val[0];
+  const end = val.at(-1);
+  if (!start || !end) return;
+  chartRange.startDay = toDayIndex(start);
+  chartRange.endDay = toDayIndex(end);
+});
+const isChartRangeFull = computed(
+  () => chartRange.startDay === dataRangeBounds.value.startDay && chartRange.endDay === dataRangeBounds.value.endDay,
+);
+const resetChartRange = () => {
+  chartRange.startDay = dataRangeBounds.value.startDay;
+  chartRange.endDay = dataRangeBounds.value.endDay;
+  pickerModel.value = [
+    new Date(fleetUtils.dayToMs(chartRange.startDay)),
+    new Date(fleetUtils.dayToMs(chartRange.endDay)),
+  ];
+};
+// A month counts as "in range" if it overlaps the selected window at all — the range picker is
+// day-precision, the CII trend is month-precision, so a month is either fully in or fully out.
+const monthStartDay = (monthStr) => {
+  const [y, m] = monthStr.split('-').map(Number);
+  return fleetUtils.msToDay(Date.UTC(y, m - 1, 1));
+};
+const monthEndDay = (monthStr) => {
+  const [y, m] = monthStr.split('-').map(Number);
+  return fleetUtils.msToDay(Date.UTC(y, m, 0));
+};
+const fleetMonthlyFiltered = computed(() => fleetMonthly.value.filter(
+  r => monthEndDay(r.month) >= chartRange.startDay && monthStartDay(r.month) <= chartRange.endDay,
+));
+
 const mean = (rows, key) => {
   const xs = rows.map(r => r[key]).filter(v => v != null);
   return xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null;
@@ -86,6 +156,32 @@ const deltaTextClass = m => (deltaTone(m) ? `text-${deltaTone(m)}` : 'text-mediu
 
 // Sparklines share the muted speed-loss color, matching the fleet speed-loss trend line.
 const SPEED_LOSS_COLOR = FleetChartConstant.SpeedLossColor;
+// avg_speed_loss_pct's tile/tooltip claim the same methodology as the Fleet Overview tab's KPI
+// (each ship's own last-30-valid-day trailing mean, THEN averaged across ships) — but the
+// generic buildTile below instead means agg_fleet_daily's *cross-sectional* daily value (itself
+// already a same-day average over whichever handful of ships cleared the gate that day) over the
+// last 30 calendar days. Both are "an average of an average," but over different axes, and they
+// generally disagree. Compute the real thing here, off the same per-ship daily rows Fleet
+// Overview uses (dailyByShip, from useFleetDaily), so the two tabs actually match.
+const SPEED_LOSS_WINDOW = 30;
+const shipValidDaily = shipId => (dailyByShip.value[shipId] ?? []).filter(r => r.valid_flag);
+const fleetMeanOf = (vals) => {
+  const xs = vals.filter(v => v != null);
+  return xs.length ? xs.reduce((s, v) => s + v, 0) / xs.length : null;
+};
+// Trailing 30 valid days as of each ship's own last report, averaged across ships — exactly
+// Fleet Overview's `sl` / `avgSpeedLoss30d`.
+const avgSpeedLoss30d = computed(() => fleetMeanOf(
+  roster.map(v => fleetUtils.trailingMean(shipValidDaily(v.ship_id), 'speed_loss_pct', SPEED_LOSS_WINDOW)),
+));
+// The same per-ship trailing mean, but over the 30 valid days ending 30 days before that —
+// trailingMean has no offset parameter, so the window is truncated off the end here first.
+const avgSpeedLoss30dPrev = computed(() => fleetMeanOf(
+  roster.map((v) => {
+    const valid = shipValidDaily(v.ship_id);
+    return fleetUtils.trailingMean(valid.slice(0, Math.max(0, valid.length - SPEED_LOSS_WINDOW)), 'speed_loss_pct', SPEED_LOSS_WINDOW);
+  }),
+));
 // `latest` overrides the tile's headline where the last daily row is not the fleet's current
 // state — the excess-cost sum is folded from each ship's own latest report instead. Speed loss
 // has the same problem for a different reason: a single day's fleet mean only pools whichever
@@ -98,6 +194,8 @@ const METRICS = [
     label: 'Avg speed loss',
     fmt: fmtPct,
     latest: cur => cur,
+    curOverride: () => avgSpeedLoss30d.value,
+    prevOverride: () => avgSpeedLoss30dPrev.value,
     tooltip: FleetGlossaryConstant.Term.avgSpeedLoss,
   },
   {
@@ -119,8 +217,8 @@ const METRICS = [
 
 const buildTile = (dailyRows, sparkRows, m) => {
   const vals = dailyRows.map(r => r[m.key]).filter(v => v != null);
-  const cur = mean(dailyRows.slice(-30), m.key);
-  const prev = mean(dailyRows.slice(-60, -30), m.key);
+  const cur = m.curOverride ? m.curOverride() : mean(dailyRows.slice(-30), m.key);
+  const prev = m.prevOverride ? m.prevOverride() : mean(dailyRows.slice(-60, -30), m.key);
   const delta = cur != null && prev != null ? cur - prev : null;
   // Direction is decided on the *displayed* magnitude: if it rounds to zero at the
   // metric's format (e.g. +0.23 alerts → "0"), treat it as flat, not up.
@@ -158,7 +256,10 @@ const ciiTrendOption = computed(() => ({
   legend: { top: 8, right: 8, data: CII_RATINGS },
   grid: { left: 36, right: 16, top: 40, bottom: 28 },
   tooltip: { trigger: 'axis' },
-  xAxis: { type: 'category', data: fleetMonthly.value.map(r => r.month), axisLabel: { interval: 11 } },
+  // 'auto' (not a fixed interval) — a fixed stride tuned for the full ~60-month default range
+  // showed exactly one label once the date-range filter narrowed the category count, since
+  // "every 12th" skips right past a filtered array of only a few months.
+  xAxis: { type: 'category', data: fleetMonthlyFiltered.value.map(r => r.month), axisLabel: { interval: 'auto' } },
   yAxis: { type: 'value', minInterval: 1, name: 'ships' },
   series: CII_RATINGS.map(r => ({
     name: r,
@@ -169,7 +270,7 @@ const ciiTrendOption = computed(() => ({
     lineStyle: { width: 0 },
     areaStyle: { opacity: 0.92 },
     itemStyle: { color: FleetChartConstant.CiiColor[r] },
-    data: fleetMonthly.value.map(row => row.ciiCounts[r] ?? 0),
+    data: fleetMonthlyFiltered.value.map(row => row.ciiCounts[r] ?? 0),
   })),
 }));
 
@@ -178,8 +279,7 @@ const ciiTrendOption = computed(() => ({
 // chart underneath it (low opacity) so the smoothing hides no data: the dispersion, and the
 // negative days, are still there to see. Negative is real, not a bug — the reference curve is
 // fitted on a median intercept, so about half of a ship's genuinely clean days sit above it.
-// The window matches the 30d the KPI tiles compare against.
-const SPEED_LOSS_WINDOW = 30;
+// SPEED_LOSS_WINDOW (declared above, by the KPI tiles) is this same 30d window.
 const ROLLING_NAME = `${SPEED_LOSS_WINDOW}-day mean`;
 const RAW_NAME = 'Daily';
 // The unit lives on the right axis's own name now, not repeated in the series label.
@@ -250,10 +350,11 @@ const speedLossTrendOption = computed(() => ({
       return [fleetUtils.dayDate(fleetUtils.msToDay(params[0]?.axisValue)), ...lines].join('<br/>');
     },
   },
-  // Extended back to day 0 (the data lake's actual start) rather than letting the axis
-  // auto-fit to the first non-null point — otherwise the chart silently starts mid-window
-  // and invites "where did 2021-2022 go?" instead of showing the answer.
-  xAxis: { type: 'time', min: fleetUtils.dayToMs(0) },
+  // Follows the shared trend-chart date range, which defaults to the full data period (day 0,
+  // the data lake's actual start) rather than auto-fitting to the first non-null point —
+  // otherwise the chart would silently start mid-window and invite "where did 2021-2022 go?"
+  // instead of showing the answer.
+  xAxis: { type: 'time', min: fleetUtils.dayToMs(chartRange.startDay), max: fleetUtils.dayToMs(chartRange.endDay) },
   yAxis: [
     {
       type: 'value',
@@ -421,6 +522,34 @@ const savingsByShipOption = computed(() => {
       </DashboardKpiCard>
     </div>
 
+    <div class="d-flex align-center ga-1">
+      <v-date-input
+        v-model="pickerModel"
+        multiple="range"
+        label="顯示期間"
+        density="compact"
+        variant="outlined"
+        prepend-icon=""
+        hide-details
+        :min="chartRangeBounds.min"
+        :max="chartRangeBounds.max"
+        class="chart-range-input"
+      />
+      <AppInputTooltip
+        size="x-small"
+        text="僅套用於下方「CII rating trend」與「Fleet speed-loss trend」，不影響上方即時狀態指標"
+      />
+      <AppIconButton
+        v-if="!isChartRangeFull"
+        icon="mdi-restore"
+        tooltip="重設為完整期間"
+        size="small"
+        icon-size="small"
+        variant="text"
+        :on-click="resetChartRange"
+      />
+    </div>
+
     <div class="exec-grid">
       <UsageResultCardFrame
         :title="FleetGlossaryConstant.Title.ciiTrend"
@@ -490,5 +619,9 @@ const savingsByShipOption = computed(() => {
   @media (min-width: 1280px) {
     grid-template-columns: 1fr 1fr;
   }
+}
+
+.chart-range-input {
+  max-width: 280px;
 }
 </style>

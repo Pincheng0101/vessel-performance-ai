@@ -68,7 +68,10 @@ const ciiColor = c => FleetChartConstant.CiiColor[c] || FleetChartConstant.Fallb
 const dotColor = row => (colorBy.value === 'cii' ? ciiColor(row.cii_rating_imo) : speedLossColor(row.speed_loss_pct));
 
 const legend = computed(() => (colorBy.value === 'cii'
-  ? ['A', 'B', 'C', 'D', 'E'].map(g => ({ label: g, color: FleetChartConstant.CiiColor[g] }))
+  // ciiColor() falls back to FallbackColor (gray) for any ship with a missing/invalid rating —
+  // this entry is what that gray dot means, matching the speed-loss legend's own n/a entry below.
+  ? [...['A', 'B', 'C', 'D', 'E'].map(g => ({ label: g, color: FleetChartConstant.CiiColor[g] })),
+      { label: 'n/a', color: FleetChartConstant.FallbackColor }]
   : [
       { label: '< 6%', color: FleetChartConstant.SemanticRamp.good },
       { label: '6–10%', color: FleetChartConstant.SemanticRamp.warning },

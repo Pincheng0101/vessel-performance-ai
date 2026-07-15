@@ -9,7 +9,7 @@ const Term = Object.freeze({
   avgSpeedLoss: '全船隊的平均速度損失（相同主機功率下，實際船速較乾淨船體基準的下降百分比）：先取各船最近 30 個通過 ISO 19030 篩選之有效日（valid day）的平均，再對全船隊取平均。單日讀數受基準曲線的擬合散布支配（可達 ±4 個百分點），須以 30 日平均判讀；數值越高代表船體／螺槳汙損越嚴重。',
   activeAlerts: '最新一日仍處於開啟狀態且仍被偵測到的預警數，用於快速掌握當前需要關注的風險。',
   openAlertCases: '目前尚未關閉的預警案件總數，包含歷史期間累積且仍 open 的 episodes，反映船隊待追蹤工作量。',
-  excessFuelCost: '全船隊最新一日因速度損失而多耗燃油所產生的成本（USD）。',
+  excessFuelCost: '全船隊最新一日相對乾淨船體、平穩海況多耗的燃油成本（USD）；三個來源加總——船體／螺槳汙損（最大宗，由速度損失導出）、天氣海況、操作——詳見「Excess fuel cost」圖表說明。',
   savingsPotential: '依各船清潔／維修建議可節省的燃油成本總額（USD）。',
 
   // Performance
@@ -30,6 +30,11 @@ const Term = Object.freeze({
   // Alerts / anomalies
   anomaly: '指標偏離預期範圍而被偵測出的事件。',
   severity: '異常事件的嚴重程度分級（high／medium／low）。',
+  // The alert table's own column — the raw signal whose deviation opened the episode. NOT the
+  // same enum as `cause` below (5 inferred root causes, from the vessel deep-dive's diagnostics
+  // panel) — that tooltip was mistakenly reused here despite listing categories that never
+  // appear in this column.
+  driverMetric: '此預警事件的觸發訊號：速度損失、主機油耗 (SFOC)、螺槳滑失、超額油耗。與下方「Cause diagnostics」推論的成因分類（船體生物附著等）是不同的分類體系。',
   cause: '異常的推定來源：船體生物附著、主機性能衰退、螺旋槳／海流異常、惡劣海氣象、感測器異常。',
   fleetAlertsTable: '全船隊預警清單：每筆為一段連續異常（或生物附著趨勢）整合而成的事件，含起訖日期、嚴重度、成因與建議行動；點擊任一列可查看該船的個船分析。',
   alertsBySeverity: '全船隊預警依成因分類的數量統計，顏色代表嚴重度組成；用於快速看出哪個成因目前最活躍。',
@@ -44,15 +49,18 @@ const Term = Object.freeze({
   breadth: '船寬（Breadth）：船舶的最大寬度（m）。',
   mcr: '最大持續輸出功率（Maximum Continuous Rating）：主機可長期連續運轉的最大功率（kW）。',
   designSpeed: '設計船速（Design Speed）：船舶於設計工況下的服務航速（kn）。',
+  // 「N 天前」是相對這艘船自己資料集裡最後一筆回報日計算，非讀者當下的真實日期。
+  lastDryDock: '最近一次乾塢（dry-dock）日期，來自船舶主檔的固定紀錄欄位。「N 天前」以此船最後一筆回報日為基準，非讀者當下的真實日期。',
+  lastInWater: '最近一次水下船體清潔日期；資料庫沒有現成欄位，由每日紀錄的「距上次清潔天數」反推得出。「N 天前」以此船最後一筆回報日為基準，非讀者當下的真實日期。',
 
   // Vessel deep-dive
   alertsFeed: '此船的預警清單：每筆為一段連續異常（或生物附著趨勢）整合而成的事件，含起訖日期、嚴重度、成因與建議行動。',
   vesselSpeedLossTrend: '此船每日速度損失的長期趨勢；含維修事件標記、ISO 19030 維修觸發線（8%）與本儀表板的清潔行動線（10%），以及依汙損速率外推至預測觸發日的趨勢線。趨勢線僅擬合於通過 ISO 篩選的實測值。灰點為未通過篩選的日子，滑鼠移入可查看被排除的原因。',
-  causeDiagnostics: '推論層（非 ISO 19030 輸出）。ISO 19030 量測的是船體「與」螺槳的合併效應，並未提供拆分兩者的方法；本面板在 ISO 之上疊加一層推論，依四個訊號——速度損失（船體＋螺槳合計）、實際滑失（螺旋槳）、SFOC（主機）與超額油耗——各自對基準的偏離與近 30 天異常數，推測衰退較可能的來源。每格附信心水準（高／中／低），依佐證訊號是否一致、樣本數與距上次重置天數而定。此結果不得作為 ISO 19030 的直接輸出對外引用。',
+  causeDiagnostics: '推論層（非 ISO 19030 輸出）。ISO 19030 量測的是船體「與」螺槳的合併效應，並未提供拆分兩者的方法；本面板在 ISO 之上疊加一層推論，依四個訊號——速度損失（船體＋螺槳合計）、實際滑失（螺旋槳）、SFOC（主機）與超額油耗——各自對「起始基準」的偏離與近 30 天異常數，推測衰退較可能的來源。「起始基準」是該訊號最早 30 筆資料的中位數，是個別指標各自的參照點，與速度損失趨勢圖／速度-功率散點圖使用的乾淨船體參考曲線是不同的東西，兩者不可混用比較。每格附信心水準（高／中／低），依佐證訊號是否一致、樣本數與距上次重置天數而定。此結果不得作為 ISO 19030 的直接輸出對外引用。',
   maintenanceRec: '整合汙損模型、異常偵測與水下檢查所產生的建議維修行動；每項含優先度、建議到期日、預估淨節省與作業方式（水下／乾塢），依優先度與節省金額排序。',
   uwiInspection: '歷次水下檢查（在水檢查 UWI／乾塢 DD）結果：船體汙損等級（0–100）與覆蓋率、螺旋槳狀況（良好／尚可／不佳）與粗糙度、塗層劣化與狀況，以及建議動作。作為統計診斷與維修建議的實體佐證。',
   ciiTrend: '此船 CII AER 與 IMO 碳強度數值（gCO₂/dwt·nm）隨時間的變化；圖上的 A–E 標記各自對應所在那條線於該段期間的 CII 評級，圓點填色代表評級，外框顏色代表所屬線別（灰藍色 AER、紫色 IMO）。C 級以上為合規；連續三年 D 或單年 E 須提出改善計畫。',
-  speedPowerScatter: '實測「船速對主機功率」散點，依距上次清潔天數上色，並與乾淨船體參考曲線比較；曲線越往右上偏移代表汙損越嚴重。',
+  speedPowerScatter: '實測「船速對主機功率」散點，依距上次清潔天數上色，並與乾淨船體參考曲線（固定不變）比較；量測點雲越往左上偏移、遠離參考曲線，代表汙損越嚴重。',
   anomalyTimeline: '各成因的異常 episode 時間軸；橫條越長代表持續越久，顏色代表嚴重度。',
 
   // Cost
@@ -74,7 +82,7 @@ const Term = Object.freeze({
   dueEta: '此行動自身的到期預估（ETA）：依該項劣化指標的趨勢外推，預測其單獨跨越門檻的日期，未考慮與其他行動整併排程——實際排定日期見左方的 Plan date。',
 
   // Executive
-  ciiARated: '以 IMO 規定值（required line）評級計，A 級船舶占全隊的比例（%）；越高代表船隊碳強度表現越好。合規風險另看 D／E 級：連續三年 D 級或單年 E 級須提出矯正行動計畫（corrective action plan）。',
+  ciiARated: '以 IMO 規定值（required line）評級計，A 級船舶占「當日回報船舶數」的比例（%）——非全隊固定總數，回報未齊時分母會較小；越高代表船隊碳強度表現越好。合規風險另看 D／E 級：連續三年 D 級或單年 E 級須提出矯正行動計畫（corrective action plan）。',
   savingsByShip: '各船的清潔／維修建議淨節省（USD），由高到低排序；僅列出目前有建議的船舶。',
 
   // Fleet overview

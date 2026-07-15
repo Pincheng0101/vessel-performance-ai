@@ -93,7 +93,7 @@ const windows = computed(() => {
 });
 
 // --- KPIs ---
-const totalNetSaving = computed(() => backlog.value.reduce((s, r) => s + Math.max(0, r.netSaving || 0), 0));
+const totalNetSaving = computed(() => backlog.value.reduce((s, r) => s + (r.netSaving || 0), 0));
 const highPriorityCount = computed(() => backlog.value.filter(r => r.priority === 'high').length);
 const dryDockCount = computed(() => windows.value.filter(w => w.serviceType === 'dry_dock').length);
 const nextWindowDate = computed(() => {
@@ -102,7 +102,7 @@ const nextWindowDate = computed(() => {
 });
 
 const kpis = computed(() => [
-  { label: 'Open actions', value: `${backlog.value.length}`, sub: 'backlog total', tooltip: T.maintenanceAction },
+  { label: 'Recommended actions', value: `${backlog.value.length}`, sub: 'backlog total', tooltip: T.maintenanceAction },
   {
     label: 'High priority', value: `${highPriorityCount.value}`, sub: 'need priority attention',
     color: highPriorityCount.value > 0 ? FleetChartConstant.SemanticRamp.critical : undefined,

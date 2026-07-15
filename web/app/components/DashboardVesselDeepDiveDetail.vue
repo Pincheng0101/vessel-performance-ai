@@ -80,11 +80,15 @@ const rec = computed(() => (maintRecs.value ?? []).find(r => r.action_type === '
 // maintenance-effect ones, keyed to the event they measure.
 const events = computed(() => (indicators.value ?? []).filter(r => r.indicator === 'ME'));
 // Latest condition = the newest ISO 19030-valid row (fallback to the newest row). Speed loss on
-// an invalid day is weather, not hull.
+// an invalid day is weather, not hull — this is for the speed-loss-gated reads (the Speed loss
+// tile, the trend chart's fit) ONLY. CII validity has nothing to do with that gate, so the CII
+// header tile below reads `latestReported` (the ship's actual last row) instead — otherwise it
+// could silently show a CII rating from a much older, ISO-valid day with no date shown for it.
 const latest = computed(() => {
   const rows = daily.value ?? [];
   return [...rows].reverse().find(r => r.valid_flag) ?? rows.at(-1) ?? {};
 });
+const latestReported = computed(() => (daily.value ?? []).at(-1) ?? {});
 
 // --- Header: vessel particulars (dim_vessel) + the ship's data coverage ---
 // ISO 19030 is explicit that data coverage is a FIRST-CLASS displayed metric, not a footnote:
@@ -121,8 +125,8 @@ const specs = computed(() => {
     { label: 'Type', value: `${kind} · ${v.hull_class ?? '–'}` },
     { label: 'TEU', value: v.teu_nominal == null ? '–' : v.teu_nominal.toLocaleString(), tooltip: T.teu },
     { label: 'Design speed', value: v.design_speed_kn == null ? '–' : `${v.design_speed_kn.toFixed(1)} kn` },
-    { label: 'Last dry-dock', value: fleetUtils.dayLabel(v.last_dry_dock_day, today) ?? '無紀錄' },
-    { label: 'Last in-water', value: fleetUtils.dayLabel(lastInWaterDay.value, today) ?? '無紀錄' },
+    { label: 'Last dry-dock', value: fleetUtils.dayLabel(v.last_dry_dock_day, today) ?? '無紀錄', tooltip: T.lastDryDock },
+    { label: 'Last in-water', value: fleetUtils.dayLabel(lastInWaterDay.value, today) ?? '無紀錄', tooltip: T.lastInWater },
     {
       label: 'ISO data coverage',
       value: c.pct == null ? '–' : `${c.pct.toFixed(0)}% (${c.valid.toLocaleString()}/${c.total.toLocaleString()})`,
@@ -795,9 +799,11 @@ const uwiRows = computed(() =>
 );
 const uwiSummary = computed(() => {
   const r = uwiRows.value[0];
-  if (!r) return '尚無水下檢查紀錄。';
+  if (!r) return '尚無檢查紀錄。';
   const act = UWI_ACTION[r.recommended_action]?.label ?? r.recommended_action;
-  return `最新一次水下檢查（${r.inspection_date}）：船體汙損 ${Math.round(r.hull_fouling_rating)}/100、螺旋槳${condLabel(r.propeller_condition)}、塗層劣化 ${Math.round(r.coating_breakdown_pct)}%，建議${act}。`;
+  // The latest row can be a dry-dock (DD) record, not an underwater (UWI) one — say which.
+  const type = UWI_TYPE_ZH[r.inspection_type] || r.inspection_type;
+  return `最新一次${type}（${r.inspection_date}）：船體汙損 ${Math.round(r.hull_fouling_rating)}/100、螺旋槳${condLabel(r.propeller_condition)}、塗層劣化 ${Math.round(r.coating_breakdown_pct)}%，建議${act}。`;
 });
 // History table stays collapsed by default — the latest inspection summary is enough at a glance.
 const uwiExpanded = ref(false);
@@ -1268,7 +1274,7 @@ const causeDiagnostics = computed(() => {
       score: Math.max(slipDelta ?? 0, slipAnomalies * 4),
       highThreshold: DIAGNOSTIC_HIGH.slip,
       value: fmtIndexDelta(stats.slip.latestIndex),
-      label: '滑失 vs 基準',
+      label: '滑失 vs 起始基準',
       detail: `目前 ${fmtMetricRaw('slip', stats.slip.latestValue)} · 近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${slipAnomalies} 件異常`,
       summary: `滑失 ${fmtIndexDelta(stats.slip.latestIndex)}，近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${slipAnomalies} 件異常`,
     },
@@ -1280,7 +1286,7 @@ const causeDiagnostics = computed(() => {
       score: Math.max(sfocDelta ?? 0, sfocAnomalies * 4),
       highThreshold: DIAGNOSTIC_HIGH.sfoc,
       value: fmtIndexDelta(stats.sfoc.latestIndex),
-      label: 'SFOC vs 基準',
+      label: 'SFOC vs 起始基準',
       detail: `目前 ${fmtMetricRaw('sfoc', stats.sfoc.latestValue)}`,
       summary: `SFOC ${fmtIndexDelta(stats.sfoc.latestIndex)}，目前 ${fmtMetricRaw('sfoc', stats.sfoc.latestValue)}`,
     },
@@ -1292,7 +1298,7 @@ const causeDiagnostics = computed(() => {
       score: Math.max(excessDelta ?? 0, excessAnomalies * 4),
       highThreshold: DIAGNOSTIC_HIGH.excessFoc,
       value: fmtIndexDelta(stats.excessFoc.trailingIndex),
-      label: '超額油耗 vs 基準',
+      label: '超額油耗 vs 起始基準',
       detail: `近 30 天平均 ${fmtMetricRaw('excess_foc', stats.excessFoc.trailingValue)} · 近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${excessAnomalies} 件異常`,
       summary: `超額油耗 ${fmtIndexDelta(stats.excessFoc.trailingIndex)}（近 30 天平均），近 ${DIAGNOSTIC_ALERT_WINDOW_DAYS} 天 ${excessAnomalies} 件異常`,
     },
@@ -1393,7 +1399,7 @@ const causeDiagnosticsOption = computed(() => {
           .map((p) => {
             const raw = fmtMetricRaw(p.data?.diagnosticKey, p.value[2]);
             const delta = fmtIndexDelta(p.value[4]);
-            return `${p.marker}${p.seriesName}: ${raw}（vs 基準 ${delta}）`;
+            return `${p.marker}${p.seriesName}: ${raw}（vs 起始基準 ${delta}）`;
           })
           .join('<br/>');
         return `${fleetUtils.dayLabel(fleetUtils.msToDay(ts)) ?? ''}<br/>${rows}`;
@@ -1500,11 +1506,11 @@ watch(alertPageCount, (n) => {
         <DashboardKpiCard
           label="CII"
           :tooltip="T.cii"
-          :value="latest?.cii_rating_imo || '–'"
-          :value-color="latest?.cii_rating_imo ? ciiColor(latest.cii_rating_imo) : ''"
+          :value="latestReported?.cii_rating_imo || '–'"
+          :value-color="latestReported?.cii_rating_imo ? ciiColor(latestReported.cii_rating_imo) : ''"
         >
           <div class="text-caption text-medium-emphasis mt-1">
-            {{ `AER ${fmtNum(latest?.cii_aer, 2)}` }}
+            {{ `AER ${fmtNum(latestReported?.cii_aer, 2)}` }}
           </div>
         </DashboardKpiCard>
       </div>

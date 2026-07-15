@@ -130,7 +130,7 @@ const tableHeaders = [
   // this table's rows are plain camelCase JS objects (`row.shipId`), so the snake_cased key
   // would come back and match nothing, silently no-op'ing the sort.
   { title: 'Ship', key: 'shipId', sortKey: 'shipId', sortable: true, minWidth: 90 },
-  { title: 'Metric', key: 'metric', sortable: true, minWidth: 150, tooltip: T.cause },
+  { title: 'Metric', key: 'metric', sortable: true, minWidth: 150, tooltip: T.driverMetric },
   { title: 'Severity', key: 'severity', sortable: true, width: 100, minWidth: 100, tooltip: T.severity },
   { title: 'Status', key: 'status', sortable: true, width: 100, minWidth: 100 },
   { title: 'Opened', key: 'openedDay', sortable: true, minWidth: 100 },

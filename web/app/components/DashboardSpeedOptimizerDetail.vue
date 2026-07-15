@@ -105,6 +105,12 @@ const stats = computed(() => {
   const recNm = valueAt('usd_per_nm', recSpeed);
   const curCo2PerNm = valueAt('co2_mt_per_day', curSpeed) / (curSpeed * 24);
   const recCo2PerNm = valueAt('co2_mt_per_day', recSpeed) / (recSpeed * 24);
+  // The economic speed is the cost-minimizing point on a convex curve — a ship currently well
+  // below it (slow but far from the minimum) can genuinely save money by speeding UP toward it,
+  // not just by slowing down. speedIncreasing flags that case so the copy below doesn't narrate
+  // a "slow down" story ("低 X%" / days going up) for a ship the model is actually telling to
+  // go faster.
+  const speedIncreasing = recSpeed > curSpeed;
   return {
     curSpeed,
     recSpeed,
@@ -112,7 +118,8 @@ const stats = computed(() => {
     recNm,
     annualSavingUsd: Math.max(0, curNm - recNm) * dist,
     annualCo2SavingMt: Math.max(0, curCo2PerNm - recCo2PerNm) * dist,
-    speedReductionPct: curSpeed ? ((curSpeed - recSpeed) / curSpeed) * 100 : null,
+    speedDeltaPct: curSpeed ? Math.abs((curSpeed - recSpeed) / curSpeed) * 100 : null,
+    speedIncreasing,
     daysAtCurrent: dist / (curSpeed * 24),
     daysAtRecommended: dist / (recSpeed * 24),
   };
@@ -155,6 +162,14 @@ const savingsPerNmSchedule = computed(() => {
   const schedNm = scheduleNm.value;
   return !s || schedNm == null ? null : Math.max(0, s.curNm - schedNm);
 });
+// scheduleSpeed is user-driven (distance/days sliders) and can land on either side of curSpeed —
+// a tight schedule can demand going FASTER than today, not just slower. The caption below used to
+// always say "降速至排程航速" (slow down to schedule speed) regardless.
+const scheduleSpeedIncreasing = computed(() => {
+  const s = stats.value;
+  const sp = scheduleSpeed.value;
+  return s && sp != null ? sp > s.curSpeed : null;
+});
 const savingsPerNmEconomic = computed(() => {
   const s = stats.value;
   return s ? Math.max(0, s.curNm - s.recNm) : null;
@@ -168,7 +183,13 @@ const savingsVoyageEconomic = computed(() => (
 const summary = computed(() => {
   const s = stats.value;
   if (!s) return '目前沒有足夠的航速優化資料。';
-  return `目前航速 ${fmtNum(s.curSpeed)} kn，經濟航速為 ${fmtNum(s.recSpeed)} kn（低 ${Math.round(s.speedReductionPct)}%）—— 調整後預估每年可省 ${fmtUsd(s.annualSavingUsd)}、減少 CO₂ ${Math.round(s.annualCo2SavingMt).toLocaleString()} 公噸；但完成相同年航程所需天數將由 ${Math.round(s.daysAtCurrent)} 天增至 ${Math.round(s.daysAtRecommended)} 天，須配合排班評估可行性。`;
+  const speedWord = s.speedIncreasing ? '高' : '低';
+  const dayWord = s.speedIncreasing ? '減至' : '增至';
+  // When the economic speed is faster, going there shortens the voyage too — that's not a
+  // trade-off against the cost/CO2 saving, so don't frame it with "但" (but) the way the
+  // slow-down case (a real time-for-money trade-off) needs to be framed.
+  const conjunction = s.speedIncreasing ? '，且' : '；但';
+  return `目前航速 ${fmtNum(s.curSpeed)} kn，經濟航速為 ${fmtNum(s.recSpeed)} kn（${speedWord} ${Math.round(s.speedDeltaPct)}%）—— 調整後預估每年可省 ${fmtUsd(s.annualSavingUsd)}、減少 CO₂ ${Math.round(s.annualCo2SavingMt).toLocaleString()} 公噸${conjunction}完成相同年航程所需天數將由 ${Math.round(s.daysAtCurrent)} 天${dayWord} ${Math.round(s.daysAtRecommended)} 天，須配合排班評估可行性。`;
 });
 
 const tiles = computed(() => {
@@ -189,7 +210,7 @@ const tiles = computed(() => {
       // Title matches the PoC's exact label ("本船年省 / Vessel savings / yr") so this figure is
       // recognizable as the same metric, not confused with the maintenance model's "淨節省".
       key: 'saving', title: '本船年省', color: FleetChartConstant.SemanticRamp.good, tooltip: T.speedOptimizerSaving,
-      value: fmtUsd(s.annualSavingUsd), sub: `較目前降速 ${Math.round(s.speedReductionPct)}%`,
+      value: fmtUsd(s.annualSavingUsd), sub: `較目前${s.speedIncreasing ? '加速' : '降速'} ${Math.round(s.speedDeltaPct)}%`,
     },
     {
       // Same green as 本船年省 — both are "the payoff" of switching to economical speed.
@@ -472,7 +493,7 @@ const fuelEmissionCurveOption = computed(() => {
                 {{ fmtUsd(savingsVoyage) }}
               </div>
               <div class="text-caption text-medium-emphasis mt-1">
-                較目前降速至排程航速 · 每海里省 {{ fmtUsdPerNm(savingsPerNmSchedule) }} · {{ scheduleInput.distanceNm.toLocaleString() }} nm
+                較目前{{ scheduleSpeedIncreasing ? '加速' : '降速' }}至排程航速 · 每海里省 {{ fmtUsdPerNm(savingsPerNmSchedule) }} · {{ scheduleInput.distanceNm.toLocaleString() }} nm
               </div>
               <div class="mt-2">
                 <span
