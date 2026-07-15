@@ -40,7 +40,7 @@ is deterministic — a fixed assumption, or a function of real data.
 | What | Where | Seeded by | Method |
 |---|---|---|---|
 | `fuel_price` (9,130 rows) | `etl/fuel.py::build_price_series` | `Random(42)` — **one stream**, fuel-major | mean-reverting GBM in log space |
-| `uwi` roughness / coating / rating / coverage | `etl/raw/uwi.py` | `Random(f'{seed}:{ship}:{day}:{type}')` — a **string** key | draw inside the real grade's band, shifted toward the real speed loss |
+| `uwi` roughness / coating / rating / coverage | `etl/raw/uwi.py` | `Random(f'{seed}:{ship}:{day}:{type}')` and `Random(f'{seed}:{ship}')` — **string** keys | saturating **growth on the reset clock**; the real grade and the real speed loss set the *rate* |
 | lat / lon / heading / ports | `etl/ports.py` + `curated/geography.py` | seed sets a rotation **phase offset only** — no RNG | walk a bent great-circle polyline by the **real** cumulative distance |
 | calendar (`report_date`, `year`, `month`, all `*_date`) | `etl/epoch.py` | deterministic | day 0 = **2021-07-01** |
 | event `cost_usd` / `downtime_hours` / `location` | `curated/dims.py`, `curated/recommendation.py` | deterministic | fixed per-type cost model |
@@ -103,47 +103,104 @@ dry-dock inspects the hull it hauls out).
 | `cavitation_found` (Yes/No) | `hull_fouling_coverage_pct` |
 | the inspection day | |
 
-The dataset simply does not measure roughness in µm or coverage in %. But the estimates
-are **not noise**: each is drawn inside the band its **real grade** implies, then pulled
-toward the position that the **real ISO 19030 speed loss on the inspection day** points
-at. So the rating ↔ speed-loss relationship every dashboard chart leans on holds against
-real measurements rather than against a random number generator.
+The dataset simply does not measure roughness in µm or coverage in %. But the estimates are **not
+noise**, and — since the rewrite — they are **not memoryless draws** either.
 
-**The bands.** Chosen so each grade straddles the threshold it ought to:
+### Roughness and coating are states that grow on a clock
 
-| Grade | `propeller_roughness_um` | `coating_breakdown_pct` |
-|---|---|---|
-| Good | 150–260 | 2–18 |
-| Fair | 260–380 | 20–44 |
-| Poor | 380–520 | 46–85 |
-| *(ungraded)* | 200–420 | 5–60 |
+The old generator drew each value inside a band keyed on that inspection's own grade. That is
+incoherent, and the incoherence was load-bearing: a band draw has **no memory**, so a propeller 500
+days into its cycle could come back cleaner than one 50 days in. Downstream, `recommendation.py`
+fits a *trend* to these points — and it was fitting noise. **9 of the 15 ships came out with a
+negative roughness slope.**
 
-**The draw**, for a band `(lo, hi)`:
+They are now generated as growth from the state the last reset left behind:
 
 ```
-centre   = U(0.3, 0.7)                        # the grade's own spread
-position = 0.55 · centre + 0.45 · band_position(speed_loss / 10)
-value    = lo + (hi − lo) · clamp(position, 0, 1)
+value(clock) = clean + (max − clean) · (1 − exp(−rate · clock / tau))
 ```
 
-`band_position` maps the day's real trailing-mean speed loss onto 0 (clean) → 1 (fouled),
-saturating at 10 %. So the real measurement carries **45 %** of the weight and the grade
-carries 55 %.
+| Signal | clock | `clean` | `max` | `tau` | crosses its threshold at |
+|---|---|---:|---:|---:|---|
+| `propeller_roughness_um` | `days_since_polish` | 150 | 560 | 600 | **300 µm at ~275 d** ≈ the fleet's 303-day mean polish interval |
+| `coating_breakdown_pct` | `days_since_dry_dock` | 2 | 90 | 2600 | **45 % at ~1,750 d** ≈ the 5-year survey |
 
-**The ungraded fallback exists because the source is sparse.** `hull_coating_condition` is
-filled on only 26 of 77 events, so for most inspections there is no grade to condition on
-and the real speed loss is the *only* thing positioning the draw. (A curiosity that falls
-out of this: the source contains **no `Poor` coating grade at all**, so the 46–85 % Poor
-band is never actually drawn from.)
+Both calibrated on the real intervals in `maintenance.csv` (44 polish intervals, 51–816 days,
+mean 303).
 
-**Rating and coverage** are anchored directly on the measurement, with jitter:
+**Saturating, not linear.** 13 inspections have no prior reset in the record, and their anchored
+clocks run past 1,300 days — a linear law would put those propellers at 800 µm, well past anything
+physical. Saturating growth is also the right shape, and over the observed 50–500 day range it stays
+near-linear, so the *linear* extrapolator `recommendation.py` fits on top of these points remains
+legitimate.
+
+### The grade sets the RATE, not the level
+
+This is the part that looks wrong until you cross-tabulate the source. `propeller_condition` is a
+**damage** grade — a pitted propeller roughens *faster* — and it is **not** a reading of how long
+since the last polish. The data says so plainly: of 53 inspections the source grades 25 `Good`,
+1 `Fair`, 1 `Poor`, and those `Good` inspections span **114 to 474 days since polish**. Grade and
+clock are uncorrelated.
+
+So keying a *band* off the grade would overwrite the clock with noise. Worse, clamping every `Good`
+into a 150–260 µm band caps the implied slope at ≤ 0.23 µm/day — under which **nothing in the fleet
+ever reaches 300 µm** and the signal dies entirely.
+
+The rate is a product of four factors, each **centred on 1.0** so the calibration above is what the
+fleet actually realises:
+
+```
+rate = ship_spread          U(0.80, 1.20), seeded per SHIP and drawn once
+     × grade_rate           Good 0.85 / Fair 1.15 / Poor 1.45 / ungraded 1.0
+     × (1 + 0.60·(pos − ½)) pos = the day's real speed loss, 0 (clean) → 1 (fouled), saturating at 10 %
+     × jitter               U(0.92, 1.08), per inspection
+```
+
+The speed-loss term is **centred, not a one-sided lift**: a slow hull fouls faster (×1.3), a clean
+one slower (×0.7), and a day with **no** speed-loss measurement is neutral (×1.0). A `1 + gain·pos`
+term cannot damp a rate, only inflate it — it would hand an *unmeasured* day a free 30 % boost, and
+drag the whole fleet ~22 % above the nominal law so that neither calibration in the table above
+would hold in the emitted data.
+
+`ship_spread` is drawn **once per ship** and held fixed across its inspections. That matters: a ship
+that fouls fast must foul fast on every one of them, or its own points would not sit on one curve
+and there would be nothing for a downstream fit to recover.
+
+### ⚠ The clock is strict — the subtlest thing in this module
+
+`daily.py`'s reset clocks are **inclusive**: a cleaning on day *d* leaves the ship clean on day *d*,
+so the clock reads 0 there. That is right for a noon report.
+
+It is exactly wrong for an inspection, because **31 of the 43 UWI atoms come from the source's
+composite `UWI+PP` rows** — they are co-located with their own polish. An inspection observes the
+state that *justified* the polish, i.e. the **pre**-polish state. Reusing the inclusive clock would
+put every one of those 31 rows at clock 0 → 150 µm, asserting that *every polished propeller was
+already clean when it was inspected*, and the roughness signal would be destroyed.
+
+So `uwi` uses `days_since_reset(..., strict=True)` — `day − max{reset < day}` — while the daily
+columns keep `strict=False`. The four columns the generator lands on each row:
+
+| Column | Meaning |
+|---|---|
+| `days_since_polish` | strict clock since the last `PP`/`DD` |
+| `days_since_dry_dock` | strict clock since the last `DD` |
+| `polish_cycle_censored` | no such reset precedes it: the clock is anchored at the data start, and is a **lower bound** |
+| `dry_dock_cycle_censored` | same, for the dock (all 5 never-docked ships; 28 of 53 rows) |
+
+The generator lands its **own** clock on the row, so the recommender's x-values come from the same
+row as its y-values and the two cannot drift apart.
+
+### Rating and coverage
+
+Unchanged, and anchored directly on the real measurement with jitter — they were never incoherent,
+because speed loss genuinely does grow within a cycle:
 
 ```
 rating   = 7.0 · speed_loss_pct + U(−6, +6),  clamped to 0–100, integer
 coverage = min(1.15 · rating, 100)
 ```
 
-**`recommended_action` is a pure rule — no RNG at all:**
+### `recommended_action` is a pure rule — no RNG at all
 
 ```
 clean   if speed_loss ≥ 8 %  or  coating_breakdown ≥ 45 %
@@ -151,12 +208,12 @@ polish  if roughness ≥ 300 µm
 none    otherwise
 ```
 
-Across the 53 inspections that yields: `none` 29, `polish` 17, `clean` 7.
+Across the 53 inspections that now yields: `none` 26, `polish` 19, `clean` 8.
 
-**The seed key is a string**, `f'{seed}:{ship}:{day}:{type}'` — not a shared counter. So
-each inspection's draw is independent of the order the events are iterated in, and adding
-an inspection does not perturb any other. Unlike the price series, this one *is*
-reproducible row by row.
+**The seed key is a string**, `f'{seed}:{ship}:{day}:{type}'` for the per-inspection jitter and
+`f'{seed}:{ship}'` for the ship's rate — not a shared counter. So each inspection is independent of
+the order the events are iterated in, and adding one does not perturb any other. Unlike the price
+series, this one *is* reproducible row by row.
 
 ---
 

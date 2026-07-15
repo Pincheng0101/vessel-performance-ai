@@ -4,9 +4,13 @@
 // vessel deep-dive / speed optimizer tabs) — mirrors DashboardFleetOverview's structure (KPI
 // grid + AppTable, no vessel selector). Row click opens that ship's deep-dive.
 //
-// fact_maintenance_recommendation carries the *saving* of an action (net_saving_usd), not its
-// cost — so this tab answers "what will this earn back", not "what will this cost", and there is
-// no ROI ratio to compute. Non-economic actions (e.g. engine_inspection) carry no saving at all.
+// fact_maintenance_recommendation carries both the *saving* of an action (net_saving_usd) and its
+// *cost* (action_cost_usd), so an ROI ratio IS computable here: sum(net_saving_usd) / sum(action_cost_usd),
+// two naive sums. action_cost_usd is deliberately MARGINAL — a shared dry dock is charged to exactly
+// one action in the window and the rest are 0.0 — so summing it at any level never double-counts one
+// trip. Do NOT sum window_cost_usd the same way: it repeats the whole window's cost on every row of
+// that window, so dedupe on window_id first.
+// Non-economic actions (e.g. engine_inspection) still carry no saving at all.
 import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
 
 const server = useServer();

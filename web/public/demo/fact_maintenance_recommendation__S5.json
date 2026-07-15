@@ -1,1 +1,1 @@
-[]
+[{"ship_id":"S5","action_type":"propeller_polishing","priority":"medium","due_day":1904,"due_date":"2026-09-17","days_overdue":0,"rationale":"propeller condition Good, roughness 271um vs 300um at 335d since polish","source":"uwi","degradation_rate":0.3612,"degradation_unit":"um/day","current_value":271.0002,"threshold_value":300,"trigger_eta_day":1904,"t_star_days":null,"net_saving_usd":null,"plan_day":1904,"plan_date":"2026-09-17","plan_service_type":"in_water","window_id":"W-S5-1904-in_water","action_cost_usd":38000,"window_cost_usd":38000}]
