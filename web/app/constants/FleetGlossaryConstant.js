@@ -38,6 +38,7 @@ const Term = Object.freeze({
   recentAlerts: '近 30 天內新開啟的預警數（以資料期間最新日期為基準）。',
 
   // Vessel specs
+  teu: 'TEU（Twenty-foot Equivalent Unit，20 呎標準貨櫃當量）：以此為單位換算的船舶額定貨櫃裝載容量。',
   dwt: '載重噸（Deadweight Tonnage）：船舶可裝載的最大總重量（公噸），含貨物、燃油、淡水等。',
   lpp: '垂線間長（Length Between Perpendiculars）：船艏艉垂線間的船長（m），常用於船體性能計算。',
   breadth: '船寬（Breadth）：船舶的最大寬度（m）。',

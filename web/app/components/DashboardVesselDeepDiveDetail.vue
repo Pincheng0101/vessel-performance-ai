@@ -93,18 +93,32 @@ const coverage = computed(() => {
   const valid = rows.filter(r => r.valid_flag).length;
   return { valid, total: rows.length, pct: rows.length ? (valid / rows.length) * 100 : null };
 });
+// "N 天前" in this header is relative to this ship's own last reported day, not the reader's
+// real-world clock — matching the fleet table's days_since_dry_dock / days_since_cleaning,
+// which are anchored the same way. Falls back to dayLabel's real-clock default (undefined,
+// not null) on the edge case of a ship with no daily rows at all.
+const shipLastDay = computed(() => (daily.value ?? []).at(-1)?.noon_utc);
+// Last in-water = the newest daily row's day minus its own days_since_cleaning. Unlike
+// last_dry_dock_day, dim_vessel carries no equivalent stored field for hull cleanings — this
+// has to be derived off the daily rows, the same way the trend chart derives its own
+// lastCleanDay below.
+const lastInWaterDay = computed(() => {
+  const last = (daily.value ?? []).at(-1);
+  return last?.days_since_cleaning == null || last?.noon_utc == null
+    ? null
+    : last.noon_utc - last.days_since_cleaning;
+});
 const specs = computed(() => {
   const v = props.vessel;
-  const rows = daily.value ?? [];
   const kind = v.role === 'predict' ? '預測船' : '訓練船';
-  const range = (rows.length ? fleetUtils.dayRangeLabel(rows[0].noon_utc, rows.at(-1).noon_utc) : null) ?? '–';
   const c = coverage.value;
+  const today = shipLastDay.value;
   return [
     { label: 'Type', value: `${kind} · ${v.hull_class ?? '–'}` },
-    { label: 'TEU', value: v.teu_nominal == null ? '–' : v.teu_nominal.toLocaleString() },
+    { label: 'TEU', value: v.teu_nominal == null ? '–' : v.teu_nominal.toLocaleString(), tooltip: T.teu },
     { label: 'Design speed', value: v.design_speed_kn == null ? '–' : `${v.design_speed_kn.toFixed(1)} kn` },
-    { label: 'Last dry-dock', value: fleetUtils.dayLabel(v.last_dry_dock_day) ?? '無紀錄' },
-    { label: 'Data range', value: range },
+    { label: 'Last dry-dock', value: fleetUtils.dayLabel(v.last_dry_dock_day, today) ?? '無紀錄' },
+    { label: 'Last in-water', value: fleetUtils.dayLabel(lastInWaterDay.value, today) ?? '無紀錄' },
     {
       label: 'ISO data coverage',
       value: c.pct == null ? '–' : `${c.pct.toFixed(0)}% (${c.valid.toLocaleString()}/${c.total.toLocaleString()})`,
