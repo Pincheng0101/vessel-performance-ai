@@ -8,7 +8,7 @@
 // that index.
 //
 // Config comes from env (never committed):
-//   YM_API_BASE_URL=... YM_API_KEY=... node scripts/capture-fixtures.mjs
+//   SERVER_API_URL=... SERVER_API_KEY=... node scripts/capture-fixtures.mjs
 //
 // The param shapes here MUST match how the app calls query() (e.g. agg_fleet_daily uses
 // {} for full-history/all-fleet, not { fleet_id: 'ALL' }), so the cache keys line up.
@@ -17,10 +17,10 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const BASE = (process.env.YM_API_BASE_URL || '').replace(/\/+$/, '');
-const KEY = process.env.YM_API_KEY || '';
+const BASE = (process.env.SERVER_API_URL || '').replace(/\/+$/, '');
+const KEY = process.env.SERVER_API_KEY || '';
 if (!BASE || !KEY) {
-  console.error('Missing YM_API_BASE_URL / YM_API_KEY env vars.');
+  console.error('Missing SERVER_API_URL / SERVER_API_KEY env vars.');
   process.exit(1);
 }
 
