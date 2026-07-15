@@ -5,6 +5,7 @@ plan.md
 tmp
 data
 etl/
+scratchpad/
 
 # Python
 __pycache__/
