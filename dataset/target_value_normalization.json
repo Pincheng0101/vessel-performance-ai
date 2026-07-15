@@ -1,0 +1,10 @@
+{
+  "method": "zscore",
+  "column": "target_value",
+  "normalized_column": "target_value_normalized",
+  "mean": 2246.962998096992,
+  "std": 1362.5559436051046,
+  "std_ddof": 0,
+  "source": "train+test",
+  "n": 19548
+}

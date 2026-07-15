@@ -1,5 +1,0 @@
-{
-  "errors": null,
-  "action_type": "start_workflow_execution_action",
-  "execution_arn": "arn:aws:states:us-west-2:191395820281:execution:workflow-dbdd3e7ffdc7b481:dynamic_execution_id"
-}

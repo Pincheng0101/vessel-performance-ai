@@ -1,8 +1,0 @@
-{
-  "action_type": "agent_action",
-  "errors": null,
-  "message": "",
-  "response": {
-    "highest_vitamin_c_fruit": "guava"
-  }
-}

@@ -1,8 +1,0 @@
-{
-  "errors": null,
-  "action_type": "code_action",
-  "output": {
-    "message": "Hello, LangForge!",
-    "count_plus_one": 4
-  }
-}
