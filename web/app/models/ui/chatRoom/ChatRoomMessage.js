@@ -1,4 +1,5 @@
-import { ChatConstant, StreamingConstant } from '~/constants';
+import * as ChatConstant from '~/constants/ChatConstant';
+import * as StreamingConstant from '~/constants/StreamingConstant';
 import { Message } from '~/models/server/message';
 
 class ChatRoomMessage extends Message {

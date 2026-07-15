@@ -45,78 +45,13 @@ Notes:
 - After updating: `npm run dev` picks up new fixtures on refresh; for a deploy run
   `npm run build`; commit `public/demo/` to version the snapshot.
 
-## Nuxt Minimal Starter
-
-Look at the [Nuxt 3 documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
-
-## Setup
-
-Make sure to install the dependencies:
+## Development
 
 ```bash
-# npm
+corepack enable npm   # once per machine (npm is pinned via packageManager)
 npm install
-
-# pnpm
-pnpm install
-
-# yarn
-yarn install
-
-# bun
-bun install
+npm run dev           # http://localhost:3000 → /dashboard
+npm run generate      # static build → .output/public
 ```
 
-## Development Server
-
-Start the development server on `http://localhost:3000`:
-
-```bash
-# npm
-npm run dev
-
-# pnpm
-pnpm run dev
-
-# yarn
-yarn dev
-
-# bun
-bun run dev
-```
-
-## Production
-
-Build the application for production:
-
-```bash
-# npm
-npm run build
-
-# pnpm
-pnpm run build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
-
-```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm run preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+Node `v24.11.0` (`.nvmrc`), npm ≥ 11.10. See `CLAUDE.md` for architecture notes.

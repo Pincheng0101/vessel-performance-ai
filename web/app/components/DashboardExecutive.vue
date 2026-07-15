@@ -4,7 +4,8 @@
 // series (the 'ALL' rollup); the fleet-wide *counts and sums* come from useFleetDaily, because
 // an agg row only covers the ships that reported that day (see fleetUtils). Self-contained so
 // it only loads when its tab is opened.
-import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
+import * as FleetChartConstant from '~/constants/FleetChartConstant';
+import * as FleetGlossaryConstant from '~/constants/FleetGlossaryConstant';
 
 const server = useServer();
 

@@ -1,4 +1,4 @@
-import { FileExtensionConstant } from '~/constants';
+import * as FileExtensionConstant from '~/constants/FileExtensionConstant';
 import { ImageContentBlock, TextContentBlock } from '~/models/server/contentBlock';
 
 const SUPPORTED_IMAGE_MIME_TYPES = [

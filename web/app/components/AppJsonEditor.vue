@@ -2,7 +2,7 @@
 import { json, jsonParseLinter } from '@codemirror/lang-json';
 import { lintGutter, linter } from '@codemirror/lint';
 import { jsonPathBindingLinter } from '~/codemirror/linters';
-import { FileExtensionConstant } from '~/constants';
+import * as FileExtensionConstant from '~/constants/FileExtensionConstant';
 
 const props = defineProps({
   defaultValue: {

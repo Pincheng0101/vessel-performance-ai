@@ -1,5 +1,5 @@
 <script setup>
-import { TableConstant } from '~/constants';
+import * as TableConstant from '~/constants/TableConstant';
 
 const props = defineProps({
   columnCount: {

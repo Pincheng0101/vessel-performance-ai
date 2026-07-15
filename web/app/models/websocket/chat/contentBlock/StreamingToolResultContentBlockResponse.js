@@ -1,4 +1,4 @@
-import { StreamingConstant } from '~/constants';
+import * as StreamingConstant from '~/constants/StreamingConstant';
 import StreamingContentBlockResponse from './StreamingContentBlockResponse';
 import StreamingContentBlockResponseFactory from './StreamingContentBlockResponseFactory';
 

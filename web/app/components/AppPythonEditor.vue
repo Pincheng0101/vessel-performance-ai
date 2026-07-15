@@ -1,6 +1,6 @@
 <script setup>
 import { python } from '@codemirror/lang-python';
-import { FileExtensionConstant } from '~/constants';
+import * as FileExtensionConstant from '~/constants/FileExtensionConstant';
 
 const props = defineProps({
   defaultValue: {

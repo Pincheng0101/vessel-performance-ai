@@ -7,7 +7,7 @@ import { searchKeymap } from '@codemirror/search';
 import { EditorState } from '@codemirror/state';
 import { EditorView, crosshairCursor, drawSelection, dropCursor, highlightActiveLine, highlightActiveLineGutter, highlightSpecialChars, keymap, lineNumbers, rectangularSelection } from '@codemirror/view';
 import { githubDarkInit, githubLightInit } from '@uiw/codemirror-theme-github';
-import { FileExtensionConstant } from '~/constants';
+import * as FileExtensionConstant from '~/constants/FileExtensionConstant';
 
 /**
  * @import { CreateThemeOptions } from '@uiw/codemirror-themes'

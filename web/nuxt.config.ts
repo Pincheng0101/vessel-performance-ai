@@ -24,7 +24,6 @@ export default defineNuxtConfig({
   },
   css: [
     '~/assets/vuetify.scss',
-    '~/assets/vue-flow.scss',
     '~/assets/highlight.scss',
     '~/assets/markdown.scss',
     'katex/dist/katex.min.css',

@@ -1,5 +1,5 @@
 <script setup>
-import { SnackbarConstant } from '~/constants';
+import * as SnackbarConstant from '~/constants/SnackbarConstant';
 
 const snackbarStore = useSnackbarStore();
 </script>

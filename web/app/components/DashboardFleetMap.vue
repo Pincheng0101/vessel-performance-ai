@@ -7,7 +7,9 @@
 // ECharts' own wheel-zoom, which jumps too far per scroll on a trackpad — see the comment by
 // `zoomChart` further down.
 // Land basemap is the same committed world.geojson the PoC ships (no external map tiles).
-import { FleetChartConstant, FleetGlossaryConstant, PortConstant } from '~/constants';
+import * as FleetChartConstant from '~/constants/FleetChartConstant';
+import * as FleetGlossaryConstant from '~/constants/FleetGlossaryConstant';
+import * as PortConstant from '~/constants/PortConstant';
 
 const server = useServer();
 const route = useRoute();

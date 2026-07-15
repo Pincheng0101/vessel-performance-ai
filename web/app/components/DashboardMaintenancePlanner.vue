@@ -11,7 +11,8 @@
 // trip. Do NOT sum window_cost_usd the same way: it repeats the whole window's cost on every row of
 // that window, so dedupe on window_id first.
 // Non-economic actions (e.g. engine_inspection) still carry no saving at all.
-import { FleetChartConstant, FleetGlossaryConstant } from '~/constants';
+import * as FleetChartConstant from '~/constants/FleetChartConstant';
+import * as FleetGlossaryConstant from '~/constants/FleetGlossaryConstant';
 
 const server = useServer();
 const route = useRoute();
@@ -256,7 +257,8 @@ const renderLaneBand = (params, api) => {
   return {
     type: 'rect',
     shape: { x, y: start[1] - laneHeight / 2, width, height: laneHeight },
-    style: api.style(),
+    // api.style() is deprecated in v5+ — read the item's designated visuals instead
+    style: { fill: api.visual('color') },
   };
 };
 const renderWindowBar = (params, api) => {
@@ -275,7 +277,12 @@ const renderWindowBar = (params, api) => {
   return {
     type: 'rect',
     shape: { x, y: start[1] - height / 2, width, height, r: 3 },
-    style: { ...api.style(), stroke: '#ffffff', lineWidth: 0.6 },
+    style: {
+      fill: api.visual('color'),
+      opacity: api.visual('opacity'),
+      stroke: '#ffffff',
+      lineWidth: 0.6,
+    },
   };
 };
 const DAY = 86_400_000;

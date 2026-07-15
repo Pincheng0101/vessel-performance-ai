@@ -1,5 +1,6 @@
 <script setup>
-import { ChatConstant, IconConstant } from '~/constants';
+import * as ChatConstant from '~/constants/ChatConstant';
+import * as IconConstant from '~/constants/IconConstant';
 import { TextContentBlock } from '~/models/server/contentBlock';
 import { AssistantChatRoomMessage, UserChatRoomMessage } from '~/models/ui/chatRoom';
 import chatUtils from '~/utils/chatUtils';

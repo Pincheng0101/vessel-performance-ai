@@ -1,5 +1,5 @@
 <script setup>
-import { StreamingConstant } from '~/constants';
+import * as StreamingConstant from '~/constants/StreamingConstant';
 
 const props = defineProps({
   items: {

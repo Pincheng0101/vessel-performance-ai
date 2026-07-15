@@ -1,4 +1,4 @@
-import { AccountConstant } from '~/constants';
+import * as AccountConstant from '~/constants/AccountConstant';
 
 /**
  * This class receives data from the token with parameters in snake_case.

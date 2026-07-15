@@ -1,5 +1,6 @@
 <script setup>
-import { ListConstant, TableConstant } from '~/constants';
+import * as ListConstant from '~/constants/ListConstant';
+import * as TableConstant from '~/constants/TableConstant';
 
 const isInsideDialog = inject('isInsideDialog', false);
 

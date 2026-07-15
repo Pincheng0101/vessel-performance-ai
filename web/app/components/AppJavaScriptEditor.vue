@@ -1,6 +1,6 @@
 <script setup>
 import { javascript } from '@codemirror/lang-javascript';
-import { FileExtensionConstant } from '~/constants';
+import * as FileExtensionConstant from '~/constants/FileExtensionConstant';
 
 const props = defineProps({
   defaultValue: {

@@ -1,4 +1,4 @@
-import { ChatConstant } from '~/constants';
+import * as ChatConstant from '~/constants/ChatConstant';
 import ChatRoomMessage from './ChatRoomMessage';
 
 class AssistantChatRoomMessage extends ChatRoomMessage {

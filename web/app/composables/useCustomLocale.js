@@ -1,9 +1,8 @@
-import { CookieConstant } from '~/constants';
+import * as CookieConstant from '~/constants/CookieConstant';
 
 export function useCustomLocale() {
   const localLocale = useCookie(CookieConstant.Base.LOCALE, { secure: true, sameSite: true, maxAge: 86400 * 365 });
   const i18n = useI18n();
-  const { $validator } = useNuxtApp();
   const dayjs = useDayjs();
 
   const initLocale = () => {
@@ -14,7 +13,6 @@ export function useCustomLocale() {
     if (!i18n.locales.value.some(locale => locale.code === v)) return;
     localLocale.value = v;
     i18n.setLocale(v);
-    $validator.setLocale(v);
     dayjs.locale(v);
   };
 

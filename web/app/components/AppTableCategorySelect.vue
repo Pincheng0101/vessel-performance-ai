@@ -1,5 +1,5 @@
 <script setup>
-import { ListConstant } from '~/constants';
+import * as ListConstant from '~/constants/ListConstant';
 
 const model = defineModel({
   type: String,

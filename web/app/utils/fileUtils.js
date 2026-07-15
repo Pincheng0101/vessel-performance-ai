@@ -1,5 +1,5 @@
 import * as fflate from 'fflate/browser';
-import { FileExtensionConstant } from '~/constants';
+import * as FileExtensionConstant from '~/constants/FileExtensionConstant';
 
 class fileUtils {
   /**

@@ -5,7 +5,7 @@
 // rebuilds on light/dark toggle, and handles resize + dispose. Callers pass a plain
 // ECharts `option`; all styling comes from the theme so charts stay consistent.
 import * as echarts from 'echarts';
-import { FleetChartConstant } from '~/constants';
+import * as FleetChartConstant from '~/constants/FleetChartConstant';
 
 /**
  * @import { EChartsOption } from 'echarts'
