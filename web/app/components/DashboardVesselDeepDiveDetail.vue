@@ -346,8 +346,8 @@ const speedLossTrendOption = computed(() => {
       {
         // Invisible hit area (shares the legend name): near-transparent symbols over the line so
         // hovering anywhere near it fires an item tooltip. The visible 1.5px stroke is too thin
-        // to hover, and `triggerLineEvent` fires zrender events without opening the tooltip. A
-        // fully transparent fill is skipped by hit-testing, so opacity is a hair above zero.
+        // to hover, and `triggerEvent: 'line'` fires zrender events without opening the tooltip.
+        // A fully transparent fill is skipped by hit-testing, so opacity is a hair above zero.
         name: '速度損失', type: 'scatter', symbolSize: 22, z: 3,
         itemStyle: { color: FleetChartConstant.SpeedLossColor, opacity: 0.01 },
         emphasis: { disabled: true },
@@ -622,7 +622,7 @@ const ciiTrendOption = computed(() => {
         smooth: true,
         showSymbol: false,
         symbol: 'none',
-        triggerLineEvent: true,
+        triggerEvent: 'line',
         lineStyle: { width: 1.6, color: s.color },
         itemStyle: { color: s.color },
         data: rows.map(row => [row.ts, row[s.key]]),
@@ -856,7 +856,8 @@ const renderLaneBand = (params, api) => {
       width,
       height: laneHeight,
     },
-    style: api.style(),
+    // api.style() is deprecated in v5+ — read the item's designated visuals instead
+    style: { fill: api.visual('color') },
   };
 };
 const renderEpisodeBar = (params, api) => {
@@ -884,7 +885,8 @@ const renderEpisodeBar = (params, api) => {
       r: 3,
     },
     style: {
-      ...api.style(),
+      fill: api.visual('color'),
+      opacity: api.visual('opacity'),
       stroke: '#ffffff',
       lineWidth: 0.6,
     },
