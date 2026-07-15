@@ -6,6 +6,7 @@ tmp
 data
 etl/
 scratchpad/
+dataset-submission/
 
 # Python
 __pycache__/
