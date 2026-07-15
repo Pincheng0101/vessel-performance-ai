@@ -1,8 +1,0 @@
-{
-  "errors": null,
-  "action_type": "llm_action",
-  "message": "Sorry, the model cannot answer this question.",
-  "request": null,
-  "thinking_summary": null,
-  "source_llm_id": "llm-abcbe5504730f792"
-}

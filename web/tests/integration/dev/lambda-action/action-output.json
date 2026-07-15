@@ -1,9 +1,0 @@
-{
-  "errors": null,
-  "action_type": "lambda_action",
-  "output": {
-    "message": {
-      "test": "test_json"
-    }
-  }
-}

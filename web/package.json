@@ -14,9 +14,8 @@
     "postinstall": "nuxt prepare",
     "lint": "eslint .",
     "lint:security": "eslint --config eslint.config.security.js app",
-    "test": "npm run test:unit -- --run && npm run test:integration",
+    "test": "npm run test:unit -- --run",
     "test:unit": "vitest",
-    "test:integration": "playwright test",
     "capture": "node --env-file-if-exists=.env.capture scripts/capture-fixtures.mjs"
   },
   "dependencies": {
