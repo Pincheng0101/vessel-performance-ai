@@ -43,8 +43,6 @@ export default {
   __fieldStatusSucceeded: 'Succeeded',
   __fieldStatusUnknown: 'Unknown',
   __fieldStatusUpdating: 'Updating',
-  __fieldTableCategoryAll: 'All',
-  __fieldTableCategoryFavorites: 'Favorites',
   __instructionChatRoomGreeting: 'Hello, how can I help you?',
   __instructionDragFileHere: 'Drag and drop {type} here',
   __instructionInternalServerError: 'Oops! Something went wrong. Please try again later.',

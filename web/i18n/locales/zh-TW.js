@@ -43,8 +43,6 @@ export default {
   __fieldStatusSucceeded: '成功',
   __fieldStatusUnknown: '未知',
   __fieldStatusUpdating: '更新中',
-  __fieldTableCategoryAll: '全部',
-  __fieldTableCategoryFavorites: '常用',
   __instructionChatRoomGreeting: '嗨！我可以怎麼幫你？',
   __instructionDragFileHere: '將{type}拖曳至此處',
   __instructionInternalServerError: '發生錯誤，請稍後再試。',

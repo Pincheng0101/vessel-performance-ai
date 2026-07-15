@@ -193,30 +193,6 @@ const Base = Object.freeze({
   },
 });
 
-const All = Object.freeze({
-  ALL: {
-    title: 'All',
-    value: null,
-    mediaType: '*/*',
-  },
-});
-
-const Application = Object.freeze({
-  ALL: {
-    title: 'All',
-    value: null,
-    mediaType: 'application/*',
-  },
-});
-
-const Audio = Object.freeze({
-  ALL: {
-    title: 'All',
-    value: null,
-    mediaType: 'audio/*',
-  },
-});
-
 const Image = Object.freeze({
   ALL: {
     title: 'All',
@@ -250,28 +226,7 @@ const Image = Object.freeze({
   },
 });
 
-const Text = Object.freeze({
-  ALL: {
-    title: 'All',
-    value: null,
-    mediaType: 'text/*',
-  },
-});
-
-const Video = Object.freeze({
-  ALL: {
-    title: 'All',
-    value: null,
-    mediaType: 'video/*',
-  },
-});
-
 export {
-  All,
-  Application,
-  Audio,
   Base,
   Image,
-  Text,
-  Video,
 };
