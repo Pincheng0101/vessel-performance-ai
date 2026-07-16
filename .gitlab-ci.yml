@@ -2,12 +2,9 @@
 # in GitLab); `deploy-web` (frontend) runs automatically when web/ changes.
 #
 # Credentials come from CI/CD variables (Settings ▸ CI/CD ▸ Variables), NOT this
-# file — never commit AWS keys. Set these three as *Protected* (and Masked if
-# GitLab accepts them):
+# file — never commit AWS keys. Set these two as *Protected* and *Masked*:
 #   AWS_ACCESS_KEY_ID
 #   AWS_SECRET_ACCESS_KEY
-#   AWS_SESSION_TOKEN        # hackathon temp creds → EXPIRES; refresh when the
-#                            # pipeline fails with ExpiredToken.
 #
 # The AWS account must already be CDK-bootstrapped (done once out-of-band).
 
