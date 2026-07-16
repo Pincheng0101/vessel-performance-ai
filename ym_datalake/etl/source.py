@@ -121,10 +121,17 @@ def load_maintenance_event(csv_path: str | Path) -> list[dict]:
 
 
 def load_all(data_dir: str | Path) -> dict[str, list[dict]]:
-    """Load all three sources from ``data_dir`` (``./dataset``)."""
+    """Load all three sources from ``data_dir`` (``./dataset``).
+
+    Prefer ``vt_fd_predict.csv`` (the PREDICT cells filled from the final submission) when it
+    exists, so the datalake serves predicted fuel consumption; fall back to ``vt_fd.csv``.
+    """
     root = Path(data_dir)
+    noon_csv = root / 'vt_fd_predict.csv'
+    if not noon_csv.is_file():
+        noon_csv = root / 'vt_fd.csv'
     return {
-        'noon_report': load_noon_report(root / 'vt_fd.csv'),
+        'noon_report': load_noon_report(noon_csv),
         'vessel_master': load_vessel_master(root / 'vessel.jsonl'),
         'maintenance_event': load_maintenance_event(root / 'maintenance.csv'),
     }
