@@ -4,6 +4,15 @@
 API and GenBI agent over the **real hackathon dataset**: hull fouling and propeller
 roughness against propulsion performance, under ISO 19030.
 
+> ### 📄 給陽明海運 (Yang Ming) 的系統建議書 → **[doc/proposal.md](doc/proposal.md)**
+>
+> 以資料驅動的一站式船隊效能決策平台，協助陽明海運 (Yang Ming) 降低油耗並達成 CII 合規。
+> 四大能力：**油耗預測 (AI 模型)**、**速度損失量化 (ISO 19030 Dashboard)**、
+> **智慧養護決策 (最佳清潔時機)**、**自然語言分析 (Copilot AI)**；全鏈路建於 AWS，
+> 涵蓋資料湖 (data lake)、AI 模型至 CloudFront 儀表板。
+>
+> **[▶ 閱讀完整建議書 (Read the full proposal)](doc/proposal.md)**
+
 The ETL runs **locally** (stdlib only, no AWS) to turn the three source files in `dataset/`
 into 20 flat tables; four CDK stacks then land them in S3 and expose them through Athena, an
 async REST API, a Bedrock AgentCore agent, and a CloudFront-hosted dashboard.
